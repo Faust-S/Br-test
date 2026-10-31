@@ -32,6 +32,17 @@ def observe(server,sid,duration=60):
     return {"phase":"timeout","last":latest}
 
 def start(server,sid,phase):
+    until=time.monotonic()+12
+    ready=False
+    while time.monotonic()<until:
+        try:
+            ready=base.execute(server,sid,'typeof window.startAdvanced === "function"',timeout=4)
+            if ready: break
+        except Exception:
+            pass
+        time.sleep(0.4)
+    if not ready:
+        return {"phase":"not-ready","detail":"advanced script unavailable"}
     base.execute(server,sid,f'window.startAdvanced("{phase}")',timeout=8)
     return observe(server,sid)
 
