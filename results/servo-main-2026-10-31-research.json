@@ -14,7 +14,8 @@
     "baseline": "v0.7.0",
     "windows_linux": "IDBIndex.getAll missing; transaction.abort rollback check failure",
     "nightly_run": "https://github.com/Faust-S/Br-test/actions/runs/41230283533",
-    "nightly_result": "PENDING"
+    "nightly_result": "HOLD: Windows official nightly SHA256 0b2f5ab6e374d4b87e31d313bbb9635a53d3066494d0bdc9ea18278f2b54713e; IDBIndex.getAll missing; transaction abort fails; readback/restart/index cursor pass",
+    "nightly_sha256": "0b2f5ab6e374d4b87e31d313bbb9635a53d3066494d0bdc9ea18278f2b54713e"
   },
   "published_comparison": [
     {
