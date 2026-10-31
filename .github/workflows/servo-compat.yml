@@ -1,0 +1,43 @@
+name: Servo compatibility
+on:
+  push:
+    branches:
+      - 'work/**'
+    paths:
+      - '.github/workflows/servo-compat.yml'
+      - 'tests/**'
+      - 'probes/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  servo:
+    name: Servo v0.7.0 / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Linux runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libgtk-3-0 libgl1 libegl1 libx11-6 libxcb1 libfontconfig1 libdbus-1-3 libasound2t64
+      - name: Probe Servo release
+        shell: bash
+        run: python tests/servo_probe.py
+      - name: Upload measurements and browser logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servo-${{ runner.os }}-${{ matrix.os }}
+          path: artifacts/
+          retention-days: 3
