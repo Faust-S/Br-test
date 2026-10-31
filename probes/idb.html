@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Servo IndexedDB diagnostic</title>
+<h1>Servo IndexedDB diagnostic</h1>
+<script>
+"use strict";
+const DB = "iwxa-servo-idb-v2";
+const STORE = "state";
+const KEY = "marker";
+const VALUE = "iwxa-idb-recovery-v2";
+const state = () => window.__idb;
+window.__idb = {phase:"idle",events:[],heartbeat:0};
+setInterval(() => { state().heartbeat += 1; }, 200);
+function event(name, detail=null) {
+  state().events.push({name, detail, ms:Date.now() - state().started});
+}
+function openDB(mode) {
+  return new Promise((resolve,reject) => {
+    event("open-request");
+    let req;
+    try { req = indexedDB.open(DB, 1); }
+    catch (e) { event("open-throw", String(e)); reject(e); return; }
+    req.onblocked = () => event("open-blocked");
+    req.onerror = () => { event("open-error", String(req.error)); reject(req.error || Error("open-error")); };
+    req.onupgradeneeded = () => {
+      event("upgrade", {oldVersion:req.oldVersion, currentVersion:req.result.version, stores:Array.from(req.result.objectStoreNames)});
+      if (mode === "read") event("unexpected-upgrade-on-restart");
+      try {
+        if (!req.result.objectStoreNames.contains(STORE)) {
+          req.result.createObjectStore(STORE);
+          event("object-store-created");
+        }
+      } catch(e) { event("create-error",String(e)); reject(e); }
+    };
+    req.onsuccess = () => {
+      event("open-success", {version:req.result.version, stores:Array.from(req.result.objectStoreNames)});
+      resolve(req.result);
+    };
+  });
+}
+function read(db) {
+  return new Promise((resolve,reject) => {
+    event("read-transaction-start");
+    let tx, req;
+    try {
+      tx = db.transaction(STORE, "readonly");
+      tx.oncomplete = () => event("read-transaction-complete");
+      tx.onerror = () => event("read-transaction-error",String(tx.error));
+      tx.onabort = () => event("read-transaction-abort",String(tx.error));
+      req = tx.objectStore(STORE).get(KEY);
+    } catch(e) { reject(e); return; }
+    req.onsuccess = () => {
+      event("read-success", req.result);
+      if (req.result === VALUE) resolve("MATCH");
+      else reject(Error("readback mismatch: " + String(req.result)));
+    };
+    req.onerror = () => { event("read-error",String(req.error)); reject(req.error || Error("read error")); };
+  });
+}
+function write(db) {
+  return new Promise((resolve,reject) => {
+    event("write-transaction-start");
+    let tx, req;
+    try {
+      tx = db.transaction(STORE,"readwrite");
+      tx.oncomplete = () => { event("write-transaction-complete"); resolve("COMMITTED"); };
+      tx.onerror = () => { event("write-transaction-error",String(tx.error)); reject(tx.error || Error("tx error")); };
+      tx.onabort = () => { event("write-transaction-abort",String(tx.error)); reject(tx.error || Error("tx abort")); };
+      req = tx.objectStore(STORE).put(VALUE,KEY);
+    } catch(e) { reject(e); return; }
+    req.onsuccess = () => event("write-request-success");
+    req.onerror = () => event("write-request-error",String(req.error));
+  });
+}
+async function run(mode) {
+  event("mode",mode);
+  if (!("indexedDB" in window)) throw Error("IndexedDB API absent");
+  const db = await openDB(mode);
+  try {
+    if (!db.objectStoreNames.contains(STORE)) throw Error("store absent after successful open");
+    if (mode === "write") {
+      await write(db);
+      await read(db);
+      localStorage.setItem("iwxa-idb-marker", VALUE);
+    } else {
+      await read(db);
+      if (localStorage.getItem("iwxa-idb-marker") !== VALUE) throw Error("localStorage recovery failed");
+    }
+    event("done");
+  } finally {
+    db.close();
+    event("db-close");
+  }
+}
+window.startIDB = mode => {
+  window.__idb = {phase:"running",mode,events:[],heartbeat:0,started:Date.now()};
+  run(mode).then(() => { state().phase = "done"; }).catch(error => {
+    event("failure", String(error));
+    state().phase = "error";
+    state().error = String(error);
+  });
+  return "started";
+};
+</script>
