@@ -89,6 +89,9 @@ def acquire():
     binary = sorted(candidates, key=lambda p: len(p.parts))[0]
     if system != "Windows":
         binary.chmod(binary.stat().st_mode | 0o111)
+    if system == "Linux":
+        inspection = subprocess.run(["ldd", str(binary)], capture_output=True, text=True)
+        (OUT / "ldd.txt").write_text(inspection.stdout + inspection.stderr, encoding="utf-8")
     return binary, {"tag": RELEASE, "asset": name, "sha256": digest, "binary": str(binary)}
 
 def launch(binary, url, wdport, logpath):
@@ -193,6 +196,21 @@ def main():
                 result["first_screenshot"] = capture(base, sid, "first")
                 if data.get("phase") != "done":
                     failures.append("probe did not finish")
+                result["public_sites"] = {}
+                for label, target in (
+                    ("marketops", "https://market-ops.ru/"),
+                    ("cehovod", "https://cehovod.ru/"),
+                ):
+                    try:
+                        visit(base, sid, target)
+                        time.sleep(2)
+                        info = execute(base, sid, "({title:document.title, url:location.href, textLength:document.body ? document.body.innerText.length : 0, h1:document.querySelector('h1')?.textContent?.trim() ?? null})")
+                        if not isinstance(info, dict) or info.get("textLength", 0) < 100:
+                            raise RuntimeError("HTML body empty or not rendered")
+                        result["public_sites"][label] = {"status":"RENDERED", **info}
+                        capture(base, sid, "public-" + label)
+                    except Exception as exc:
+                        result["public_sites"][label] = {"status":"HOLD", "error":str(exc)}
             finally:
                 try:
                     wd(base, f"/session/{sid}", method="DELETE", timeout=5)
@@ -227,6 +245,12 @@ def main():
         if server:
             server.shutdown()
         result["errors"] = failures
+        if failures and (OUT / "servo-first.log").exists():
+            print("Servo startup log:")
+            print((OUT / "servo-first.log").read_text(encoding="utf-8", errors="replace")[-3500:])
+        if (OUT / "ldd.txt").exists():
+            print("Missing shared libraries:")
+            print("\n".join(line for line in (OUT / "ldd.txt").read_text().splitlines() if "not found" in line))
         (OUT / "result.json").write_text(json.dumps(result, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
         print(json.dumps(result, indent=2, ensure_ascii=False, default=str))
     return 0 if result["status"] == "MEASURED" else 1
