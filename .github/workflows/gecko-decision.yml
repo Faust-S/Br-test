@@ -1,0 +1,40 @@
+name: Independent Gecko control
+on:
+  push:
+    branches: ['work/2026-10-31-gecko-decision']
+    paths: ['comparison/gecko.py','.github/workflows/gecko-decision.yml']
+permissions:
+  contents: read
+env:
+  PYTHONUTF8: '1'
+jobs:
+  gecko:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install psutil==7.0.0 websocket-client==1.8.0
+      - run: |
+          npm install --prefix comparison --no-audit --no-fund react@19.2.0 react-dom@19.2.0 esbuild@0.25.0
+          ./comparison/node_modules/.bin/esbuild comparison/react.jsx --bundle --outfile=comparison/react-bundle.js --minify
+        shell: bash
+      - run: python comparison/gecko.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gecko-control-${{ matrix.os }}
+          path: |
+            artifacts/firefox.json
+            artifacts/firefox-*.png
+            artifacts/firefox-*.log
+          retention-days: 14
