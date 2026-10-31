@@ -151,12 +151,14 @@ def capture(base, sid, label):
 
 def await_probe(base, sid, name, duration=65):
     deadline = time.monotonic() + duration
+    last = None
     while time.monotonic() < deadline:
         obj = execute(base, sid, f"window.{name}", timeout=9)
+        last = obj
         if isinstance(obj, dict) and obj.get("phase") in ("done", "error"):
             return obj
         time.sleep(0.7)
-    return {"phase":"timeout"}
+    return {"phase":"timeout", "last":last}
 
 def shutdown(proc, log):
     try:
@@ -237,7 +239,7 @@ def main():
                     pass
         finally:
             shutdown(proc2, log2)
-        result["status"] = "MEASURED"
+        result["status"] = "MEASURED" if not failures else "MEASURED_WITH_GAPS"
     except Exception as exc:
         failures.append(f"{type(exc).__name__}: {exc}")
         result["status"] = "INFRA_OR_BROWSER_FAILURE"
