@@ -48,7 +48,7 @@ const results = {};
 async function check(name, fn) {
   window.__iwxaProbe = {phase: 'running', current:name, data:results};
   try {
-    const value = await fn();
+    const value = await Promise.race([fn(), new Promise((_,reject) => setTimeout(() => reject(Error(name + ' timeout')), 8000))]);
     results[name] = {status: 'PASS', detail: value === undefined ? null : value};
   } catch (error) {
     results[name] = {status: 'FAIL', error: String(error)};
@@ -136,10 +136,10 @@ window.startIWXAProbe = () => {
 };
 window.startRestartProbe = () => {
   window.__iwxaRestart = {phase:'running'};
-  Promise.all([
+  Promise.race([Promise.all([
     idbGet(),
     Promise.resolve(localStorage.getItem('iwxa-servo-marker'))
-  ]).then(([db, local]) => {
+  ]), new Promise((_,reject) => setTimeout(() => reject(Error('restart timeout')), 8000))]).then(([db, local]) => {
     window.__iwxaRestart = {phase:'done', indexeddb:db, localstorage: local === VALUE};
   }).catch(err => { window.__iwxaRestart = {phase:'error', error:String(err)}; });
 };
