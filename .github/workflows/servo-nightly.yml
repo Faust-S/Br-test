@@ -1,0 +1,36 @@
+name: Servo nightly / Windows
+on:
+  push:
+    branches: ['work/**']
+    paths:
+      - 'nightly/**'
+      - '.github/workflows/servo-nightly.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+env:
+  PYTHONUTF8: '1'
+  PYTHONIOENCODING: utf-8
+jobs:
+  nightly-windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Probe official Servo nightly
+        shell: bash
+        run: python nightly/run.py
+      - name: Upload measured results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: servo-nightly-windows
+          path: |
+            artifacts/nightly-manifest.json
+            artifacts/nightly-results.json
+            artifacts/*.log
+            artifacts/real-*.png
+          retention-days: 5
