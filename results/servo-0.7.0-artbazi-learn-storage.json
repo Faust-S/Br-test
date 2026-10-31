@@ -1,0 +1,44 @@
+{
+  "date": "2026-10-31",
+  "servo": "v0.7.0",
+  "branch": "work/2026-10-31-servo-compat",
+  "run": "https://github.com/Faust-S/Br-test/actions/runs/41227194838",
+  "stable_public_sites": {
+    "artbazi": {
+      "home": "HTML_PRESENT",
+      "workspace": "HTML_PRESENT",
+      "origin": "https://artbazi.ru"
+    },
+    "learn": {
+      "home": "HTML_PRESENT",
+      "workspace": "HTML_PRESENT",
+      "origin": "https://learn.iwxa.ru"
+    },
+    "note": "Rendered route content only; not actual Kernel receipt/readback or T2 lifecycle"
+  },
+  "win_linux": {
+    "baseline_idb": "PASS",
+    "create_8_stores": "PASS",
+    "multi_store_commit": "PASS",
+    "readback": "PASS",
+    "schema_upgrade": "PASS",
+    "revision_cursor_two_records": "PASS",
+    "restart_readback": "PASS",
+    "index_getall": "FAIL_METHOD_MISSING",
+    "transaction_abort": "FAIL_ROLLBACK_RECORD_REMAINS",
+    "overall": "HOLD"
+  },
+  "former_fails": {
+    "version_error": "TEST_BUG_FIXED",
+    "first_page_script_not_ready": "TEST_RACE_FIXED",
+    "prior_indexeddb_hang": "NOT_REPRODUCED_IN_ISOLATED_PROFILES"
+  },
+  "upstream": [
+    "https://github.com/servo/servo/issues/40983",
+    "https://github.com/servo/servo/issues/39178",
+    "https://github.com/servo/servo/issues/47893"
+  ],
+  "scope": "No private T2 source or user data copied to public repository. No modifications to Servo or domain repos.",
+  "decision": "SERVO_T2_STORAGE_HOLD",
+  "next": "Validate required IDBIndex queries and transaction atomic rollback on an upstream fix before qualifying real Kernel; basic rendering cannot substitute full IWXA workflow."
+}
