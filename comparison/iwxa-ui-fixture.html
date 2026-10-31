@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>IWXA engine paired human viewport fixture</title>
+<style>
+:root { color-scheme:light; --accent:#28598c; font-family:system-ui,Arial,sans-serif; }
+*{box-sizing:border-box} body{margin:0;background:#f5f7fa;color:#1c2735}
+header {position:sticky;top:0;z-index:10;background:#132c47;color:white;min-height:68px;padding:12px 20px;display:flex;align-items:center;justify-content:space-between}
+header strong {font-size:22px} header span {padding:8px 16px;background:#3873a0;border-radius:24px}
+main{max-width:1050px;margin:24px auto;padding:0 16px}
+.panels{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);gap:18px}
+.card{background:white;border-radius:12px;box-shadow:0 3px 13px #17314e20;padding:20px;min-height:240px}
+h1{font-size:28px;margin:8px 0 24px}button,input,textarea{font:inherit}
+button{padding:12px 18px;background:var(--accent);color:white;border:0;border-radius:8px;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:3px solid #e68c26}
+input,textarea{display:block;margin:10px 0;padding:8px 10px;border:1px solid #64778b;width:100%}
+output {padding:8px;margin-left:10px;font-weight:bold}
+.svgbox {height:48px}.canvas {border:1px solid #888}.tall {height:920px;background:linear-gradient(180deg,#cfe2e9,#e9f6f0);padding:24px;margin-top:24px}
+.foot{padding:20px;background:#193348;color:white}
+@media(max-width:650px){.panels{grid-template-columns:1fr}.card{min-height:180px}h1{font-size:23px}header strong{font-size:17px}}
+</style></head><body>
+<header id="top"><strong>IWXA BROWSER</strong><span>Общий интерфейс</span></header>
+<main><h1>Сравнение единого интерфейса IWXA</h1>
+<div class="panels"><section class="card" id="cardA"><h2>Интерактив</h2><button id="increment" type="button">Добавить</button><output id="count">0</output>
+<label for="entry">Введите текст</label><input id="entry" autocomplete="off" placeholder="Ввод с клавиатуры">
+<output id="typed"></output><label><input id="check" type="checkbox" style="width:auto;display:inline"> Отметка</label>
+</section><section class="card" id="cardB"><h2>Отрисовка</h2>
+<svg class="svgbox" viewBox="0 0 200 48" aria-label="Vector probe"><rect x="3" y="3" rx="8" width="180" height="42" fill="#28598c"/><text x="15" y="30" fill="white" font-size="16">IWXA SVG</text></svg>
+<canvas id="canvas" class="canvas" width="160" height="54"></canvas><div id="shadow"></div>
+</section></div>
+<div class="tall" id="scroll-region"><h2>Scroll region</h2><p>Нижний блок доступен при прокрутке.</p></div><footer class="foot" id="foot">Низ страницы IWXA</footer></main>
+<script>
+'use strict';
+const state={clicked:0,typed:'',focused:false,shadowClicked:false,scrollY:0};
+window.__iwxaUi=state;
+const count=document.getElementById('count'),entry=document.getElementById('entry');
+document.getElementById('increment').addEventListener('click',()=>{state.clicked++;count.textContent=String(state.clicked)});
+entry.addEventListener('input',()=>{state.typed=entry.value;document.getElementById('typed').textContent=entry.value});
+entry.addEventListener('focus',()=>{state.focused=true});
+window.addEventListener('scroll',()=>{state.scrollY=window.scrollY});
+const canvas=document.getElementById('canvas');const context=canvas.getContext('2d');
+if(context){context.fillStyle='#e69b32';context.fillRect(3,3,140,45);context.fillStyle='#172b45';context.fillText('IWXA CANVAS',20,30)}
+try{const sh=document.getElementById('shadow').attachShadow({mode:'open'});sh.innerHTML='<button id="shadowButton">Shadow DOM</button>';sh.getElementById('shadowButton').onclick=()=>{state.shadowClicked=true}}catch(e){state.shadowError=String(e)}
+window.__iwxaFeatureCheck=()=>({
+  origin:location.origin,localStorage:typeof localStorage !== 'undefined',indexedDB:typeof indexedDB!=='undefined',
+  cryptoSubtle:!!globalThis.crypto?.subtle, wasm:typeof WebAssembly!=='undefined',webgpu:!!navigator.gpu,
+  serviceWorker:!!navigator.serviceWorker, mediaSource:typeof MediaSource!=='undefined',
+  canvas2d:!!document.getElementById('canvas').getContext('2d'),shadowDom:!!document.getElementById('shadow').shadowRoot,
+  cssGrid:!!CSS?.supports?.('display','grid'), cssHas:!!CSS?.supports?.('selector(:has(*))'),
+  videoMp4:document.createElement('video').canPlayType?.('video/mp4')||'',
+  webgl:!!document.createElement('canvas').getContext('webgl'),
+  width:innerWidth,height:innerHeight,dpr:devicePixelRatio,
+  layout:(()=>{const a=document.getElementById('cardA').getBoundingClientRect(),b=document.getElementById('cardB').getBoundingClientRect();return {a:{x:a.x,y:a.y,w:a.width,h:a.height},b:{x:b.x,y:b.y,w:b.width,h:b.height},columns:Math.abs(a.y-b.y)<6&&b.x>a.right}})()
+});
+let database;
+function openDb(){return new Promise((ok,no)=>{const r=indexedDB.open('iwxa-paired-persistence-v1',1);r.onupgradeneeded=()=>{for(const name of ['records','heads','audit'])if(!r.result.objectStoreNames.contains(name))r.result.createObjectStore(name)};r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)})}
+function txDone(tx){return new Promise((ok,no)=>{tx.oncomplete=()=>ok(true);tx.onabort=()=>no(tx.error||Error('aborted'));tx.onerror=()=>no(tx.error||Error('failed'))})}
+function readStore(db,name){return new Promise((ok,no)=>{const r=db.transaction(name,'readonly').objectStore(name).get('x');r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)})}
+window.__persist={phase:'idle'};
+window.startPersist=()=>{window.__persist={phase:'working'};(async()=>{
+ const db=await openDb();const tx=db.transaction(['records','heads','audit'],'readwrite');const done=txDone(tx);
+ for(const s of ['records','heads','audit'])tx.objectStore(s).put({v:7,revision:1},'x');
+ await done;const written=[];for(const s of ['records','heads','audit'])written.push((await readStore(db,s))?.v);
+ if(written.some(v=>v!==7))throw Error('write or readback mismatch');localStorage.setItem('iwxa-pair-local','saved');
+ const tx2=db.transaction(['records','heads','audit'],'readwrite');let aborted=false;
+ await new Promise((resolve,reject)=>{
+   tx2.onabort=()=>{aborted=true;resolve()};tx2.oncomplete=()=>reject(Error('abort unexpectedly committed'));
+   for(const s of ['records','heads','audit']){
+     const req=tx2.objectStore(s).put({v:999},'x');
+     if(s==='audit')req.onsuccess=()=>tx2.abort();
+   }
+ });
+ const rollback=[];for(const s of ['records','heads','audit'])rollback.push((await readStore(db,s))?.v);
+ db.close();if(!aborted||rollback.some(v=>v!==7))throw Error('atomic rollback failed: '+rollback.join(','));
+ window.__persist={phase:'done',status:'PASS',commit:written,abort:rollback,local:localStorage.getItem('iwxa-pair-local')};
+})().catch(e=>window.__persist={phase:'done',status:'FAIL',error:String(e)})};
+window.startReadback=()=>{window.__persist={phase:'working'};(async()=>{
+ const db=await openDb();const values=[];for(const s of ['records','heads','audit'])values.push((await readStore(db,s))?.v??null);db.close();
+ const local=localStorage.getItem('iwxa-pair-local');
+ window.__persist={phase:'done',status:values.every(v=>v===7)&&local==='saved'?'PASS':'FAIL',values,local};
+})().catch(e=>window.__persist={phase:'done',status:'FAIL',error:String(e)})};
+</script>
+</body></html>
