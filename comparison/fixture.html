@@ -1,0 +1,22 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><title>Engine compatibility fixture</title>
+<style>body{font:18px sans-serif;margin:24px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:20px}button,input{font:inherit}article{padding:20px;border:2px solid #444}</style>
+<h1>Engine compatibility fixture</h1><div class="cards"><article><button id="native">Count</button><output id="count">0</output></article><article id="react"></article></div>
+<script src="react-bundle.js"></script><script>
+'use strict';window.__probe={done:false,checks:{}};
+async function check(name,fn){let timer;try{const value=await Promise.race([fn(),new Promise((_,r)=>{timer=setTimeout(()=>r(Error('timeout')),5000)})]);__probe.checks[name]={status:'PASS',value}}catch(e){__probe.checks[name]={status:'FAIL',error:String(e)}}finally{clearTimeout(timer)}}
+function req(r){return new Promise((resolve,reject)=>{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)})}
+function done(t){return new Promise((resolve,reject)=>{t.oncomplete=resolve;t.onabort=()=>reject(t.error||Error('aborted'))})}
+function read(db,store,key){return req(db.transaction(store).objectStore(store).get(key))}
+(async()=>{
+await check('dom_event',async()=>{let n=0;const b=document.getElementById('native'),out=document.getElementById('count');b.onclick=()=>out.textContent=String(++n);b.click();if(out.textContent!=='1')throw Error('event');return 1});
+await check('layout_grid',async()=>{const a=document.querySelectorAll('article');const x=a[0].getBoundingClientRect(),y=a[1].getBoundingClientRect();if(!(x.width>20&&y.left>x.right&&Math.abs(y.top-x.top)<2))throw Error('geometry');return {left:x.width,right:y.width}});
+await check('webcrypto_aes',async()=>{const key=await crypto.subtle.generateKey({name:'AES-GCM',length:256},false,['encrypt','decrypt']);const iv=crypto.getRandomValues(new Uint8Array(12)),data=new Uint8Array([1,2,3]);const c=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,data);const r=new Uint8Array(await crypto.subtle.decrypt({name:'AES-GCM',iv},key,c));if(r.join()!=data.join())throw Error('roundtrip');return true});
+await check('wasm',async()=>{await WebAssembly.compile(new Uint8Array([0,97,115,109,1,0,0,0]));return true});
+let db;await check('indexeddb',async()=>{const r=indexedDB.open('generic-engine-probe',1);r.onupgradeneeded=()=>{for(const s of ['objects','history','links','receipts'])r.result.createObjectStore(s,{keyPath:'id'});r.transaction.objectStore('history').createIndex('entity','entity')};db=await req(r);return db.objectStoreNames.length});
+if(db){
+await check('cross_store_commit',async()=>{const t=db.transaction(['objects','history','links','receipts'],'readwrite'),completion=done(t);for(const s of ['objects','history','links','receipts'])t.objectStore(s).put({id:'x',entity:'e',value:7});await completion;for(const s of ['objects','history','links','receipts'])if((await read(db,s,'x'))?.value!==7)throw Error(s);return true});
+await check('index_getall',async()=>{const a=await req(db.transaction('history').objectStore('history').index('entity').getAll('e'));if(a.length!==1)throw Error('index');return true});
+await check('abort_after_success',async()=>{const t=db.transaction(['objects','history','links','receipts'],'readwrite'),aborted=new Promise((resolve,reject)=>{t.onabort=resolve;t.oncomplete=()=>reject(Error('committed'))});for(const s of ['objects','history','links','receipts']){const r=t.objectStore(s).put({id:'x',value:999});if(s==='receipts')r.onsuccess=()=>t.abort()}await aborted;for(const s of ['objects','history','links','receipts'])if((await read(db,s,'x'))?.value!==7)throw Error('partial rollback '+s);return true});db.close();}
+__probe.done=true;
+})().catch(e=>{__probe.fatal=String(e);__probe.done=true});
+</script></html>
