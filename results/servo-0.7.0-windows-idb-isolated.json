@@ -1,0 +1,25 @@
+{
+  "date": "2026-10-31",
+  "repo": "Faust-S/Br-test",
+  "branch": "work/2026-10-31-servo-compat",
+  "servo": "v0.7.0",
+  "new_run": "https://github.com/Faust-S/Br-test/actions/runs/41226483739",
+  "baseline_run": "https://github.com/Faust-S/Br-test/actions/runs/41226405353",
+  "diagnosis": {
+    "windows_isolated_indexeddb": "PASS 4/4 (2 idb-only; 2 experimental)",
+    "windows_combined_api": "PASS 2/2 repeated profiles with two browser launches each",
+    "windows_restart": "PASS all IDB trials",
+    "public_sites_replaced": [
+      "https://club.iwxa.ru/",
+      "https://komplektovod.ru/"
+    ],
+    "public_site_verification": "HTML content rendered only; T2/T3 flows not tested",
+    "original_test": "Intermittent hang in original harness with implicit shared profile; isolated-profile explicit lifecycle runs do not reproduce; exact trigger not proven",
+    "upstream_gaps": "Servo IndexedDB experimental; upstream issue servo/servo#47893 describes missing indexes/cursors/Web Locks",
+    "final_suitability": "HOLD pending T2 Kernel + realistic IndexedDB and Browser Use flows"
+  },
+  "no_changes": [
+    "main",
+    "Faust-S/IWXA-Browser"
+  ]
+}
