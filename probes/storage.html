@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Servo IWXA storage surface</title>
+<h1>Servo IWXA storage surface</h1>
+<script>
+"use strict";
+const D="servo-iwxa-compatible-storage-v1", D2="servo-index-dupe-v1";
+const K="iwxa-generic-revision-v1", W="workspace-demo";
+const names=["entities","history","links","receipts","snapshots","meta","provenance","workspaces"];
+window.__advanced={phase:"idle",tests:{},events:[]};
+function event(tag,detail) {
+  window.__advanced.events.push([tag,detail===undefined?null:detail]);
+}
+function request(r,tag) {
+  return new Promise((resolve,reject)=>{
+    r.onsuccess=()=>resolve(r.result);
+    r.onerror=()=>reject(r.error||new Error(tag+" failed"));
+  });
+}
+function transaction(db,storeNames,mode,body) {
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction(storeNames,mode);
+    tx.oncomplete=()=>resolve("COMPLETED");
+    tx.onabort=()=>reject(tx.error||new Error("transaction aborted"));
+    tx.onerror=()=>event("transaction-error",String(tx.error));
+    try { body(tx); } catch(e) { try { tx.abort(); } catch(_) {} reject(e); }
+  });
+}
+function dbOpen(version,upgrade,dbname=D) {
+  return new Promise((resolve,reject)=>{
+    const q=indexedDB.open(dbname,version);
+    q.onblocked=()=>event("db-blocked",version);
+    q.onerror=()=>reject(q.error||new Error("open failed"));
+    q.onupgradeneeded=e=>{
+      try { upgrade(q.result,e.oldVersion,q.transaction); }
+      catch(error) { event("upgrade-exception",String(error)); reject(error); }
+    };
+    q.onsuccess=()=>resolve(q.result);
+  });
+}
+function schema(db,old,tx) {
+  if(old>=1)return;
+  for(const name of names)db.createObjectStore(name,{keyPath:"id"});
+  tx.objectStore("entities").createIndex("entityByWorkspace","workspace");
+  tx.objectStore("history").createIndex("historyByEntity","entity");
+  tx.objectStore("links").createIndex("linksByWorkspace","workspace");
+}
+async function init() {
+  const db=await dbOpen(1,schema);
+  try {
+    if(names.some(x=>!db.objectStoreNames.contains(x)))throw Error("missing store");
+    return {version:db.version,stores:db.objectStoreNames.length};
+  }finally{db.close();}
+}
+async function commit() {
+  const db=await dbOpen(1,schema);
+  try {
+    const entity={id:"entity-1",workspace:W,kind:"analysis",value:{level:2,items:[1,2,3]},blob:new Uint8Array([1,4,9])};
+    const revision={id:"revision-1",entity:"entity-1",v:1,payload:{count:7,labels:["a","b"]}};
+    const link={id:"link-1",workspace:W,entity:"entity-1"};
+    const receipt={id:"receipt-1",entity:"entity-1",revision:"revision-1",digest:K};
+    return await transaction(db,["entities","history","links","receipts"],"readwrite",tx=>{
+      tx.objectStore("entities").put(entity);
+      tx.objectStore("history").put(revision);
+      tx.objectStore("links").put(link);
+      tx.objectStore("receipts").put(receipt);
+    });
+  }finally{db.close();}
+}
+async function getRecord(store,key) {
+  const db=await dbOpen(1,schema);
+  try{return await request(db.transaction(store).objectStore(store).get(key),"get "+store);}
+  finally{db.close();}
+}
+async function readback() {
+  const a=await getRecord("entities","entity-1");
+  const h=await getRecord("history","revision-1");
+  const l=await getRecord("links","link-1");
+  const r=await getRecord("receipts","receipt-1");
+  if(!a||a.workspace!==W||a.value.items[2]!==3)throw Error("entity mismatch");
+  if(!(a.blob instanceof Uint8Array)||a.blob[2]!==9)throw Error("typed array mismatch");
+  if(h?.v!==1||l?.entity!==a.id||r?.revision!==h.id||r?.digest!==K)throw Error("cross store mismatch");
+  return "MATCH";
+}
+async function indexQuery() {
+  const db=await dbOpen(1,schema);
+  try {
+    const tx=db.transaction(["entities"]);
+    const idx=tx.objectStore("entities").index("entityByWorkspace");
+    if(typeof idx.getAll!=="function")throw Error("IDBIndex.getAll unavailable");
+    const list=await request(idx.getAll(W),"index getAll");
+    if(list.length!==1||list[0].id!=="entity-1")throw Error("index getAll mismatch");
+    return list.length;
+  }finally{db.close();}
+}
+async function cursorQuery() {
+  const db=await dbOpen(1,schema);
+  try {
+    const tx=db.transaction(["history"]);
+    const idx=tx.objectStore("history").index("historyByEntity");
+    let counter=0;
+    const records=await new Promise((resolve,reject)=>{
+      const arr=[];
+      const req=idx.openCursor();
+      req.onerror=()=>reject(req.error||Error("cursor request"));
+      req.onsuccess=()=>{
+        try{
+          const c=req.result;
+          if(!c){resolve(arr);return;}
+          arr.push([c.key,c.value.id]);
+          counter+=1;
+          if(counter>4)throw Error("cursor does not advance");
+          c.continue();
+        }catch(e){reject(e);}
+      };
+    });
+    if(records.length!==1||records[0][1]!=="revision-1")throw Error("cursor mismatch");
+    return records;
+  }finally{db.close();}
+}
+async function abortCheck() {
+  const db=await dbOpen(1,schema);
+  try {
+    const result=await new Promise((resolve,reject)=>{
+      const tx=db.transaction("entities","readwrite");
+      tx.oncomplete=()=>reject(Error("aborted transaction committed"));
+      tx.onabort=()=>resolve("ABORTED");
+      tx.onerror=()=>{};
+      try {
+        tx.objectStore("entities").put({id:"rollback",workspace:W});
+        tx.abort();
+      }catch(e){reject(e);}
+    });
+    const q=await request(db.transaction("entities").objectStore("entities").get("rollback"),"rollback read");
+    if(q!==undefined)throw Error("rollback not atomic");
+    return result;
+  }finally{db.close();}
+}
+async function upgrade() {
+  const db=await dbOpen(2,(d,old,tx)=>{
+    if(old===0)schema(d,0,tx);
+    if(old<2)d.createObjectStore("upgrade_marker",{keyPath:"id"});
+  });
+  try {
+    if(!db.objectStoreNames.contains("upgrade_marker"))throw Error("upgrade store absent");
+    return db.version;
+  }finally{db.close();}
+}
+async function indexUniqueness() {
+  const db=await dbOpen(1,(d,old,tx)=>{
+    if(old>0)return;
+    d.createObjectStore("first",{keyPath:"id"}).createIndex("sameName","kind");
+    d.createObjectStore("second",{keyPath:"id"}).createIndex("sameName","kind");
+  },D2);
+  try {
+    if(db.objectStoreNames.length!==2)throw Error("index schema mismatch");
+    return "TWO_STORES_SAME_INDEX_NAME";
+  }finally{db.close();}
+}
+async function persistRead() {
+  const db=await dbOpen(2,()=>{throw Error("unexpected schema upgrade");});
+  try {
+    if(db.version!==2||!db.objectStoreNames.contains("upgrade_marker"))throw Error("upgrade missing");
+  }finally{db.close();}
+  return readback();
+}
+async function runCheck(name,fn,timeout=5500) {
+  window.__advanced.current=name;
+  try {
+    const result=await Promise.race([fn(),new Promise((_,reject)=>setTimeout(()=>reject(Error(name+" timed out")),timeout))]);
+    window.__advanced.tests[name]={status:"PASS",detail:result};
+  }catch(e){
+    window.__advanced.tests[name]={status:"FAIL",error:String(e)};
+  }
+  window.__advanced.current=null;
+}
+async function run(kind) {
+  if(kind==="first"){
+    await runCheck("init",init);
+    if(window.__advanced.tests.init.status==="PASS")await runCheck("commit",commit);
+    if(window.__advanced.tests.commit?.status==="PASS"){
+      await runCheck("readback",readback);
+      await runCheck("index_getall",indexQuery);
+      await runCheck("index_cursor",cursorQuery);
+      await runCheck("transaction_abort",abortCheck);
+      await runCheck("upgrade",upgrade);
+    }
+    await runCheck("index_scope",indexUniqueness);
+  }else{
+    await runCheck("restart_read",persistRead);
+    await runCheck("restart_index_getall",indexQuery);
+    await runCheck("restart_index_cursor",cursorQuery);
+  }
+  window.__advanced.phase="done";
+}
+window.startAdvanced=kind=>{
+  window.__advanced={phase:"running",kind,current:null,started:Date.now(),tests:{},events:[]};
+  run(kind).catch(error=>{
+    window.__advanced.phase="error";
+    window.__advanced.error=String(error);
+  });
+  return "started";
+};
+</script>
+</html>

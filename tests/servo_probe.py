@@ -200,8 +200,8 @@ def main():
                     failures.append("probe did not finish")
                 result["public_sites"] = {}
                 for label, target in (
-                    ("club", "https://club.iwxa.ru/"),
-                    ("komplektovod", "https://komplektovod.ru/"),
+                    ("artbazi", "https://artbazi.ru/"),
+                    ("learn", "https://learn.iwxa.ru/"),
                 ):
                     try:
                         visit(base, sid, target)

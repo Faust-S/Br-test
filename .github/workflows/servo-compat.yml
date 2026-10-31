@@ -31,12 +31,17 @@ jobs:
           sudo apt-get install -y libgtk-3-0 libgl1 libegl1 libx11-6 libxcb1 libfontconfig1 libdbus-1-3 libasound2t64 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libgstreamer-plugins-bad1.0-0
       - run: python tests/idb_probe.py
         shell: bash
+      - name: Advanced storage and public site probes
+        run: python tests/advanced_probe.py
+        shell: bash
       - if: always()
         uses: actions/upload-artifact@v4
         with:
           name: idb-${{ matrix.os }}
           path: |
             artifacts/idb-results.json
+            artifacts/advanced-results.json
             artifacts/*.log
             artifacts/stable-*.png
+            artifacts/real-*.png
           retention-days: 3

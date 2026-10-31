@@ -12,8 +12,8 @@ import servo_probe as base
 
 OUT = base.OUT
 STABLE_SITES = (
-    ("club", "https://club.iwxa.ru/"),
-    ("komplektovod", "https://komplektovod.ru/"),
+    ("artbazi", "https://artbazi.ru/"),
+    ("learn", "https://learn.iwxa.ru/"),
 )
 
 def launch(binary, url, wdport, profile, mode, path):
