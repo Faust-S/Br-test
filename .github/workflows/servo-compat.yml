@@ -39,5 +39,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: servo-${{ runner.os }}-${{ matrix.os }}
-          path: artifacts/
+          path: |
+            artifacts/result.json
+            artifacts/*.log
+            artifacts/*.png
+            artifacts/ldd.txt
           retention-days: 3
