@@ -1,0 +1,42 @@
+{
+  "as_of": "2026-10-31",
+  "servo_main": {
+    "sha": "585585e38977d4967371a43b8604df5399ac1c67",
+    "indexeddb_index_getall": "ABSENT_FROM_WEBIDL",
+    "transaction_atomic_rollback": "TODO_NOT_ATOMIC",
+    "locations": [
+      "components/script_bindings/webidls/IDBIndex.webidl",
+      "components/script/dom/indexeddb/idbtransaction.rs"
+    ],
+    "issue": "https://github.com/servo/servo/issues/40983"
+  },
+  "testing": {
+    "baseline": "v0.7.0",
+    "windows_linux": "IDBIndex.getAll missing; transaction.abort rollback check failure",
+    "nightly_run": "https://github.com/Faust-S/Br-test/actions/runs/41230283533",
+    "nightly_result": "PENDING"
+  },
+  "published_comparison": [
+    {
+      "url": "https://github.com/servo/servo/wiki/Servo-Benchmarking-Report-(December-2024)",
+      "scope": "3 cold-loaded pages Servo vs Chromium 130; not current or RAM"
+    },
+    {
+      "url": "https://ultralig.ht/",
+      "scope": "vendor 9 MB vs Electron 72 MB Windows; embedding UI, non-equivalent browser workload"
+    },
+    {
+      "url": "https://lightpanda.io/docs/core-concepts/benchmarks",
+      "scope": "vendor crawler 933 URLs 25 parallel: 123 MB/4.81 s vs Chrome 2 GB/46.70 s; headless no rendering"
+    }
+  ],
+  "alternatives": {
+    "ultralight": "WebKit fork, native Windows, proprietary, standards/IndexedDB not verified",
+    "blitz": "No standard localStorage in stated model; not a full browser",
+    "wpe": "embedded WebKit Linux-targeted not practical Windows path",
+    "lightpanda": "headless no visual rendering not standalone interactive browser",
+    "webview2": "modern Windows compatibility; Chromium runtime shared",
+    "gecko": "modern standards; Windows embedding costly"
+  },
+  "privacy": "No private IWXA code or keys copied"
+}
