@@ -1,0 +1,64 @@
+{
+  "date": "2026-10-31",
+  "repository": "Faust-S/Br-test",
+  "branch": "work/2026-10-31-servo-compat",
+  "servo": "v0.7.0",
+  "release_sha256": {
+    "windows": "49d4b2c2d3576f93fad70812ee9e42820f5b84da9103f2a633838109a2fcde53",
+    "linux": "728eba1be1cc1851e05dfaa90e18f98ab8644dd2355bedb0b8a5e89795ebe333"
+  },
+  "runs": [
+    41224711268,
+    41224861325,
+    41224992294,
+    41225222128,
+    41225404588
+  ],
+  "windows": {
+    "first_run": {
+      "webdriver": "PASS",
+      "dom": "PASS",
+      "css_grid_flex": "PASS",
+      "fetch": "PASS",
+      "localstorage": "PASS",
+      "indexeddb": "PASS",
+      "indexeddb_restart": "PASS",
+      "webcrypto_sha256": "PASS",
+      "ed25519": "PASS",
+      "wasm": "PASS",
+      "worker": "PASS",
+      "file_blob": "PASS",
+      "webgpu_adapter": "PASS",
+      "serviceworker_api": false,
+      "opfs_api": false
+    },
+    "repeat_runs": {
+      "indexeddb": "INTERMITTENT_HANG",
+      "restart": "NOTFOUND_ERROR",
+      "marketops_public_home": "RENDERED_HTML",
+      "cehovod_public_home": "RENDERED_HTML",
+      "react_error_418_marketops": "OBSERVED_ROOT_UNDETERMINED"
+    }
+  },
+  "linux": {
+    "latest_run": 41225404588,
+    "status": "PASS",
+    "webdriver": "PASS",
+    "indexeddb_restart": "PASS",
+    "webgpu_adapter": "UNAVAILABLE_CI_GPU",
+    "serviceworker_api": false,
+    "opfs_api": false,
+    "marketops_public_home": "RENDERED_HTML",
+    "cehovod_public_home": "RENDERED_HTML"
+  },
+  "not_tested": [
+    "T2 Kernel receipt/readback and history",
+    "T3 package and entitlements",
+    "complete site workflows",
+    "local LLM inference",
+    "resource benchmark",
+    "production isolation and security"
+  ],
+  "assessment": "SERVO_IWXA_HOLD",
+  "blocker": "Windows IndexedDB intermittent hang and restart instability; T2/T3 product flows not yet qualified"
+}
