@@ -1,0 +1,40 @@
+name: Obscura input and render continuity
+on:
+  push:
+    branches: ['work/2026-10-31-obscura-interaction']
+    paths: ['comparison/obscura_interaction.py','.github/workflows/obscura-interaction.yml']
+permissions:
+  contents: read
+env:
+  PYTHONUTF8: '1'
+jobs:
+  interaction:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 7
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: python -m pip install psutil==7.0.0 websocket-client==1.8.0
+      - run: |
+          npm install --prefix comparison --no-audit --no-fund react@19.2.0 react-dom@19.2.0 esbuild@0.25.0
+          ./comparison/node_modules/.bin/esbuild comparison/react.jsx --bundle --outfile=comparison/react-bundle.js --minify
+        shell: bash
+      - run: python comparison/obscura_interaction.py
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: obscura-interaction-${{ matrix.os }}
+          path: |
+            artifacts/obscura-interaction.json
+            artifacts/obscura-interaction.log
+            artifacts/obscura-live-*.png
+          retention-days: 14
