@@ -46,12 +46,14 @@ async function idbGet() {
 }
 const results = {};
 async function check(name, fn) {
+  window.__iwxaProbe = {phase: 'running', current:name, data:results};
   try {
     const value = await fn();
     results[name] = {status: 'PASS', detail: value === undefined ? null : value};
   } catch (error) {
     results[name] = {status: 'FAIL', error: String(error)};
   }
+  window.__iwxaProbe = {phase:'running', current:null, data:results};
 }
 async function runIWXAProbe() {
   await check('dom', () => {
