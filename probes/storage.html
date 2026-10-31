@@ -63,6 +63,7 @@ async function commit() {
     return await transaction(db,["entities","history","links","receipts"],"readwrite",tx=>{
       tx.objectStore("entities").put(entity);
       tx.objectStore("history").put(revision);
+      tx.objectStore("history").put({id:"revision-2",entity:"entity-1",v:2,payload:{count:8}});
       tx.objectStore("links").put(link);
       tx.objectStore("receipts").put(receipt);
     });
@@ -76,11 +77,12 @@ async function getRecord(store,key) {
 async function readback() {
   const a=await getRecord("entities","entity-1");
   const h=await getRecord("history","revision-1");
+  const h2=await getRecord("history","revision-2");
   const l=await getRecord("links","link-1");
   const r=await getRecord("receipts","receipt-1");
   if(!a||a.workspace!==W||a.value.items[2]!==3)throw Error("entity mismatch");
   if(!(a.blob instanceof Uint8Array)||a.blob[2]!==9)throw Error("typed array mismatch");
-  if(h?.v!==1||l?.entity!==a.id||r?.revision!==h.id||r?.digest!==K)throw Error("cross store mismatch");
+  if(h?.v!==1||h2?.v!==2||l?.entity!==a.id||r?.revision!==h.id||r?.digest!==K)throw Error("cross store mismatch");
   return "MATCH";
 }
 async function indexQuery() {
@@ -115,7 +117,7 @@ async function cursorQuery() {
         }catch(e){reject(e);}
       };
     });
-    if(records.length!==1||records[0][1]!=="revision-1")throw Error("cursor mismatch");
+    if(records.length!==2||records[0][1]!=="revision-1"||records[1][1]!=="revision-2")throw Error("cursor iteration mismatch");
     return records;
   }finally{db.close();}
 }
