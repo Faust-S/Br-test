@@ -101,6 +101,25 @@ def trial(binary, url, mode, number, show_sites=False):
     output["pass"] = all(output.get(stage,{}).get("phase")=="done" for stage in ("write","reload","restart"))
     return output
 
+def mixed_trial(binary, origin, mode, trial_num):
+    result={"mode": mode, "case":"mixed-api", "trial": trial_num}
+    profile=OUT/"profiles"/f"mixed-{mode}-{trial_num}"
+    if profile.exists():
+        shutil.rmtree(profile)
+    for iteration in range(2):
+        p,f,server,sid=open_session(binary,origin,profile,mode,f"mixed-{mode}-{trial_num}-{iteration}")
+        try:
+            base.execute(server,sid,"window.startIWXAProbe()",timeout=10)
+            result[f"pass_{iteration}"]=base.await_probe(server,sid,"__iwxaProbe",duration=42)
+        finally:
+            close_session(p,f,server,sid)
+    phases=[result[f"pass_{i}"].get("phase") for i in range(2)]
+    result["pass"]=phases==["done","done"] and all(
+        result[f"pass_{i}"].get("data",{}).get("indexeddb",{}).get("status")=="PASS"
+        for i in range(2)
+    )
+    return result
+
 def main():
     OUT.mkdir(exist_ok=True)
     data = {"servo":"v0.7.0","platform":sys.platform,"status":"INCOMPLETE","trials":[]}
@@ -119,6 +138,13 @@ def main():
                 data["trials"].append(trial(binary,url,mode,number,show_sites=(mode=="idb-only" and number==1)))
             except Exception as exc:
                 data["trials"].append({"mode":mode,"trial":number,"pass":False,"runner_error":str(exc)})
+        if sys.platform=="win32":
+            mixed_url=f"http://127.0.0.1:{server.server_port}/fixture.html"
+            for attempt in range(2):
+                try:
+                    data["trials"].append(mixed_trial(binary,mixed_url,"experimental",attempt))
+                except Exception as exc:
+                    data["trials"].append({"mode":"experimental","case":"mixed-api","trial":attempt,"pass":False,"runner_error":str(exc)})
         data["status"]="PASS" if all(t["pass"] for t in data["trials"]) else "HOLD"
     except Exception as exc:
         data["status"]="INFRA_FAILURE"
