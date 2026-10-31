@@ -29,7 +29,7 @@ function transaction(db,storeNames,mode,body) {
 }
 function dbOpen(version,upgrade,dbname=D) {
   return new Promise((resolve,reject)=>{
-    const q=indexedDB.open(dbname,version);
+    const q=version===undefined ? indexedDB.open(dbname) : indexedDB.open(dbname,version);
     q.onblocked=()=>event("db-blocked",version);
     q.onerror=()=>reject(q.error||new Error("open failed"));
     q.onupgradeneeded=e=>{
@@ -69,7 +69,7 @@ async function commit() {
   }finally{db.close();}
 }
 async function getRecord(store,key) {
-  const db=await dbOpen(1,schema);
+  const db=await dbOpen(undefined,schema);
   try{return await request(db.transaction(store).objectStore(store).get(key),"get "+store);}
   finally{db.close();}
 }
@@ -84,7 +84,7 @@ async function readback() {
   return "MATCH";
 }
 async function indexQuery() {
-  const db=await dbOpen(1,schema);
+  const db=await dbOpen(undefined,schema);
   try {
     const tx=db.transaction(["entities"]);
     const idx=tx.objectStore("entities").index("entityByWorkspace");
@@ -95,7 +95,7 @@ async function indexQuery() {
   }finally{db.close();}
 }
 async function cursorQuery() {
-  const db=await dbOpen(1,schema);
+  const db=await dbOpen(undefined,schema);
   try {
     const tx=db.transaction(["history"]);
     const idx=tx.objectStore("history").index("historyByEntity");
@@ -120,7 +120,7 @@ async function cursorQuery() {
   }finally{db.close();}
 }
 async function abortCheck() {
-  const db=await dbOpen(1,schema);
+  const db=await dbOpen(undefined,schema);
   try {
     const result=await new Promise((resolve,reject)=>{
       const tx=db.transaction("entities","readwrite");
