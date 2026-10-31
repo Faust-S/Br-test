@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IWXA Servo probe</title>
+<style>
+  #grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #flex { display: flex; gap: 8px; }
+</style>
+<h1 id="heading">IWXA Servo probe</h1>
+<div id="grid"><span>A</span><span>B</span></div>
+<div id="flex"><span>A</span><span>B</span></div>
+<button id="action" onclick="this.textContent = 'clicked'">Run</button>
+<script>
+const DB_NAME = 'iwxa-servo-compat';
+const VALUE = 'iwxa-servo-compat-v1';
+const request = req => new Promise((resolve, reject) => {
+  req.onsuccess = () => resolve(req.result);
+  req.onerror = () => reject(req.error || new Error('request failed'));
+});
+async function openDB() {
+  const req = indexedDB.open(DB_NAME, 1);
+  req.onupgradeneeded = () => {
+    if (!req.result.objectStoreNames.contains('state')) req.result.createObjectStore('state');
+  };
+  return request(req);
+}
+async function idbPut() {
+  const db = await openDB();
+  const tx = db.transaction('state', 'readwrite');
+  tx.objectStore('state').put(VALUE, 'marker');
+  await new Promise((resolve, reject) => {
+    tx.oncomplete = resolve;
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error);
+  });
+  db.close();
+  return idbGet();
+}
+async function idbGet() {
+  const db = await openDB();
+  const value = await request(db.transaction('state').objectStore('state').get('marker'));
+  db.close();
+  if (value !== VALUE) throw new Error('IndexedDB readback mismatch: ' + String(value));
+  return 'write-readback';
+}
+const results = {};
+async function check(name, fn) {
+  try {
+    const value = await fn();
+    results[name] = {status: 'PASS', detail: value === undefined ? null : value};
+  } catch (error) {
+    results[name] = {status: 'FAIL', error: String(error)};
+  }
+}
+async function runIWXAProbe() {
+  await check('dom', () => {
+    if (document.getElementById('heading').textContent !== 'IWXA Servo probe') throw Error('DOM text');
+    return document.title;
+  });
+  await check('css_grid_flex', () => {
+    if (getComputedStyle(document.getElementById('grid')).display !== 'grid') throw Error('grid');
+    if (getComputedStyle(document.getElementById('flex')).display !== 'flex') throw Error('flex');
+    return true;
+  });
+  await check('fetch', async () => {
+    const reply = await fetch('/fixture.html');
+    if (!reply.ok || !(await reply.text()).includes('IWXA Servo probe')) throw Error('fetch');
+    return reply.status;
+  });
+  await check('localstorage', () => {
+    localStorage.setItem('iwxa-servo-marker', VALUE);
+    if (localStorage.getItem('iwxa-servo-marker') !== VALUE) throw Error('localStorage readback');
+    return true;
+  });
+  await check('indexeddb', idbPut);
+  await check('webcrypto_sha256', async () => {
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode('IWXA'));
+    if (digest.byteLength !== 32) throw Error('SHA-256 digest length');
+    return digest.byteLength;
+  });
+  await check('webcrypto_ed25519', async () => {
+    const keys = await crypto.subtle.generateKey('Ed25519', false, ['sign', 'verify']);
+    const data = new TextEncoder().encode('IWXA');
+    const signature = await crypto.subtle.sign('Ed25519', keys.privateKey, data);
+    if (!await crypto.subtle.verify('Ed25519', keys.publicKey, signature, data)) throw Error('Ed25519 verify');
+    return signature.byteLength;
+  });
+  await check('wasm', async () => {
+    const module = await WebAssembly.compile(new Uint8Array([0,97,115,109,1,0,0,0]));
+    if (!(module instanceof WebAssembly.Module)) throw Error('WebAssembly module');
+    return true;
+  });
+  await check('worker', async () => {
+    const workerURL = URL.createObjectURL(new Blob(['onmessage = e => postMessage(e.data + 1)'], {type:'text/javascript'}));
+    const worker = new Worker(workerURL);
+    try {
+      return await Promise.race([
+        new Promise((resolve,reject) => {
+          worker.onmessage = e => e.data === 42 ? resolve(true) : reject(Error('worker result'));
+          worker.onerror = e => reject(Error(String(e.message)));
+          worker.postMessage(41);
+        }),
+        new Promise((_,reject) => setTimeout(() => reject(Error('worker timeout')), 3000))
+      ]);
+    } finally {
+      worker.terminate();
+      URL.revokeObjectURL(workerURL);
+    }
+  });
+  await check('file_blob', async () => {
+    const file = new File(['IWXA'], 'probe.iwxa', {type:'application/octet-stream'});
+    if (await file.text() !== 'IWXA') throw Error('File API');
+    return file.size;
+  });
+  await check('webgpu_api', async () => {
+    if (!navigator.gpu) throw Error('navigator.gpu missing');
+    const adapter = await Promise.race([
+      navigator.gpu.requestAdapter(),
+      new Promise((_,reject) => setTimeout(() => reject(Error('GPU adapter timeout')), 4000))
+    ]);
+    if (!adapter) throw Error('no GPU adapter (may be runner limitation)');
+    return 'adapter available';
+  });
+  results.serviceworker_api = {status: 'INFO', detail: 'serviceWorker' in navigator};
+  results.opfs_api = {status: 'INFO', detail: !!(navigator.storage && navigator.storage.getDirectory)};
+  return results;
+}
+window.__iwxaProbe = {phase:'idle'};
+window.startIWXAProbe = () => {
+  window.__iwxaProbe = {phase:'running'};
+  runIWXAProbe().then(data => { window.__iwxaProbe = {phase:'done', data}; })
+    .catch(err => { window.__iwxaProbe = {phase:'error', error:String(err)}; });
+};
+window.startRestartProbe = () => {
+  window.__iwxaRestart = {phase:'running'};
+  Promise.all([
+    idbGet(),
+    Promise.resolve(localStorage.getItem('iwxa-servo-marker'))
+  ]).then(([db, local]) => {
+    window.__iwxaRestart = {phase:'done', indexeddb:db, localstorage: local === VALUE};
+  }).catch(err => { window.__iwxaRestart = {phase:'error', error:String(err)}; });
+};
+</script>
+</html>
