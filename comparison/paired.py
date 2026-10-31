@@ -74,8 +74,20 @@ class Engine:
         if self.name=='obscura':return self.client.evaluate(js)
         return self.wd('/execute/sync',{'script':f'return ({js});','args':[]})
     def setsize(self,width,height):
-        if self.name=='obscura':return self.client.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width<500})
-        return self.wd('/window/rect',{'width':width,'height':height})
+        if self.name=='obscura':
+            self.client.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width<500})
+        else:
+            # WebDriver window dimensions include platform/browser chrome. Firefox
+            # headless also clamps width to 500. Match actual inner viewport.
+            self.wd('/window/rect',{'width':width,'height':height})
+            inner=self.eval('({width:innerWidth,height:innerHeight})')
+            if inner['height']!=height or inner['width']!=width:
+                self.wd('/window/rect',{'width':max(500,width+(width-inner['width'])),'height':height+(height-inner['height'])})
+        return self.eval('({width:innerWidth,height:innerHeight})')
+    def scroll_top(self):
+        self.eval('(window.scrollTo(0,0),true)')
+        wait_truth(lambda: self.eval('window.scrollY===0'),3)
+
     def click(self,x,y):
         if self.name=='obscura':
             for kind in ['mousePressed','mouseReleased']:
@@ -155,6 +167,7 @@ def collect(engine,binary,driver,identity,host):
         wait_truth(lambda: runner.eval('typeof window.startPersist === "function"'))
         result['checks']['viewport_desktop']=record(lambda: runner.setsize(1280,850))
         result['checks']['features_desktop']=record(lambda: check_features(runner))
+        runner.scroll_top()
         result['checks']['render_desktop']=record(lambda: runner.screenshot(OUT/f'{engine}-desktop.png'))
         if result['checks']['render_desktop']['status']=='PASS':result['screenshots'].append(result['checks']['render_desktop']['value'])
         def click_button():
@@ -169,7 +182,10 @@ def collect(engine,binary,driver,identity,host):
             runner.wheel();return wait_truth(lambda: runner.eval('window.scrollY > 150'))
         result['checks']['wheel_scroll']=record(scroll)
         result['checks']['render_after_input']=record(lambda:runner.screenshot(OUT/f'{engine}-interacted.png'))
-        result['checks']['viewport_mobile']=record(lambda:runner.setsize(390,844))
+        # 500px is the smallest reliable Firefox WebDriver headless viewport.
+        # Identical CSS breakpoint to 390px, without an unequal screenshot canvas.
+        result['checks']['viewport_mobile']=record(lambda:runner.setsize(500,844))
+        runner.scroll_top()
         result['checks']['features_mobile']=record(lambda:check_features(runner))
         result['checks']['render_mobile']=record(lambda:runner.screenshot(OUT/f'{engine}-mobile.png'))
         if result['checks']['render_mobile']['status']=='PASS':result['screenshots'].append(result['checks']['render_mobile']['value'])
@@ -179,6 +195,11 @@ def collect(engine,binary,driver,identity,host):
             if status.get('status')!='PASS':raise AssertionError(status)
             return status
         result['checks']['persist_commit_abort']=record(persist)
+        def functional_gpu():
+            runner.eval('''(window.__iwxaGpu={done:false},(async()=>{try{const gpu=navigator.gpu;if(!gpu?.requestAdapter){window.__iwxaGpu={done:true,status:'UNAVAILABLE'};return;}const result=await Promise.race([gpu.requestAdapter(),new Promise((_,reject)=>setTimeout(()=>reject(Error('GPU adapter timeout')),3500))]);window.__iwxaGpu={done:true,status:result?'ADAPTER':'UNAVAILABLE'}}catch(e){window.__iwxaGpu={done:true,status:'ERROR',error:String(e)}}})(),true)''')
+            return wait_truth(lambda:runner.eval('window.__iwxaGpu?.done&&window.__iwxaGpu'),6)
+        result['checks']['webgpu_adapter_observation']=record(functional_gpu)
+
         result['memory_one_tab_mib']=runner.memory()
         result['checks']['open_five_tabs']=record(lambda:runner.extratabs(url))
         time.sleep(1)
