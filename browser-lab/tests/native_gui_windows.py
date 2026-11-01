@@ -99,9 +99,18 @@ def wait_event(kind,tab,detail,earlier,seconds=20):
         time.sleep(.15)
     raise AssertionError(f"No backend-observed {kind}/{tab}/{detail}; events={EVENTS}")
 
+ADDRESS_ATTEMPTS=0
 def type_url(url):
-    pyautogui.hotkey("ctrl","l")
-    pyautogui.write(url,interval=.015)
+    global ADDRESS_ATTEMPTS
+    ADDRESS_ATTEMPTS+=1
+    # Windows WebView2 can consume Ctrl+L as a browser accelerator. Test the
+    # ordinary pointer route first so we do not mistake the accelerator for
+    # a navigation/engine regression.
+    pyautogui.click(430,100)
+    time.sleep(.28)
+    pyautogui.hotkey("ctrl","a")
+    pyautogui.write(url,interval=.025)
+    capture("address-entered-"+str(ADDRESS_ATTEMPTS))
     pyautogui.press("enter")
 
 def assert_unauthorized_cdp_rejected(app_pid):
