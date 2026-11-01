@@ -104,6 +104,27 @@ def type_url(url):
     pyautogui.write(url,interval=.015)
     pyautogui.press("enter")
 
+def assert_unauthorized_cdp_rejected(app_pid):
+    import psutil
+    import websocket
+    candidates=[]
+    for child in psutil.Process(app_pid).children(recursive=True):
+        try:
+            argv=child.cmdline()
+            if argv and Path(argv[0]).name.lower().startswith("obscura") and "--port" in argv:
+                candidates.append("ws://127.0.0.1:"+argv[argv.index("--port")+1]+"/")
+        except psutil.Error:
+            pass
+    if len(candidates)!=1:raise AssertionError("Expected exactly one Obscura CDP owner: "+str(candidates))
+    try:
+        client=websocket.create_connection(candidates[0],timeout=4,suppress_origin=True)
+    except websocket.WebSocketBadStatusException as error:
+        if error.status_code!=401:raise AssertionError("Wrong CDP denial "+str(error.status_code))
+        return {"unauthenticated_status":401,"endpoint_private":True}
+    else:
+        client.close()
+        raise AssertionError("Unauthenticated CDP unexpectedly accepted")
+
 def main():
     executable=Path(os.environ["OBSCURA_LAB_GUI_BINARY"]).resolve(strict=True)
     engine=Path(os.environ["OBSCURA_LAB_BINARY"]).resolve(strict=True)
@@ -146,6 +167,7 @@ def main():
             type_url(origin+"/browser-lab/fixtures/gui-smoke.html")
             red=wait_color((238,53,78),"first-tab",seconds=55)
             report["checks"]["navigation_render"]="PASS"
+            report["checks"]["unauthenticated_cdp_refused"]=assert_unauthorized_cdp_rejected(process.pid)
             count=len(EVENTS)
             pyautogui.click(*red)
             wait_event("click","one","1",count)

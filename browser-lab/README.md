@@ -39,10 +39,16 @@ flag is enabled for this test mode; it **must not be used for ordinary browsing*
 This guard does not constrain subresources, redirects, DNS rebinding or socket
 access; a future OS and engine network sandbox must enforce those policies.
 
-There is **no** arbitrary-page native command bridge. CDP is loopback-only but
-not authenticated against other local processes. It has a port-allocation race.
-A hash check alone does not establish executable origin/signature authenticity.
-The process supervisor and sandbox are not qualified.
+There is **no** arbitrary-page native command bridge. CDP is bound to
+loopback and protected by a fresh 64-character random bearer token passed only
+in the child process environment and native WebSocket Authorization header.
+The original upstream CDP server also rejects browser-origin WebSockets.
+Native GUI tests assert that an unauthenticated local connection receives 401.
+This protects against opportunistic unauthorized CDP clients, **not** arbitrary
+same-user code execution or OS-level inspection of process environments.
+There remains a port-allocation race. A hash check alone does not establish
+executable origin/signature authenticity. The OS process sandbox and
+network policy enforcement remain unqualified.
 
 ## Limitations
 - PNG frames are periodically sampled, not a native 60 FPS compositor.

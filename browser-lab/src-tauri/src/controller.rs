@@ -18,7 +18,11 @@ use tokio::{
     process::{Child, Command},
     time::{sleep, timeout},
 };
-use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use tokio_tungstenite::{
+    connect_async,
+    tungstenite::{client::IntoClientRequest, http::{header::AUTHORIZATION, HeaderValue}, Message},
+    MaybeTlsStream, WebSocketStream,
+};
 use url::{Host, Url};
 use uuid::Uuid;
 
@@ -104,6 +108,20 @@ impl Drop for Controller {
 }
 fn denied(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message.to_owned())
+}
+fn fresh_cdp_token() -> String {
+    // 244 bits of OS-backed randomness via two UUID v4 values. The token is
+    // engine-process-local, never stored in the browser profile or argv.
+    format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+fn verified_ws_request(endpoint: &str, token: &str) -> io::Result<tokio_tungstenite::tungstenite::http::Request<()>> {
+    let mut request = endpoint
+        .into_client_request()
+        .map_err(|e| denied(&format!("Invalid local CDP endpoint: {e}")))?;
+    let authorization = HeaderValue::from_str(&format!("Bearer {token}"))
+        .map_err(|_| denied("Invalid CDP authorization header"))?;
+    request.headers_mut().insert(AUTHORIZATION, authorization);
+    Ok(request)
 }
 fn verify_binary() -> io::Result<PathBuf> {
     let path = std::env::var_os("OBSCURA_LAB_BINARY")
@@ -280,11 +298,17 @@ impl Controller {
             }
         }
         if fixture_mode { child.arg("--allow-private-network"); }
+        // Upstream Obscura v0.2.6 already enforces this bearer token and
+        // refuses WebSocket handshakes carrying a browser Origin header.
+        // Never put the token on the command line, in JS, or in disk storage.
+        let cdp_token = fresh_cdp_token();
+        child.env("OBSCURA_CDP_TOKEN", &cdp_token);
         self.owned = Some(child.spawn()?);
         let endpoint = format!("ws://127.0.0.1:{port}/");
+        let request = verified_ws_request(&endpoint, &cdp_token)?;
         for _ in 0..70 {
             if self.owned.as_mut().and_then(|ch| ch.try_wait().ok().flatten()).is_some() { break; }
-            if let Ok(Ok((connection, _))) = timeout(Duration::from_millis(500), connect_async(&endpoint)).await {
+            if let Ok(Ok((connection, _))) = timeout(Duration::from_millis(500), connect_async(request.clone())).await {
                 self.connection = Some(connection);
                 break;
             }
@@ -516,6 +540,17 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cdp_token_is_ephemeral_and_authorization_not_exposed_to_urls() {
+        let a = fresh_cdp_token();
+        let b = fresh_cdp_token();
+        assert_eq!(a.len(), 64);
+        assert!(a.bytes().all(|c| c.is_ascii_hexdigit()));
+        assert_ne!(a, b);
+        let req = verified_ws_request("ws://127.0.0.1:9222/", &a).unwrap();
+        assert_eq!(req.headers().get(AUTHORIZATION).unwrap().to_str().unwrap(), format!("Bearer {a}"));
+        assert_eq!(req.uri().to_string(), "ws://127.0.0.1:9222/");
+    }
     #[test]
     fn top_level_navigation_refuses_ungranted_local_and_file_schemes() {
         let allow=HashSet::from(["https://example.org".into()]);

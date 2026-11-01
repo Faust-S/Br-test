@@ -48,6 +48,29 @@ def await_event(kind,tab,detail,since,seconds=20):
         if hits:return hits[-1]
         time.sleep(.15)
     raise AssertionError(f"Missing real HTTP interaction {kind}/{tab}/{detail}: {EVENTS[-8:]}")
+def assert_unauthorized_cdp_rejected(app_pid):
+    """Real unauthorized local WebSocket must get HTTP 401, not open CDP."""
+    import psutil
+    import websocket
+    endpoints=[]
+    for child in psutil.Process(app_pid).children(recursive=True):
+        try:
+            argv=child.cmdline()
+            if argv and Path(argv[0]).name.startswith("obscura") and "--port" in argv:
+                endpoints.append("ws://127.0.0.1:"+argv[argv.index("--port")+1]+"/")
+        except psutil.Error:
+            pass
+    if len(endpoints)!=1:
+        raise AssertionError("Expected exactly one owned native Obscura process: "+str(endpoints))
+    try:
+        client=websocket.create_connection(endpoints[0],timeout=4,suppress_origin=True)
+    except websocket.WebSocketBadStatusException as error:
+        if error.status_code!=401:raise AssertionError("Wrong CDP denial code "+str(error.status_code))
+        return {"unauthenticated_status":401,"endpoint_private":True}
+    else:
+        client.close()
+        raise AssertionError("CDP accepted a missing bearer token")
+
 def main():
     binary=Path(os.environ["OBSCURA_LAB_BINARY"]).resolve(strict=True)
     appbinary=Path(os.environ["OBSCURA_LAB_GUI_BINARY"]).resolve(strict=True)
@@ -95,6 +118,7 @@ def main():
             key("ctrl+l");type_text(origin+"/browser-lab/fixtures/gui-smoke.html");key("Return")
             red=find_color((238,53,78),"first-tab")
             report["checks"]["real_obscura_page_render"]="PASS"
+            report["checks"]["unauthenticated_cdp_refused"]=assert_unauthorized_cdp_rejected(procs[-1].pid)
             n=len(EVENTS);click(red);await_event("click","one","1",n)
             report["checks"]["real_mouse_click"]="PASS"
             green=find_color((40,184,93),"text-input")
