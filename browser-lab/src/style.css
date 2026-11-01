@@ -47,6 +47,11 @@ main{flex:1;min-height:0;display:flex;position:relative}
 .page{flex:1;min-width:0;min-height:0;overflow:hidden;background:#fff}
 .interactive-frame{height:100%;width:100%;overflow:hidden}
 .interactive-frame img{width:100%;height:100%;pointer-events:none;user-select:none;display:block}
+.loading-page{height:100%;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:20px;gap:9px;background:#fbfdff;color:#47668b}
+.loading-page strong{font-size:16px;color:#203956}
+.loading-page p{font-size:12px;overflow-wrap:anywhere;margin:0;max-width:100%;text-align:center}
+.loading-page small{color:#6d86a5}
 .start-page{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:auto;
   background:radial-gradient(ellipse 52% 55% at 50% 38%,#ecf4ff 0%,transparent 100%),#fbfdff;padding:35px}
 .start-content{display:flex;flex-direction:column;align-items:center;width:min(690px,100%);margin:auto;text-align:center;padding:16px 0}
@@ -92,6 +97,7 @@ kbd{font-family:inherit;display:inline-block;padding:2px 6px;border:1px solid #e
   font-size:11px;padding:5px 13px;display:flex;align-items:center;gap:8px;white-space:nowrap}
 .engine-status{display:inline-flex;align-items:center;gap:8px;min-width:0;overflow:hidden;text-overflow:ellipsis}
 .dot{height:7px;width:7px;flex:none;border-radius:50%;background:#d2a656}
+.engine-status.ready .dot{background:#2b9f62}
 .spacer{flex:1}
 .preview-note{display:inline-flex;align-items:center;gap:6px;color:#8091a5}
 .preview-note svg{color:#b09a65}
@@ -114,6 +120,9 @@ kbd{font-family:inherit;display:inline-block;padding:2px 6px;border:1px solid #e
   .omnibox input{color:#eef6ff}.omnibox:focus-within{background:#314763}
   .go-button{background:#3c5779;color:#d7e9ff}
   .page{background:#152237}
+  .loading-page{background:#152237;color:#aac0db}
+  .loading-page strong{color:#eff6ff}
+  .loading-page small{color:#8fa8c5}
   .start-page{background:radial-gradient(ellipse 52% 55% at 50% 38%,#203b5f,transparent 100%),#152237}
   .start-content h1{color:#eef6ff}.start-copy,.start-hint{color:#a5b9d2}
   .start-search{background:#1d314d;border-color:#395576;box-shadow:none}

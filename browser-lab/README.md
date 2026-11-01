@@ -150,3 +150,13 @@ Debug-only fixture grants remain separate from persisted site approvals.
 This is a restricted preview, not a secure arbitrary-Internet browser.
 Subresource requests, redirects, DNS rebinding, OS process isolation,
 downloads, and full T2 Workspace routes remain outside acceptance.
+
+## Pending external HTTPS navigation
+
+An HTTPS page may still be loading when Page.navigate acknowledges. The native
+controller preserves the requested URL instead of replacing it with a stale
+about:blank response. The tab shows Loading page... and a separate page-loading
+surface until a real Obscura frame arrives. On subsequent metadata refreshes
+the actual document URL, title and readiness replace the pending state.
+The stale-document grace is bounded at 25 seconds. This is not a network
+sandbox and it does not qualify an external website as a T2 Result.

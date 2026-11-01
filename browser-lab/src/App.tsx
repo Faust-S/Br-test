@@ -251,7 +251,10 @@ export default function App() {
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={e => { composing.current = false; if (e.data) void issue({ type: "text", text: e.data }); }}>
           <img draggable={false} alt="Obscura webpage capture" src={image}/>
-        </div> : <section className="start-page" aria-label="New tab">
+        </div> : active && active.url !== "about:blank" ? <section className="loading-page" aria-label="Loading website">
+          <Globe2 size={29}/><strong>Opening approved website</strong>
+          <p>{active.url}</p><small>Page content is still loading in Obscura.</small>
+        </section> : <section className="start-page" aria-label="New tab">
           <div className="start-content">
             <div className="start-emblem" aria-hidden="true">i</div>
             <div className="start-eyebrow">IWXA BROWSER / OPEN PREVIEW</div>
@@ -298,7 +301,8 @@ export default function App() {
         <IconButton label="Dismiss" onClick={() => setError(null)}><X size={15}/></IconButton></div>}
     </main>
     <footer className="statusbar">
-      <span className="engine-status"><span className="dot"/>{view.status}</span><span className="spacer"/>
+      <span className={"engine-status" + (view.status.startsWith("Page ready") ? " ready" : "")}>
+        <span className="dot"/>{view.status}</span><span className="spacer"/>
       <span className="preview-note"><ShieldAlert size={13}/> Preview · two opt-in sites · no downloads</span>
     </footer>
   </div>;

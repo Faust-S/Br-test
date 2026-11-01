@@ -92,6 +92,7 @@ struct Page {
     tab: Tab,
     target: String,
     session: String,
+    pending_navigation: Option<(String, String, Instant)>,
 }
 pub struct Controller {
     owned: Option<Child>,
@@ -660,7 +661,7 @@ impl Controller {
         self.pages.push(Page {
             tab: Tab { id:id.clone(), url:"about:blank".into(),
                 title:"New tab".into(), back:false, forward:false },
-            target, session:session.clone()
+            target, session:session.clone(), pending_navigation: None
         });
         self.active = Some(id);
         self.cdp("Page.enable", json!({}), Some(session.clone())).await?;
@@ -679,18 +680,42 @@ impl Controller {
     }
     async fn navigate(&mut self, url: String) -> io::Result<()> {
         let url = self.guard(&url)?;
+        let previous = self.selected()?.tab.url.clone();
         self.release_screencast().await;
         self.page("Page.navigate", json!({"url":url})).await?;
-        self.refresh().await
+        let active = self.active.clone();
+        if let Some(page) = self.pages.iter_mut().find(|p| Some(&p.tab.id) == active.as_ref()) {
+            page.pending_navigation = if url != previous {
+                Some((url.clone(), previous, Instant::now()))
+            } else { None };
+            page.tab.url = url.clone();
+            page.tab.title = if url == "about:blank" {
+                "New tab".to_owned()
+            } else {
+                "Loading page...".to_owned()
+            };
+        }
+        self.status = if url == "about:blank" {
+            "Obscura connected · approved sites only".to_owned()
+        } else { "Loading approved website".to_owned() };
+        Ok(())
     }
     async fn refresh(&mut self) -> io::Result<()> {
         if self.active.is_none() { return Ok(()); }
         let evaluation = self.page("Runtime.evaluate", json!({
-            "expression":"({url:location.href,title:document.title})", "returnByValue":true
+            "expression":"({url:location.href,title:document.title,ready:document.readyState})",
+            "returnByValue":true
         })).await?;
         let value = &evaluation["result"]["value"];
         let url = value["url"].as_str().unwrap_or("about:blank");
         if url != "about:blank" { self.guard(url)?; }
+        let active = self.active.clone();
+        let pending = self.pages.iter().find(|p| Some(&p.tab.id) == active.as_ref())
+            .and_then(|p| p.pending_navigation.as_ref());
+        if pending.is_some_and(|(wanted, old, started)|
+            url == old && url != wanted && started.elapsed() < Duration::from_secs(25)) {
+            return Ok(());
+        }
         let title = value["title"].as_str().filter(|s| !s.is_empty()).unwrap_or(url);
         let history = self.page("Page.getNavigationHistory", json!({})).await?;
         let index = history["currentIndex"].as_u64().unwrap_or(0) as usize;
@@ -703,7 +728,13 @@ impl Controller {
             p.tab.title = title.chars().take(120).collect();
             p.tab.back = index > 0;
             p.tab.forward = index + 1 < total;
+            p.pending_navigation = None;
         }
+        self.status = if url == "about:blank" {
+            "Obscura connected · approved sites only".into()
+        } else if value["ready"] == "complete" {
+            "Page ready · approved origin".into()
+        } else { "Loading approved website".into() };
         if navigation_changed && !self.recovering_tabs {
             self.save_tab_session()?;
         }
