@@ -50,7 +50,7 @@ def key(chord):
     else:command("xdotool","key","--clearmodifiers",chord)
 
 def text(value):
-    if WINDOWS:pyautogui.write(value,interval=.012)
+    if WINDOWS:pyautogui.write(value,interval=.025)
     else:command("xdotool","type","--clearmodifiers","--delay","15",value)
 
 def click(x,y):
@@ -169,13 +169,32 @@ def main():
                 try:
                     get_window(process)
                     wait_chrome(process)
-                    key("ctrl+l")
-                    if WINDOWS:
-                        click(430,96);key("ctrl+a")
-                    text(origin+"/browser-lab/fixtures/idb-crash-recovery.html")
-                    key("Return")
-                    point=locate((238,53,78) if phase=="write" else (33,106,202),
-                        phase+"-viewport")
+                    marker=(238,53,78) if phase=="write" else (33,106,202)
+                    target=origin+"/browser-lab/fixtures/idb-crash-recovery.html"
+                    point=None
+                    for attempt in range(3):
+                        if WINDOWS:
+                            # Tauri WebView2 can intercept Ctrl+L; use the
+                            # proven ordinary Windows omnibox pointer path.
+                            click(430,96)
+                            time.sleep(.35)
+                            key("ctrl+a")
+                        else:
+                            key("ctrl+l")
+                            time.sleep(.15)
+                        text(target)
+                        if WINDOWS:
+                            # A visible URL is evidence of focus, not success;
+                            # only a rendered engine webpage qualifies.
+                            screenshot(f"{phase}-address-entered-{attempt+1}")
+                        key("Return")
+                        try:
+                            point=locate(marker,phase+"-viewport",seconds=16)
+                            break
+                        except AssertionError:
+                            screenshot(f"{phase}-navigation-retry-{attempt+1}")
+                    if point is None:
+                        raise AssertionError(f"{phase}: address did not navigate to Obscura page")
                     click(*point)
                     event=wait_event("idb_write" if phase=="write" else "idb_read")
                     if event.get("detail")!="PASS" or event.get("values")!=[7,7,7]:
