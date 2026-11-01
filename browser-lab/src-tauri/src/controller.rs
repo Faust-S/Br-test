@@ -396,6 +396,21 @@ impl Controller {
         }
         Ok(())
     }
+    // Security Supervisor first slice: all CDP traffic must belong to a live,
+    // originally spawned child. No PID lookup, no foreign process adoption.
+    fn check_owned_process(&mut self) -> io::Result<()> {
+        let alive = match self.owned.as_mut() {
+            Some(child) => child.try_wait()?.is_none(),
+            None => false,
+        };
+        if !alive {
+            self.connection.take();
+            self.status = "Owned Obscura process stopped; use Restart".into();
+            return Err(denied("Obscura process stopped; restart owned engine to recover"));
+        }
+        Ok(())
+    }
+
     pub async fn execute(&mut self,action:Action)->io::Result<View> {
         match action {
             Action::Boot => {
@@ -404,6 +419,7 @@ impl Controller {
             }
             Action::Restart => self.restart_owned().await?,
             other => {
+                self.check_owned_process()?;
                 if self.connection.is_none() { return Err(denied("Obscura must be started first")); }
                 match other {
                     Action::Capture => {
@@ -497,6 +513,17 @@ mod tests {
             "https://user@example.org/", "javascript:alert(1)"] {
             assert!(allowed_url(item,&allow,false).is_err(),"{item}");
         }
+    }
+    #[tokio::test]
+    async fn missing_owner_refuses_cdp_and_leaves_restart_available() {
+        let mut controller = Controller::default();
+        controller.connection = None;
+        let err = match controller.execute(Action::Capture).await {
+            Err(e) => e,
+            Ok(_) => panic!("Capture without owned process unexpectedly succeeded"),
+        };
+        assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert!(controller.status.contains("Restart"));
     }
     #[test]
     fn localhost_requires_explicit_fixture_allowance() {
