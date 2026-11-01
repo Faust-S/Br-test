@@ -86,7 +86,7 @@ export default function App() {
       const next = await invoke<View>("command", { action });
       setView(next);
       const tab = next.tabs.find(t => t.id === next.active);
-      if (tab && tab.url !== "about:blank" && !["capture", "resize"].includes(action.type)) {
+      if (tab && tab.url !== "about:blank") {
         const visitKey = tab.id + ":" + tab.url;
         if (lastObservedVisit.current !== visitKey) {
           lastObservedVisit.current = visitKey;
