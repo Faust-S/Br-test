@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import packaged_idb_gui as gui
 
@@ -213,6 +214,59 @@ def wait_artbazi_overview(initial, report, seconds=70):
     raise AssertionError("ArtBazi T2 overview not hydrated within bounded user wait")
 
 
+def inspect_closed_engine_workspace(profile, created_url):
+    """Read ONLY key presence from the existing Obscura profile snapshot.
+
+    Called after terminating the entire test-owned browser process tree. This
+    never opens a database, reads Result bodies, or uses a second T2 Kernel.
+    IndexedDB v0.2.6 encodes a string primary key as JSON.stringify([2, key]).
+    """
+    output = {"snapshot": "ABSENT", "database": "ABSENT",
+              "store": "ABSENT", "record": "UNKNOWN", "records": 0}
+    try:
+        page = urlsplit(created_url)
+        if (page.scheme, page.netloc) != ("https", "artbazi.ru"):
+            return {**output, "error": "unexpected_origin"}
+        parts = page.fragment.split("/")
+        if len(parts) != 3 or parts[0:2] != ["", "workspace"] or not parts[2]:
+            return {**output, "error": "unexpected_route"}
+        workspace_id = parts[2]
+        snapshot = profile / "indexedDB" / "snapshot-v1.json"
+        if not snapshot.is_file():
+            return output
+        if snapshot.stat().st_size > 256 * 1024 * 1024:
+            return {**output, "error": "oversized"}
+        output["snapshot"] = "PRESENT"
+        durable = json.loads(snapshot.read_text(encoding="utf-8"))
+        if durable.get("format") != 1:
+            return {**output, "error": "unexpected_format"}
+        databases = [
+            entry for entry in durable.get("databases", [])
+            if entry.get("origin") == "https://artbazi.ru"
+            and entry.get("name") == "iwxa-local"
+        ]
+        if len(databases) != 1:
+            return output
+        db = databases[0]
+        output["database"] = "PRESENT"
+        output["db_version"] = db.get("version")
+        records = db.get("records", {})
+        if "workspaces" not in records:
+            return output
+        store = records["workspaces"]
+        output["store"] = "PRESENT"
+        output["records"] = len(store)
+        # Inspect only stored primary keys; values are V8-serialized and
+        # must never be extracted into artifacts or user-facing diagnostics.
+        output["record"] = "PRESENT" if any(
+            json.loads(key) == [2, workspace_id]
+            for key in store
+        ) else "ABSENT"
+        return output
+    except (OSError, ValueError, TypeError, AttributeError) as error:
+        return {**output, "error": type(error).__name__}
+
+
 def attempt_artbazi_create(initial, report, session):
     view=wait_artbazi_overview(initial, report)["result"]
     toggle=(view.get("buttons") or {}).get("new-workspace-toggle")
@@ -408,6 +462,14 @@ def main():
                     report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
                 gui.stop_tree(process)
                 process = None
+                # Observe the *actual T2 IndexedDB key* while the only
+                # owning engine is closed. URL persistence alone is not data
+                # persistence, and missing React is not proof of data loss.
+                if created_url and stage in ("restore", "readback"):
+                    label = "after_create" if stage == "restore" else "after_readback"
+                    report["checks"]["artbazi_t2_idb_" + label] = (
+                        inspect_closed_engine_workspace(profile, created_url)
+                    )
             report["status"] = "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"
         except Exception as error:
             report["status"] = "HOLD_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"
@@ -418,6 +480,12 @@ def main():
             if process is not None:
                 with contextlib.suppress(Exception):
                     gui.stop_tree(process)
+            # Even a readback failure must leave a data-versus-rendering
+            # verdict. No modification is made to this test-only profile.
+            if created_url:
+                report["checks"]["artbazi_t2_idb_final"] = (
+                    inspect_closed_engine_workspace(profile, created_url)
+                )
             if manager is not None:
                 manager.terminate()
                 with contextlib.suppress(Exception):
