@@ -106,7 +106,7 @@ def type_url(url):
     # Windows WebView2 can consume Ctrl+L as a browser accelerator. Test the
     # ordinary pointer route first so we do not mistake the accelerator for
     # a navigation/engine regression.
-    pyautogui.click(430,100)
+    pyautogui.click(430,125)
     time.sleep(.28)
     pyautogui.hotkey("ctrl","a")
     pyautogui.write(url,interval=.025)
@@ -189,7 +189,7 @@ def main():
                 image=pyautogui.screenshot().convert("RGB")
                 if image.width>850 and image.height>130:
                     tab=image.getpixel((750,50))
-                    omnibox=image.getpixel((750,100))
+                    omnibox=image.getpixel((750,123))
                     if all(abs(tab[i]-(226,234,245)[i])<15 for i in range(3)) and all(
                         abs(omnibox[i]-(240,244,250)[i])<15 for i in range(3)):
                         break

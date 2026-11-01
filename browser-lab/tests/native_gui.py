@@ -107,8 +107,8 @@ def main():
             ready_deadline=time.monotonic()+40
             while time.monotonic()<ready_deadline:
                 im=Image.open(shot("startup-poll")).convert("RGB")
-                if (im.getpixel((200,42)) == (255,255,255) and
-                    all(abs(im.getpixel((500,80))[i]-[240,244,250][i])<8 for i in range(3))):
+                if (im.getpixel((200,65)) == (255,255,255) and
+                    all(abs(im.getpixel((500,110))[i]-[240,244,250][i])<8 for i in range(3))):
                     break
                 if procs[-1].poll() is not None:
                     raise RuntimeError("Tauri exited while loading browser chrome")
