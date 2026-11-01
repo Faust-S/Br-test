@@ -1,0 +1,60 @@
+name: Public Obscura IndexedDB durable restart
+on:
+  push:
+    branches: [work/2026-11-01-public-browser-core]
+    paths:
+      - "engine-overrides/**"
+      - "browser-lab/tests/idb_restart.py"
+      - ".github/workflows/public-idb-restart.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  patched-engine:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    env:
+      CARGO_INCREMENTAL: "0"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: h4ckf0r0day/obscura
+          ref: 8534b401898ed17b62f69bdc3d5eb186bffb0d60
+          path: upstream
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply public version-pinned engine overrides
+        shell: bash
+        run: |
+          test "$(cd upstream && git rev-parse HEAD)" = "8534b401898ed17b62f69bdc3d5eb186bffb0d60"
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/indexed_db.rs upstream/crates/obscura-js/src/indexed_db.rs
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-browser/src/context.rs upstream/crates/obscura-browser/src/context.rs
+      - name: Native IndexedDB regression and durability tests
+        run: cargo test --manifest-path upstream/Cargo.toml -p obscura-js indexed_db
+      - name: Build real patched Obscura with native renderer
+        run: cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
+      - name: Install public harness dependencies
+        run: python -m pip install websocket-client==1.8.0 psutil==7.0.0 Pillow==11.3.0
+      - name: Real cross-process IndexedDB recovery
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then export OBSCURA_PATCHED_BINARY="$GITHUB_WORKSPACE/upstream/target/debug/obscura.exe"; else export OBSCURA_PATCHED_BINARY="$GITHUB_WORKSPACE/upstream/target/debug/obscura"; fi
+          python browser-lab/tests/idb_restart.py
+      - name: Collect real failure evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: idb-durability-${{ matrix.os }}
+          path: |
+            artifacts/browser-lab/idb-*.json
+            artifacts/browser-lab/idb-*.log
+          retention-days: 7
