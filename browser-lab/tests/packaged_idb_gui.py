@@ -172,7 +172,12 @@ def main():
                     marker=(238,53,78) if phase=="write" else (33,106,202)
                     target=origin+"/browser-lab/fixtures/idb-crash-recovery.html"
                     point=None
-                    for attempt in range(3):
+                    if phase=="readback":
+                        # User workflow: the second app launch must restore
+                        # the previous tab without manual address entry.
+                        point=locate(marker,"restored-idb-tab",seconds=32)
+                        report["checks"]["tab_restored_after_full_restart"]="PASS"
+                    for attempt in range(3) if phase=="write" else range(0):
                         if WINDOWS:
                             # Tauri WebView2 can intercept Ctrl+L; use the
                             # proven ordinary Windows omnibox pointer path.

@@ -16,12 +16,11 @@ jobs:
   packaged-restart:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 70
-    # Previous complete Linux bundled-GUI persistence/readback PASS.
-    # Qualify the Windows GUI fix without duplicating native engine builds.
+    # One full native Tauri + IndexedDB + browser-tab restoration gate.
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2022]
+        os: [ubuntu-24.04, windows-2022]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4

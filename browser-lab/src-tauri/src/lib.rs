@@ -1,4 +1,5 @@
 mod controller;
+mod session;
 use controller::{Action, Controller, View};
 use tauri::{Manager, State};
 use tokio::sync::Mutex;

@@ -111,3 +111,22 @@ real Tauri GUI IndexedDB write and readback after terminating the complete
 owned process tree and relaunching the application using the **same** engine
 profile. This is a browser session qualification, not acceptance of T2
 Workspace receipts or Exchange.
+
+## Browser tab restoration (public prototype)
+
+The native controller now persists only the **URLs and selected-tab index**
+in the local Obscura profile as \`browser-tabs-v1.json\`. Writes use a
+same-directory temporary file, file synchronization and atomic replacement.
+This is not a Result store, a second IndexedDB, or a duplicate Workspace
+history. No page contents, receipts or credentials are serialized into this
+browser metadata file (URLs can still contain sensitive query parameters).
+
+On cold launch, the controller reads the bounded file and **revalidates every
+URL against current origin grants**. Disallowed, corrupt or stale entries never
+gain an engine tab. A new default tab is used if no entries are permitted.
+After the application is closed and restarted, the active tab and its URL
+reappear while the engine's original IndexedDB profile remains intact.
+
+The public packaged-GUI scenario now checks that the second Tauri launch
+displays the previously open IndexedDB page *without manually navigating
+again*, then performs a real click and reads the same committed stores.

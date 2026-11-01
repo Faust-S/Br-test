@@ -2,6 +2,7 @@
 //! Strict local-fixture policy. No hostile-site isolation, no T2 authority.
 //! No browser-generated receipts or parallel workspace database.
 use futures_util::{SinkExt, StreamExt};
+use crate::session::{self, BrowserSession};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -100,6 +101,8 @@ pub struct Controller {
     status: String,
     fixture_mode: bool,
     bundle_resource_dir: Option<PathBuf>,
+    browser_session_path: Option<PathBuf>,
+    recovering_tabs: bool,
     stream_session: Option<String>,
     stream_latest: Option<String>,
     stream_ack_ids: Vec<i64>,
@@ -119,6 +122,8 @@ impl Default for Controller {
             status: "Not started".into(),
             fixture_mode: false,
             bundle_resource_dir: None,
+            browser_session_path: None,
+            recovering_tabs: false,
             stream_session: None,
             stream_latest: None,
             stream_ack_ids: Vec::new(),
@@ -257,6 +262,56 @@ fn grants() -> io::Result<(HashSet<String>, bool)> {
     Ok((origins, fixture))
 }
 impl Controller {
+    // URL grants are rechecked every time; a copied session file cannot
+    // escalate page privileges or resurrect no-longer-permitted origins.
+    fn admitted_session(&self, saved: BrowserSession) -> Option<BrowserSession> {
+        let mut tabs = Vec::new();
+        let mut selected = None;
+        for (index, raw) in saved.tabs.into_iter().enumerate().take(10) {
+            if let Ok(url) = self.guard(&raw) {
+                if index == saved.active { selected = Some(tabs.len()); }
+                tabs.push(url);
+            }
+        }
+        if tabs.is_empty() { return None; }
+        Some(BrowserSession {
+            version: session::SCHEMA_VERSION,
+            active: selected.unwrap_or(0),
+            tabs,
+        })
+    }
+
+    fn save_tab_session(&self) -> io::Result<()> {
+        let Some(path) = self.browser_session_path.as_deref() else { return Ok(()) };
+        if self.pages.is_empty() { return Ok(()) };
+        let active = self.pages.iter()
+            .position(|p| Some(&p.tab.id) == self.active.as_ref()).unwrap_or(0);
+        session::write(path, &BrowserSession {
+            version: session::SCHEMA_VERSION,
+            tabs: self.pages.iter().map(|p| p.tab.url.clone()).collect(),
+            active,
+        })
+    }
+
+    async fn reopen_saved_tabs(&mut self) -> io::Result<()> {
+        let saved = self.browser_session_path.as_deref()
+            .and_then(session::read)
+            .and_then(|state| self.admitted_session(state));
+        if let Some(saved) = saved {
+            for url in saved.tabs {
+                self.spawn_tab(url).await?;
+            }
+            if let Some(tab) = self.pages.get(saved.active) {
+                self.active = Some(tab.tab.id.clone());
+                self.resize().await?;
+            }
+        }
+        if self.pages.is_empty() {
+            self.spawn_tab("about:blank".to_string()).await?;
+        }
+        Ok(())
+    }
+
     pub fn with_resource_dir(resource_dir: Option<PathBuf>) -> Self {
         let mut controller = Self::default();
         controller.bundle_resource_dir = resource_dir;
@@ -453,6 +508,7 @@ impl Controller {
             }
         } else { default_profile };
         fs::create_dir_all(&profile)?;
+        self.browser_session_path = Some(profile.join("browser-tabs-v1.json"));
         // No bind-close-rebind race. The engine chooses its port and reports
         // readiness atomically, including its PID.
         let ready_file = profile.join(format!(".obscura-cdp-{}.ready.json", Uuid::new_v4()));
@@ -601,11 +657,16 @@ impl Controller {
         let index = history["currentIndex"].as_u64().unwrap_or(0) as usize;
         let total = history["entries"].as_array().map(|x| x.len()).unwrap_or(0);
         let id = self.active.clone();
+        let mut navigation_changed = false;
         if let Some(p) = self.pages.iter_mut().find(|x| Some(&x.tab.id) == id.as_ref()) {
+            navigation_changed = p.tab.url != url;
             p.tab.url = url.to_owned();
             p.tab.title = title.chars().take(120).collect();
             p.tab.back = index > 0;
             p.tab.forward = index + 1 < total;
+        }
+        if navigation_changed && !self.recovering_tabs {
+            self.save_tab_session()?;
         }
         Ok(())
     }
@@ -648,10 +709,19 @@ impl Controller {
     }
 
     pub async fn execute(&mut self,action:Action)->io::Result<View> {
+        let persist = matches!(&action,
+            Action::Boot | Action::Restart | Action::NewTab{..} |
+            Action::SelectTab{..} | Action::CloseTab{..} | Action::Navigate{..} |
+            Action::Back | Action::Forward | Action::Reload);
         match action {
             Action::Boot => {
                 self.start().await?;
-                if self.pages.is_empty() { self.spawn_tab("about:blank".into()).await?; }
+                if self.pages.is_empty() {
+                    self.recovering_tabs = true;
+                    let result = self.reopen_saved_tabs().await;
+                    self.recovering_tabs = false;
+                    result?;
+                }
             }
             Action::Restart => self.restart_owned().await?,
             other => {
@@ -743,6 +813,9 @@ impl Controller {
                 }
             }
         }
+        if persist && !self.recovering_tabs {
+            self.save_tab_session()?;
+        }
         Ok(self.view(None))
     }
 }
@@ -814,6 +887,40 @@ mod tests {
         assert!(allowed_url("https://example.org/", &allow, true).is_err());
         assert!(allowed_url("http://127.0.0.2:8080/", &allow, true).is_err());
     }
+    #[test]
+    fn restored_tabs_drop_ungranted_origins_without_losing_safe_selection() {
+        let mut c = Controller::default();
+        c.allowed = HashSet::from(["https://learn.iwxa.ru".into()]);
+        let saved = BrowserSession {
+            version: session::SCHEMA_VERSION,
+            tabs: vec![
+                "https://not-approved.example/path".into(),
+                "https://learn.iwxa.ru/workspace/".into(),
+                "file:///etc/passwd".into(),
+                "about:blank".into(),
+            ],
+            active: 1,
+        };
+        let safe = c.admitted_session(saved).unwrap();
+        assert_eq!(safe.tabs, [
+            "https://learn.iwxa.ru/workspace/".to_string(),
+            "about:blank".to_string(),
+        ]);
+        assert_eq!(safe.active, 0);
+    }
+
+    #[test]
+    fn restored_tabs_do_not_regrant_expired_fixtures() {
+        let mut c = Controller::default();
+        c.allowed = HashSet::from(["https://learn.iwxa.ru".into()]);
+        let saved = BrowserSession {
+            version: session::SCHEMA_VERSION,
+            tabs: vec!["http://127.0.0.1:9999/".into()],
+            active: 0,
+        };
+        assert!(c.admitted_session(saved).is_none());
+    }
+
     #[test]
     fn localhost_requires_explicit_fixture_allowance() {
         let allow=HashSet::from(["http://127.0.0.1:8080".into()]);
