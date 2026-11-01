@@ -9,6 +9,7 @@ on:
       - "browser-lab/index.html"
       - "browser-lab/package.json"
       - "browser-lab/tests/native_route.py"
+      - "browser-lab/tests/native_screencast.py"
       - ".github/workflows/public-browser-core.yml"
   workflow_dispatch:
 concurrency:
@@ -57,6 +58,9 @@ jobs:
       - name: Actual Obscura mouse keyboard scroll tabs and history
         working-directory: .
         run: python browser-lab/tests/native_route.py
+      - name: Qualify upstream event-driven screencast and ACK
+        working-directory: .
+        run: python browser-lab/tests/native_screencast.py
       - name: Upload evidence
         if: always()
         uses: actions/upload-artifact@v4
