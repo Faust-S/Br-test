@@ -97,7 +97,12 @@ def main():
             report["status"]="PASS_REAL_GUI"
         except Exception as ex:
             report["status"]="FAIL_REAL_GUI";report["error"]=repr(ex)
-            with contextlib.suppress(Exception):shot("failure")
+            with contextlib.suppress(Exception):
+                png=shot("failure")
+                from collections import Counter
+                im=Image.open(png).convert("RGB")
+                report["screen_most_common_rgb"]=Counter(im.resize((128,90)).getdata()).most_common(12)
+            report["processes_alive"]=[p.poll() is None for p in procs]
         finally:
             for p in reversed(procs):
                 if p.poll() is None:

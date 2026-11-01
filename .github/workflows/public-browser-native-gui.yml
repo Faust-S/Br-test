@@ -57,6 +57,14 @@ jobs:
           export OBSCURA_LAB_BINARY="$(cat /tmp/obscura-lab-path)"
           export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"
           xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/native_gui.py
+      - name: Print native application diagnostics on failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== native app log ==="
+          tail -n 180 artifacts/browser-lab/gui/native-app.log || true
+          echo "=== GUI report ==="
+          cat artifacts/browser-lab/gui/gui-report.json || true
       - name: Upload screenshot and event evidence
         if: always()
         uses: actions/upload-artifact@v4
