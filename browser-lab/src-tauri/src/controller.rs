@@ -28,6 +28,24 @@ use uuid::Uuid;
 
 type Transport = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
+#[derive(Deserialize)]
+struct EngineReady {
+    pid: u32,
+    host: String,
+    port: u16,
+    websocket_path: String,
+}
+
+fn validate_engine_ready(data: &str, expected_pid: u32) -> io::Result<u16> {
+    let ready: EngineReady = serde_json::from_str(data)
+        .map_err(|_| denied("Invalid Obscura readiness record"))?;
+    if ready.pid != expected_pid || ready.host != "127.0.0.1" ||
+        ready.port == 0 || ready.websocket_path != "/devtools/browser" {
+        return Err(denied("Obscura readiness identity or endpoint mismatch"));
+    }
+    Ok(ready.port)
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
@@ -278,13 +296,14 @@ impl Controller {
             }
         } else { default_profile };
         fs::create_dir_all(&profile)?;
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
-        let port = listener.local_addr()?.port();
-        drop(listener);
+        // No bind-close-rebind race. The engine chooses its port and reports
+        // readiness atomically, including its PID.
+        let ready_file = profile.join(format!(".obscura-cdp-{}.ready.json", Uuid::new_v4()));
         let mut child = Command::new(binary);
-        child.args(["serve", "--host", "127.0.0.1", "--port", &port.to_string(),
-            "--max-connections", "1", "--storage-dir"])
-            .arg(profile)
+        child.args(["serve", "--host", "127.0.0.1", "--port", "0",
+            "--workers", "1", "--max-connections", "1", "--ready-file"])
+            .arg(&ready_file)
+            .arg("--storage-dir").arg(&profile)
             .kill_on_drop(true)
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::null())
@@ -304,15 +323,32 @@ impl Controller {
         let cdp_token = fresh_cdp_token();
         child.env("OBSCURA_CDP_TOKEN", &cdp_token);
         self.owned = Some(child.spawn()?);
-        let endpoint = format!("ws://127.0.0.1:{port}/");
-        let request = verified_ws_request(&endpoint, &cdp_token)?;
-        for _ in 0..70 {
-            if self.owned.as_mut().and_then(|ch| ch.try_wait().ok().flatten()).is_some() { break; }
-            if let Ok(Ok((connection, _))) = timeout(Duration::from_millis(500), connect_async(request.clone())).await {
-                self.connection = Some(connection);
+        let identity = self.owned.as_ref().and_then(|c| c.id())
+            .ok_or_else(|| denied("Owned Obscura PID unavailable"))?;
+        let mut announced_port = None;
+        for _ in 0..130 {
+            if self.owned.as_mut().ok_or_else(|| denied("Owned process missing"))?
+                .try_wait()?.is_some() { break; }
+            if let Ok(contents) = fs::read_to_string(&ready_file) {
+                announced_port = Some(validate_engine_ready(&contents, identity)?);
                 break;
             }
             sleep(Duration::from_millis(120)).await;
+        }
+        let _ = fs::remove_file(&ready_file);
+        if let Some(port) = announced_port {
+            let endpoint = format!("ws://127.0.0.1:{port}/");
+            let request = verified_ws_request(&endpoint, &cdp_token)?;
+            for _ in 0..35 {
+                if self.owned.as_mut().ok_or_else(|| denied("Owned process missing"))?
+                    .try_wait()?.is_some() { break; }
+                if let Ok(Ok((connection, _))) =
+                    timeout(Duration::from_millis(500), connect_async(request.clone())).await {
+                    self.connection = Some(connection);
+                    break;
+                }
+                sleep(Duration::from_millis(120)).await;
+            }
         }
         if self.connection.is_none() {
             if let Some(mut child) = self.owned.take() {
@@ -540,6 +576,20 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_ready_identity_is_bound_to_spawned_pid_and_loopback() {
+        let valid = r#"{"pid":1234,"host":"127.0.0.1","port":49152,"websocket_path":"/devtools/browser"}"#;
+        assert_eq!(validate_engine_ready(valid, 1234).unwrap(), 49152);
+        assert!(validate_engine_ready(valid, 5).is_err());
+        for invalid in [
+            r#"{"pid":1234,"host":"0.0.0.0","port":49152,"websocket_path":"/devtools/browser"}"#,
+            r#"{"pid":1234,"host":"127.0.0.1","port":0,"websocket_path":"/devtools/browser"}"#,
+            r#"{"pid":1234,"host":"127.0.0.1","port":49152,"websocket_path":"/json/version"}"#,
+            "{}"
+        ] {
+            assert!(validate_engine_ready(invalid, 1234).is_err());
+        }
+    }
     #[test]
     fn cdp_token_is_ephemeral_and_authorization_not_exposed_to_urls() {
         let a = fresh_cdp_token();
