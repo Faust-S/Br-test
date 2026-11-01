@@ -10,7 +10,7 @@ use std::{
     fs,
     io,
     net::{Ipv4Addr, Ipv6Addr},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use tokio::{
@@ -99,6 +99,7 @@ pub struct Controller {
     allowed: HashSet<String>,
     status: String,
     fixture_mode: bool,
+    bundle_resource_dir: Option<PathBuf>,
     stream_session: Option<String>,
     stream_latest: Option<String>,
     stream_ack_ids: Vec<i64>,
@@ -117,6 +118,7 @@ impl Default for Controller {
             allowed: HashSet::new(),
             status: "Not started".into(),
             fixture_mode: false,
+            bundle_resource_dir: None,
             stream_session: None,
             stream_latest: None,
             stream_ack_ids: Vec::new(),
@@ -149,21 +151,39 @@ fn verified_ws_request(endpoint: &str, token: &str) -> io::Result<tokio_tungsten
     request.headers_mut().insert(AUTHORIZATION, authorization);
     Ok(request)
 }
-fn verify_binary() -> io::Result<PathBuf> {
-    let path = std::env::var_os("OBSCURA_LAB_BINARY")
-        .ok_or_else(|| denied("OBSCURA_LAB_BINARY must name an adopted native executable"))?;
-    let expected = std::env::var("OBSCURA_LAB_SHA256")
-        .map_err(|_| denied("OBSCURA_LAB_SHA256 is required"))?;
+fn verified_digest(path: &Path, expected: &str) -> io::Result<PathBuf> {
     if expected.len() != 64 || !expected.bytes().all(|c| c.is_ascii_hexdigit()) {
-        return Err(denied("Expected a SHA-256 digest"));
+        return Err(denied("Expected a complete SHA-256 digest"));
     }
     let path = fs::canonicalize(path)?;
-    if !path.is_file() {
-        return Err(denied("Obscura executable is not a regular file"));
-    }
+    if !path.is_file() { return Err(denied("Obscura executable missing")); }
     let digest = hex::encode(Sha256::digest(fs::read(&path)?));
     if digest != expected.to_ascii_lowercase() {
-        return Err(denied("Obscura binary hash mismatch"));
+        return Err(denied("Obscura executable does not match compiled SHA-256"));
+    }
+    Ok(path)
+}
+
+fn verify_binary(resource_dir: Option<&Path>) -> io::Result<PathBuf> {
+    // A developer may adopt a separately inspected engine only in a DEBUG
+    // build. Production binaries cannot redirect the engine using an env var.
+    #[cfg(debug_assertions)]
+    if let Some(value) = std::env::var_os("OBSCURA_LAB_BINARY") {
+        let expected = std::env::var("OBSCURA_LAB_SHA256")
+            .map_err(|_| denied("Adopted debug engine requires OBSCURA_LAB_SHA256"))?;
+        return verified_digest(Path::new(&value), &expected);
+    }
+
+    let root = resource_dir.ok_or_else(|| denied("Tauri resource directory unavailable"))?;
+    let directory = root.join("obscura");
+    let expected = option_env!("IWXA_BUNDLED_OBSCURA_SHA256")
+        .ok_or_else(|| denied("This build does not include an approved Obscura engine"))?;
+    let binary_name = if cfg!(windows) { "obscura.exe" } else { "obscura" };
+    // No user-supplied path is used for release engine selection; reject a
+    // symlink that redirects outside the installed, packaged engine directory.
+    let path = verified_digest(&directory.join(binary_name), expected)?;
+    if path.parent() != Some(fs::canonicalize(&directory)?.as_path()) {
+        return Err(denied("Bundled engine redirects outside its resource directory"));
     }
     Ok(path)
 }
@@ -237,6 +257,9 @@ fn grants() -> io::Result<(HashSet<String>, bool)> {
     Ok((origins, fixture))
 }
 impl Controller {
+    pub fn with_resource_dir(resource_dir: Option<PathBuf>) -> Self {
+        Self { bundle_resource_dir: resource_dir, ..Self::default() }
+    }
     fn view(&self, frame: Option<String>) -> View {
         View {
             active: self.active.clone(),
@@ -409,7 +432,7 @@ impl Controller {
     }
     async fn start(&mut self) -> io::Result<()> {
         if self.connection.is_some() { return Ok(()); }
-        let binary = verify_binary()?;
+        let binary = verify_binary(self.bundle_resource_dir.as_deref())?;
         let (allow, fixture_mode) = grants()?;
         self.allowed = allow;
         self.fixture_mode = fixture_mode;
