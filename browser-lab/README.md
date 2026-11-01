@@ -49,8 +49,12 @@ The process supervisor and sandbox are not qualified.
 - Accessibility/IME, downloads, hostile-site networking, DNS rebinding,
   redirects, file upload permission dialogs, app install/update and crash
   cleanup remain unqualified.
-- Obscura upstream IndexedDB still does not survive process restart. This
-  program **does not** claim persistent T2 results or invent a second database.
+- The **unmodified** upstream Obscura 0.2.6 binary still does not preserve
+  IndexedDB across restart. The open `engine-overrides/obscura-v0.2.6/`
+  patch has passed public Windows/Linux process-restart tests, but this
+  standalone GUI currently loads an explicitly adopted binary and does
+  **not** automatically bundle that patch. No T2 Workspace results or
+  receipts have been qualified; no second canonical database is created.
 - No Gecko is bundled. No code from any private IWXA repository is included.
 - A green workflow means source compilation and real *fixture* actions,
   **not** general-web, protected T2 or installed-application acceptance.
