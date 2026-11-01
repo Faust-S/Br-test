@@ -5,6 +5,7 @@ native GUI before interacting. URL/session readback does not prove that a
 remote site rendered or created a T2 Result: screenshots remain review evidence.
 """
 import contextlib
+import hashlib
 import json
 import os
 import platform
@@ -179,12 +180,29 @@ def native_workspace_click(point):
     reliable_click(x,y+111)
 
 
-def attempt_artbazi_create(initial, report):
-    view=initial.get("result") or {}
-    report["checks"]["artbazi_overview_rendered"] = (
-        "PASS" if view.get("overviewRendered") else "HOLD")
-    if not view.get("overviewRendered"):
-        raise AssertionError("ArtBazi overview not rendered; cannot create T2 Workspace")
+def wait_artbazi_overview(initial, report, seconds=70):
+    # Remote React hydration was non-deterministic in the earlier run.
+    # Never click a blank document, and never treat HTML ready as UI ready.
+    state=initial
+    deadline=time.monotonic()+seconds
+    attempts=0
+    while time.monotonic()<deadline:
+        view=state.get("result") or {}
+        if view.get("overviewRendered") and (view.get("buttons") or {}).get("new-workspace-toggle"):
+            report["checks"]["artbazi_overview_rendered"]="PASS"
+            report["checks"]["artbazi_overview_probe_count"]=attempts+1
+            return state
+        attempts+=1
+        time.sleep(5)
+        state=request_probe("artbazi")
+    report["checks"]["artbazi_overview_rendered"]="HOLD"
+    report["checks"]["artbazi_overview_probe_count"]=attempts
+    screenshot("artbazi-overview-unavailable")
+    raise AssertionError("ArtBazi T2 overview not hydrated within bounded user wait")
+
+
+def attempt_artbazi_create(initial, report, session):
+    view=wait_artbazi_overview(initial, report)["result"]
     toggle=(view.get("buttons") or {}).get("new-workspace-toggle")
     native_workspace_click(toggle)
     time.sleep(1.1)
@@ -199,8 +217,29 @@ def attempt_artbazi_create(initial, report):
     time.sleep(3)
     screenshot("artbazi-after-create")
     report["checks"]["artbazi_create_submitted"] = "USER_ACTION_PERFORMED"
-    # The next acceptance step must read the created Workspace from T2
-    # catalog after a full restart. A click alone is not a T2 receipt.
+    # The normal T2 route is fragment-based. Only a successful Kernel
+    # createWorkspace may drive its workspace-id route from the UI.
+    created=wait_session(session,lambda state:
+        len(state.get("tabs",[])) == 2 and state.get("active") == 1 and
+        state["tabs"][1].startswith("https://artbazi.ru/workspace/#/workspace/"),
+        "ArtBazi T2 created workspace route",seconds=80)
+    created_url=created["tabs"][1]
+    report["checks"]["created_workspace_route_sha256"]=hashlib.sha256(
+        created_url.encode("utf-8")).hexdigest()
+    report["checks"]["artbazi_created_workspace_route"]="PASS"
+    last={}
+    for _ in range(4):
+        time.sleep(3)
+        last=request_probe("artbazi")["result"]
+        if last.get("workspaceViewMounted") and not last.get("workspaceViewError"):
+            break
+    report["checks"]["artbazi_created_workspace_visible"]=(
+        "PASS" if last.get("workspaceViewMounted") and not last.get("workspaceViewError")
+        else "HOLD")
+    screenshot("artbazi-created-workspace")
+    if report["checks"]["artbazi_created_workspace_visible"] != "PASS":
+        raise AssertionError("New T2 workspace did not render its genuine record view")
+    return created_url
 
 
 
@@ -218,6 +257,7 @@ def main():
     }
     manager = None
     process = None
+    created_url = None
     with tempfile.TemporaryDirectory(prefix="iwxa-public-sites-") as temp, (OUT / "native.log").open("wb") as log:
         profile = Path(temp) / "profile"
         profile.mkdir()
@@ -233,7 +273,7 @@ def main():
             env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
             manager = subprocess.Popen(["openbox"], stdout=log, stderr=subprocess.STDOUT)
         try:
-            for stage in ("visit", "restore"):
+            for stage in ("visit", "restore", "readback"):
                 previous_write = session.stat().st_mtime_ns if session.exists() else 0
                 process = subprocess.Popen([str(app)], env=env, cwd=app.parent,
                     stdout=log, stderr=subprocess.STDOUT)
@@ -273,7 +313,7 @@ def main():
                     wait_remote_document("artbazi-public-page")
                     report["checks"]["artbazi_native_document_ready"] = "PASS"
                     report["checks"]["browser_session_before_restart"] = saved["tabs"]
-                else:
+                elif stage == "restore":
                     saved = wait_session(session, lambda state:
                         set(state.get("granted_sites", [])) == {"learn", "artbazi"} and
                         len(state.get("tabs", [])) == 2 and state.get("active") == 1 and
@@ -295,7 +335,7 @@ def main():
                     report["checks"]["artbazi_t2_host_mount"]=(
                         "PASS" if artbazi_probe["result"].get("hostMounted") else "HOLD")
                     screenshot("artbazi-workspace-after-probe")
-                    attempt_artbazi_create(artbazi_probe,report)
+                    created_url=attempt_artbazi_create(artbazi_probe,report,session)
                     report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
 
                     reliable_click(145, 43)  # original Learn tab
@@ -313,6 +353,37 @@ def main():
                         "PASS" if learn_probe["result"].get("hostMounted") else "HOLD")
                     screenshot("learn-workspace-after-probe")
                     report["checks"]["learn_t2_result_readback"] = "UNQUALIFIED"
+                else:  # readback: do not re-create the workspace or change URLs
+                    if not created_url:
+                        raise AssertionError("No created T2 Workspace identity from the user action")
+                    restored=wait_session(session,lambda state:
+                        len(state.get("tabs",[])) == 2 and
+                        set(state.get("granted_sites",[])) == {"learn","artbazi"} and
+                        state["tabs"][1] == created_url,
+                        "same T2 Workspace URL persisted through full Tauri restart")
+                    report["checks"]["artbazi_created_workspace_route_restored"]="PASS"
+                    # The previous stage left Learn active. Re-select the
+                    # previously created ArtBazi workspace through the GUI.
+                    reliable_click(300,43)
+                    wait_session(session,lambda state:
+                        state.get("active") == 1 and state["tabs"][1] == created_url,
+                        "native ArtBazi tab selected after cold restart")
+                    screenshot("artbazi-created-workspace-restored")
+                    deadline=time.monotonic()+65
+                    readback={}
+                    while time.monotonic()<deadline:
+                        readback=request_probe("artbazi")["result"]
+                        if readback.get("workspaceViewError"):
+                            break
+                        if readback.get("workspaceViewMounted"):
+                            break
+                        time.sleep(4)
+                    screenshot("artbazi-created-workspace-after-restart")
+                    if readback.get("workspaceViewError") or not readback.get("workspaceViewMounted"):
+                        raise AssertionError("Same T2 Workspace record not readable after cold restart")
+                    report["checks"]["artbazi_workspace_same_record_readback"]="PASS"
+                    # A Workspace record is not a domain Result or receipt.
+                    report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
                 gui.stop_tree(process)
                 process = None
             report["status"] = "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"

@@ -379,7 +379,7 @@ export default function App() {
         <IconButton label="Dismiss" onClick={() => setError(null)}><X size={15}/></IconButton></div>}
     </main>
     <footer className="statusbar">
-      <span className={"engine-status" + ((view.status.startsWith("Page ready") || view.status.startsWith("Workspace overview rendered")) ? " ready" : "")}>
+      <span className={"engine-status" + ((view.status.startsWith("Page ready") || view.status.startsWith("Workspace ready")) ? " ready" : "")}>
         <span className="dot"/>{view.status}</span><span className="spacer"/>
       <span className="preview-note"><ShieldAlert size={13}/> Preview · two opt-in sites · no downloads</span>
     </footer>

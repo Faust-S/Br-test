@@ -164,6 +164,7 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
     // Inspect the same real DOM that is visible in the window. In particular,
     // detect the actual overview, not only a fragile attribute selector.
     var hostMounted = false, overviewRendered = false, createDialog = false;
+    var workspaceViewMounted = false, workspaceViewError = false;
     var buttons = {};
     var all = document.getElementsByTagName('*');
     for (var n = 0; n < all.length; n++) {
@@ -173,6 +174,11 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
         if (ui === 'workspace') hostMounted = true;
         if (testid === 'overview-view') overviewRendered = true;
         if (testid === 'create-workspace-dialog') createDialog = true;
+        if (testid === 'workspace-view') workspaceViewMounted = true;
+        if (['workspace-record-not-found','workspace-record-unavailable',
+            'workspace-record-error','workspace-profile-error'].includes(testid)) {
+            workspaceViewError = true;
+        }
         if ((testid === 'new-workspace-toggle' || testid === 'create-workspace-confirm')
             && el.getBoundingClientRect) {
             var rect = el.getBoundingClientRect();
@@ -199,6 +205,7 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
     var mains = Array.from(document.querySelectorAll('main'));
     return {scope:'public-workspace',stage:stage,hostMounted:hostMounted,
         overviewRendered:overviewRendered,createDialog:createDialog,
+        workspaceViewMounted:workspaceViewMounted,workspaceViewError:workspaceViewError,
         buttons:buttons,rootChildren:root ? root.children.length : 0,
         mainTextLength:mains.reduce(function(n,element) {
             return n+(element.textContent||'').trim().length;
@@ -869,18 +876,21 @@ impl Controller {
         if self.active.is_none() { return Ok(()); }
         let evaluation = self.page("Runtime.evaluate", json!({
             "expression":r#"(() => {
-                var mounted=false, overview=false;
+                var mounted=false, overview=false, detail=false;
                 if (location.pathname.startsWith('/workspace')) {
                     var nodes=document.getElementsByTagName('*');
                     for (var i=0; i<nodes.length; i++) {
                         var el=nodes[i];
                         if (el.getAttribute('data-t2-ui')==='workspace') mounted=true;
-                        if (el.getAttribute('data-testid')==='overview-view') overview=true;
-                        if (mounted && overview) break;
+                        var id=el.getAttribute('data-testid');
+                        if (id==='overview-view') overview=true;
+                        if (id==='workspace-view') detail=true;
+                        if (mounted && (overview || detail)) break;
                     }
                 }
                 return {url:location.href,title:document.title,
-                    ready:document.readyState,t2Mounted:mounted,t2Overview:overview};
+                    ready:document.readyState,t2Mounted:mounted,
+                    t2Overview:overview,t2Details:detail};
             })()"#,
             "returnByValue":true
         })).await?;
@@ -913,12 +923,12 @@ impl Controller {
         } else if is_preview_workspace(url) {
             // HTML readiness is not T2 readiness. Do not show a green
             // "ready" indicator until the canonical Host actually mounted.
-            if value["t2Mounted"] == true && value["t2Overview"] == true {
-                "Workspace overview rendered".into()
+            if value["t2Overview"] == true {
+                "Workspace ready · overview".into()
+            } else if value["t2Details"] == true {
+                "Workspace ready · record".into()
             } else if value["t2Mounted"] == true {
                 "Workspace Host mounted · loading view".into()
-            } else if value["t2Overview"] == true {
-                "Workspace overview visible · verifying Host".into()
             } else {
                 "Workspace initializing · waiting for UI".into()
             }
