@@ -1,5 +1,10 @@
 name: Public patched Obscura packaged Tauri IndexedDB GUI
 on:
+  push:
+    branches: [work/2026-11-01-public-browser-core]
+    paths:
+      - ".github/workflows/public-browser-patched-bundle.yml"
+      - "browser-lab/tests/packaged_idb_gui.py"
   workflow_dispatch:
 permissions:
   contents: read
