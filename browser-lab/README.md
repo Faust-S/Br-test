@@ -23,7 +23,7 @@ not as a hidden fallback page engine.
 3. Set the environment:
    - `OBSCURA_LAB_BINARY`: absolute native Obscura executable path
    - `OBSCURA_LAB_SHA256`: full verified executable SHA-256
-   - `OBSCURA_LAB_ALLOWED_ORIGINS`: explicit comma-separated HTTPS origins
+   - `OBSCURA_LAB_ALLOWED_ORIGINS`: optional **debug-only** comma-separated HTTPS origins. A normal installed browser starts without this variable; users choose Learn or ArtBazi on the new-tab page.
 4. `cd browser-lab && npm install && npm run tauri:dev`.
 
 The public GUI smoke uses a verified official Obscura v0.2.6 executable, a
@@ -57,12 +57,12 @@ network policy enforcement remain unqualified.
 - Accessibility/IME, downloads, hostile-site networking, DNS rebinding,
   redirects, file upload permission dialogs, app install/update and crash
   cleanup remain unqualified.
-- The **unmodified** upstream Obscura 0.2.6 binary still does not preserve
-  IndexedDB across restart. The open `engine-overrides/obscura-v0.2.6/`
-  patch has passed public Windows/Linux process-restart tests, but this
-  standalone GUI currently loads an explicitly adopted binary and does
-  **not** automatically bundle that patch. No T2 Workspace results or
-  receipts have been qualified; no second canonical database is created.
+- The **unmodified** upstream Obscura 0.2.6 binary does not preserve
+  IndexedDB across restart. A resource-bundled patched-engine build has
+  independently passed Windows/Linux native Tauri full-restart IndexedDB
+  readback. A normal unpatched dev build is **not** equivalent to that candidate.
+  No T2 Workspace results or receipts have been qualified; no second canonical
+  database is created.
 - No Gecko is bundled. No code from any private IWXA repository is included.
 - A green workflow means source compilation and real *fixture* actions,
   **not** general-web, protected T2 or installed-application acceptance.
@@ -130,3 +130,23 @@ reappear while the engine's original IndexedDB profile remains intact.
 The public packaged-GUI scenario now checks that the second Tauri launch
 displays the previously open IndexedDB page *without manually navigating
 again*, then performs a real click and reads the same committed stores.
+
+## No-environment product entry (2026-11-01)
+
+The regular browser no longer requires `OBSCURA_LAB_ALLOWED_ORIGINS`.
+On a fresh profile it shows two explicit user choices:
+`https://learn.iwxa.ru` (Learn) and `https://artbazi.ru` (ArtBazi).
+Choosing either site approves **that exact HTTPS origin only** and opens it
+in the current tab. No wildcard, arbitrary origin, search provider, or
+automatic grant has been introduced.
+
+The existing atomic `browser-tabs-v1.json` gains an optional
+`granted_sites` field containing only compiled-in site IDs. Old sessions
+without that field load safely. Those IDs are revalidated on startup and
+permit the browser to restore its last tabs without environment configuration.
+The options menu lets the user forget site approvals and close tabs.
+Debug-only fixture grants remain separate from persisted site approvals.
+
+This is a restricted preview, not a secure arbitrary-Internet browser.
+Subresource requests, redirects, DNS rebinding, OS process isolation,
+downloads, and full T2 Workspace routes remain outside acceptance.

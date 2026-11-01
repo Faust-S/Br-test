@@ -53,6 +53,8 @@ pub enum Action {
     Boot,
     Restart,
     Capture,
+    OpenSite { site: String },
+    ResetSites,
     NewTab { url: String },
     SelectTab { id: String },
     CloseTab { id: String },
@@ -83,6 +85,8 @@ pub struct View {
     width: u32,
     height: u32,
     status: String,
+    granted_sites: Vec<String>,
+    site_picker_available: bool,
 }
 struct Page {
     tab: Tab,
@@ -98,6 +102,7 @@ pub struct Controller {
     width: u32,
     height: u32,
     allowed: HashSet<String>,
+    granted_sites: HashSet<String>,
     status: String,
     fixture_mode: bool,
     bundle_resource_dir: Option<PathBuf>,
@@ -119,6 +124,7 @@ impl Default for Controller {
             width: 960,
             height: 620,
             allowed: HashSet::new(),
+            granted_sites: HashSet::new(),
             status: "Not started".into(),
             fixture_mode: false,
             bundle_resource_dir: None,
@@ -238,10 +244,11 @@ fn allowed_url(raw: &str, allow: &HashSet<String>, fixture_mode: bool) -> io::Re
     }
     Ok(url.to_string())
 }
-fn grants() -> io::Result<(HashSet<String>, bool)> {
-    let raw = std::env::var("OBSCURA_LAB_ALLOWED_ORIGINS")
-        .map_err(|_| denied("OBSCURA_LAB_ALLOWED_ORIGINS must be set explicitly"))?;
-    let fixture = std::env::var("OBSCURA_LAB_FIXTURE").ok().as_deref() == Some("1");
+fn parse_grants(raw: Option<&str>, fixture: bool) -> io::Result<HashSet<String>> {
+    let Some(raw) = raw else {
+        if fixture { return Err(denied("A fixture requires explicit loopback origin grants")); }
+        return Ok(HashSet::new());
+    };
     let mut origins = HashSet::new();
     for grant in raw.split(',').map(str::trim) {
         let url = Url::parse(grant).map_err(|_| denied("Invalid origin grant"))?;
@@ -256,10 +263,21 @@ fn grants() -> io::Result<(HashSet<String>, bool)> {
         }
         origins.insert(grant.to_owned());
     }
-    if origins.is_empty() {
-        return Err(denied("Empty origin grant"));
+    if origins.is_empty() { return Err(denied("Empty origin grant")); }
+    Ok(origins)
+}
+fn grants() -> io::Result<(HashSet<String>, bool)> {
+    let raw = match std::env::var("OBSCURA_LAB_ALLOWED_ORIGINS") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) =>
+            return Err(denied("Invalid origin grant environment value")),
+    };
+    let fixture = std::env::var("OBSCURA_LAB_FIXTURE").ok().as_deref() == Some("1");
+    if !cfg!(debug_assertions) && (raw.is_some() || fixture) {
+        return Err(denied("Origin environment overrides are debug-only"));
     }
-    Ok((origins, fixture))
+    Ok((parse_grants(raw.as_deref(), fixture)?, fixture))
 }
 impl Controller {
     // URL grants are rechecked every time; a copied session file cannot
@@ -278,6 +296,7 @@ impl Controller {
             version: session::SCHEMA_VERSION,
             active: selected.unwrap_or(0),
             tabs,
+            granted_sites: saved.granted_sites,
         })
     }
 
@@ -286,10 +305,13 @@ impl Controller {
         if self.pages.is_empty() { return Ok(()) };
         let active = self.pages.iter()
             .position(|p| Some(&p.tab.id) == self.active.as_ref()).unwrap_or(0);
+        let mut granted_sites = self.granted_sites.iter().cloned().collect::<Vec<_>>();
+        granted_sites.sort();
         session::write(path, &BrowserSession {
             version: session::SCHEMA_VERSION,
             tabs: self.pages.iter().map(|p| p.tab.url.clone()).collect(),
             active,
+            granted_sites,
         })
     }
 
@@ -325,6 +347,12 @@ impl Controller {
             width: self.width,
             height: self.height,
             status: self.status.clone(),
+            granted_sites: {
+                let mut ids = self.granted_sites.iter().cloned().collect::<Vec<_>>();
+                ids.sort();
+                ids
+            },
+            site_picker_available: !self.fixture_mode,
         }
     }
     fn selected(&self) -> io::Result<&Page> {
@@ -490,8 +518,7 @@ impl Controller {
     async fn start(&mut self) -> io::Result<()> {
         if self.connection.is_some() { return Ok(()); }
         let binary = verify_binary(self.bundle_resource_dir.as_deref())?;
-        let (allow, fixture_mode) = grants()?;
-        self.allowed = allow;
+        let (mut allow, fixture_mode) = grants()?;
         self.fixture_mode = fixture_mode;
         let default_profile = dirs::data_local_dir().ok_or_else(|| denied("Missing local data directory"))?
             .join("ObscuraBrowserLab").join("profile-v1");
@@ -509,6 +536,18 @@ impl Controller {
         } else { default_profile };
         fs::create_dir_all(&profile)?;
         self.browser_session_path = Some(profile.join("browser-tabs-v1.json"));
+        self.granted_sites.clear();
+        if !fixture_mode {
+            if let Some(saved) = self.browser_session_path.as_deref().and_then(session::read) {
+                for id in saved.granted_sites {
+                    if let Some(origin) = session::preview_site_origin(&id) {
+                        self.granted_sites.insert(id);
+                        allow.insert(origin.to_owned());
+                    }
+                }
+            }
+        }
+        self.allowed = allow;
         // No bind-close-rebind race. The engine chooses its port and reports
         // readiness atomically, including its PID.
         let ready_file = profile.join(format!(".obscura-cdp-{}.ready.json", Uuid::new_v4()));
@@ -570,7 +609,7 @@ impl Controller {
             }
             return Err(denied("Obscura process did not accept CDP"));
         }
-        self.status = "Obscura CDP connected · laboratory mode".into();
+        self.status = "Obscura connected · approved sites only".into();
         Ok(())
     }
     async fn restart_owned(&mut self) -> io::Result<()> {
@@ -711,7 +750,7 @@ impl Controller {
     pub async fn execute(&mut self,action:Action)->io::Result<View> {
         let persist = matches!(&action,
             Action::Boot | Action::Restart | Action::NewTab{..} |
-            Action::SelectTab{..} | Action::CloseTab{..} | Action::Navigate{..} |
+            Action::OpenSite{..} | Action::ResetSites | Action::SelectTab{..} | Action::CloseTab{..} | Action::Navigate{..} |
             Action::Back | Action::Forward | Action::Reload);
         match action {
             Action::Boot => {
@@ -734,6 +773,35 @@ impl Controller {
                         return Ok(self.view(frame));
                     }
                     Action::NewTab{url} => self.spawn_tab(url).await?,
+                    Action::OpenSite{site} => {
+                        if self.fixture_mode {
+                            return Err(denied("Public site picker disabled in fixture mode"));
+                        }
+                        let origin = session::preview_site_origin(&site)
+                            .ok_or_else(|| denied("Unknown public preview site"))?;
+                        self.granted_sites.insert(site);
+                        self.allowed.insert(origin.to_owned());
+                        let destination = format!("{origin}/");
+                        if self.active.is_some() { self.navigate(destination).await?; }
+                        else { self.spawn_tab(destination).await?; }
+                    }
+                    Action::ResetSites => {
+                        if self.fixture_mode {
+                            return Err(denied("Public site picker disabled in fixture mode"));
+                        }
+                        self.release_screencast().await;
+                        let targets = self.pages.iter().map(|p| p.target.clone()).collect::<Vec<_>>();
+                        for target in targets {
+                            self.cdp("Target.closeTarget", json!({"targetId":target}), None).await?;
+                        }
+                        self.pages.clear();
+                        self.active = None;
+                        self.granted_sites.clear();
+                        for (_, origin) in session::PREVIEW_SITES {
+                            self.allowed.remove(*origin);
+                        }
+                        self.spawn_tab("about:blank".to_owned()).await?;
+                    }
                     Action::SelectTab{id} => {
                         if !self.pages.iter().any(|p| p.tab.id==id) { return Err(denied("Unknown tab")); }
                         self.release_screencast().await;
@@ -900,6 +968,7 @@ mod tests {
                 "about:blank".into(),
             ],
             active: 1,
+            granted_sites: Vec::new(),
         };
         let safe = c.admitted_session(saved).unwrap();
         assert_eq!(safe.tabs, [
@@ -917,6 +986,7 @@ mod tests {
             version: session::SCHEMA_VERSION,
             tabs: vec!["http://127.0.0.1:9999/".into()],
             active: 0,
+            granted_sites: Vec::new(),
         };
         assert!(c.admitted_session(saved).is_none());
     }
@@ -928,4 +998,24 @@ mod tests {
         assert!(allowed_url("http://127.0.0.1:8080/page",&allow,false).is_err());
         assert!(allowed_url("http://127.0.0.1:8090/page",&allow,true).is_err());
     }
+    #[test]
+    fn no_environment_grants_required_for_normal_browsing() {
+        assert!(parse_grants(None, false).unwrap().is_empty());
+        assert!(parse_grants(None, true).is_err());
+        assert!(parse_grants(Some("http://127.0.0.1:8123"), true).is_ok());
+        assert!(parse_grants(Some("https://learn.iwxa.ru"), true).is_err());
+    }
+    #[test]
+    fn preview_catalog_only_grants_exact_https_origins() {
+        assert_eq!(session::preview_site_origin("learn"), Some("https://learn.iwxa.ru"));
+        assert_eq!(session::preview_site_origin("artbazi"), Some("https://artbazi.ru"));
+        for id in ["www", "https://example.org", "learn.evil", "../learn", ""] {
+            assert!(session::preview_site_origin(id).is_none());
+        }
+        let allowed = HashSet::from(["https://learn.iwxa.ru".to_owned()]);
+        assert!(allowed_url("https://learn.iwxa.ru/workspace", &allowed, false).is_ok());
+        assert!(allowed_url("https://learn.iwxa.ru.evil.example/", &allowed, false).is_err());
+        assert!(allowed_url("https://artbazi.ru/", &allowed, false).is_err());
+    }
+
 }

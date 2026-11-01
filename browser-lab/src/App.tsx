@@ -20,9 +20,13 @@ type View = {
   width: number;
   height: number;
   status: string;
+  granted_sites: string[];
+  site_picker_available: boolean;
 };
 type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "reload" }
   | { type: "new_tab" | "navigate"; url: string }
+  | { type: "open_site"; site: "learn" | "artbazi" }
+  | { type: "reset_sites" }
   | { type: "select_tab" | "close_tab"; id: string }
   | { type: "resize"; width: number; height: number }
   | { type: "click"; x: number; y: number }
@@ -31,7 +35,8 @@ type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "rel
   | { type: "text"; text: string };
 
 const blank: View = {
-  active: null, tabs: [], frame: null, width: 960, height: 620, status: "Engine not started"
+  active: null, tabs: [], frame: null, width: 960, height: 620, status: "Engine not started",
+  granted_sites: [], site_picker_available: false
 };
 const bookmarksKey = "obscura-browser-lab.bookmarks";
 const historyKey = "obscura-browser-lab.history";
@@ -55,7 +60,7 @@ function addressToUrl(value: string): string {
   if (!trimmed) return "about:blank";
   if (/^https?:\/\//i.test(trimmed)) return trimmed;
   if (/^[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:\/.*)?$/i.test(trimmed)) return "https://" + trimmed;
-  return "https://www.mojeek.com/search?q=" + encodeURIComponent(trimmed);
+  return trimmed; // This preview has no general-purpose web search.
 }
 function IconButton(props: {label: string; disabled?: boolean; onClick: () => void; children: React.ReactNode}) {
   return <button className="icon-btn" title={props.label} aria-label={props.label}
@@ -102,7 +107,7 @@ export default function App() {
         }
       }
       if (next.frame && action.type === "capture") setImage("data:image/png;base64," + next.frame);
-      if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload", "restart"].includes(action.type)) setImage("");
+      if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload", "restart", "open_site", "reset_sites"].includes(action.type)) setImage("");
       if (action.type !== "capture" && action.type !== "resize") setError(null);
       if (document.activeElement !== address.current) {
         const tab = next.tabs.find(t => t.id === next.active);
@@ -214,7 +219,7 @@ export default function App() {
           onClick={() => void issue({ type: "navigate", url: "about:blank" })}><Home size={17}/></IconButton>
         <form className="omnibox" onSubmit={visit}>
           <ShieldAlert size={16} aria-hidden="true" className="origin-icon"/>
-          <input aria-label="Address or search" ref={address} placeholder="Search or enter a web address"
+          <input aria-label="Web address" ref={address} placeholder="Enter an approved HTTPS address"
             value={input} onChange={e => setInput(e.target.value)} autoComplete="off" spellCheck={false}/>
           <button type="submit" title="Open address" className="go-button">Go</button>
         </form>
@@ -230,7 +235,11 @@ export default function App() {
             <button role="menuitem" type="button" onClick={() => {setToolsOpen(false);void issue({type:"restart"});}}>
               <RotateCcw size={16}/> Restart web engine
             </button>
-            <p>Sites run in Obscura. This preview currently opens only approved addresses.</p>
+            {view.granted_sites.length > 0 && <button role="menuitem" type="button"
+              onClick={() => {setToolsOpen(false);void issue({type:"reset_sites"});}}>
+              <ShieldAlert size={16}/> Forget site approvals and close tabs
+            </button>}
+            <p>Only approved Learn and ArtBazi origins are available. General Internet access is disabled.</p>
           </div>}
         </div>
       </div>
@@ -247,14 +256,27 @@ export default function App() {
             <div className="start-emblem" aria-hidden="true">i</div>
             <div className="start-eyebrow">IWXA BROWSER / OPEN PREVIEW</div>
             <h1>Where would you like to go?</h1>
-            <p className="start-copy">A focused browser powered by Obscura. Start with an address or search.</p>
+            <p className="start-copy">Choose a trusted IWXA site to begin. General web access is not enabled in this preview.</p>
             <form className="start-search" onSubmit={visit}>
               <Search size={21} aria-hidden="true"/>
-              <input aria-label="Search or enter a web address" placeholder="Search or enter a web address"
+              <input aria-label="Web address" placeholder="Enter an approved HTTPS address"
                 value={input} onChange={e => setInput(e.target.value)} autoComplete="off" spellCheck={false}/>
               <button type="submit">Open</button>
             </form>
-            <div className="start-hint"><ShieldAlert size={15}/> This experimental build permits approved sites only.</div>
+            {view.site_picker_available && <div className="site-picker" aria-label="Available preview sites">
+              <div className="site-picker-label">Available sites · choose to approve and open</div>
+              <div className="site-choices">
+                <button type="button" className="site-choice" onClick={() => void issue({type:"open_site",site:"learn"})}>
+                  <strong>Learn</strong><span>Learning, practice and Workspace</span>
+                  <small>learn.iwxa.ru {view.granted_sites.includes("learn") ? "· approved" : "· approve and open"}</small>
+                </button>
+                <button type="button" className="site-choice" onClick={() => void issue({type:"open_site",site:"artbazi"})}>
+                  <strong>ArtBazi</strong><span>Marketing, sales and Workspace</span>
+                  <small>artbazi.ru {view.granted_sites.includes("artbazi") ? "· approved" : "· approve and open"}</small>
+                </button>
+              </div>
+            </div>}
+            <div className="start-hint"><ShieldAlert size={15}/> Only exact approved HTTPS sites; this is not a secure general-purpose browser.</div>
             <div className="start-shortcuts"><span><kbd>Ctrl</kbd> + <kbd>L</kbd> Address</span><span><kbd>Ctrl</kbd> + <kbd>T</kbd> New tab</span></div>
           </div>
         </section>}
@@ -277,7 +299,7 @@ export default function App() {
     </main>
     <footer className="statusbar">
       <span className="engine-status"><span className="dot"/>{view.status}</span><span className="spacer"/>
-      <span className="preview-note"><ShieldAlert size={13}/> Preview · restricted sites · no downloads</span>
+      <span className="preview-note"><ShieldAlert size={13}/> Preview · two opt-in sites · no downloads</span>
     </footer>
   </div>;
 }

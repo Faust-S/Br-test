@@ -12,11 +12,33 @@ const MAX_BYTES: usize = 64 * 1024;
 const MAX_TABS: usize = 10;
 pub(crate) const SCHEMA_VERSION: u8 = 1;
 
+pub(crate) const PREVIEW_SITES: &[(&str, &str)] = &[
+    ("learn", "https://learn.iwxa.ru"),
+    ("artbazi", "https://artbazi.ru"),
+];
+
+pub(crate) fn preview_site_origin(id: &str) -> Option<&'static str> {
+    PREVIEW_SITES.iter().find(|(key, _)| *key == id).map(|(_, origin)| *origin)
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct BrowserSession {
     pub version: u8,
     pub tabs: Vec<String>,
     pub active: usize,
+    #[serde(default)]
+    pub granted_sites: Vec<String>,
+}
+
+fn valid_session(saved: &BrowserSession) -> bool {
+    saved.version == SCHEMA_VERSION &&
+        !saved.tabs.is_empty() && saved.tabs.len() <= MAX_TABS &&
+        saved.active < saved.tabs.len() &&
+        saved.tabs.iter().all(|url| url.len() <= 4096) &&
+        saved.granted_sites.len() <= PREVIEW_SITES.len() &&
+        saved.granted_sites.iter().enumerate().all(|(index, id)|
+            preview_site_origin(id).is_some() &&
+            !saved.granted_sites[..index].contains(id))
 }
 
 pub(crate) fn read(path: &Path) -> Option<BrowserSession> {
@@ -29,19 +51,12 @@ pub(crate) fn read(path: &Path) -> Option<BrowserSession> {
     let bytes = fs::read(path).ok()?;
     if bytes.len() > MAX_BYTES { return None; }
     let saved: BrowserSession = serde_json::from_slice(&bytes).ok()?;
-    if saved.version != SCHEMA_VERSION ||
-        saved.tabs.is_empty() || saved.tabs.len() > MAX_TABS ||
-        saved.active >= saved.tabs.len() ||
-        saved.tabs.iter().any(|url| url.len() > 4096) {
-        return None;
-    }
+    if !valid_session(&saved) { return None; }
     Some(saved)
 }
 
 pub(crate) fn write(path: &Path, saved: &BrowserSession) -> io::Result<()> {
-    if saved.version != SCHEMA_VERSION || saved.tabs.is_empty() ||
-        saved.tabs.len() > MAX_TABS || saved.active >= saved.tabs.len() ||
-        saved.tabs.iter().any(|url| url.len() > 4096) {
+    if !valid_session(saved) {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Invalid browser session"));
     }
     let bytes = serde_json::to_vec(saved)
@@ -89,11 +104,13 @@ mod tests {
             version: SCHEMA_VERSION,
             tabs: vec!["about:blank".into(), "https://example.org/".into()],
             active: 1,
+            granted_sites: vec!["learn".into()],
         };
         write(&file, &before).unwrap();
         assert_eq!(read(&file), Some(before));
         let after = BrowserSession {
-            version: SCHEMA_VERSION, tabs: vec!["about:blank".into()], active: 0
+            version: SCHEMA_VERSION, tabs: vec!["about:blank".into()], active: 0,
+            granted_sites: Vec::new()
         };
         write(&file, &after).unwrap();
         assert_eq!(read(&file), Some(after));
@@ -111,9 +128,28 @@ mod tests {
         fs::write(&file, vec![b'a'; MAX_BYTES + 1]).unwrap();
         assert!(read(&file).is_none());
         let incompatible = BrowserSession {
-            version: 255, tabs: vec!["about:blank".into()], active: 0
+            version: 255, tabs: vec!["about:blank".into()], active: 0,
+            granted_sites: Vec::new()
         };
         assert!(write(&file, &incompatible).is_err());
         fs::remove_dir_all(root).unwrap();
     }
+    #[test]
+    fn old_files_are_readable_and_unlisted_sites_cannot_be_persisted() {
+        let root = std::env::temp_dir().join(format!("iwxa-grants-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("browser-tabs-v1.json");
+        fs::write(&file, r#"{"version":1,"tabs":["about:blank"],"active":0}"#).unwrap();
+        let mut saved = read(&file).unwrap();
+        assert!(saved.granted_sites.is_empty());
+        saved.granted_sites = vec!["https://unknown.example".into()];
+        assert!(write(&file, &saved).is_err());
+        saved.granted_sites = vec!["learn".into(), "learn".into()];
+        assert!(write(&file, &saved).is_err());
+        saved.granted_sites = vec!["artbazi".into()];
+        write(&file, &saved).unwrap();
+        assert_eq!(read(&file).unwrap().granted_sites, vec!["artbazi"]);
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }
