@@ -1,0 +1,90 @@
+name: Public patched Obscura packaged Tauri IndexedDB GUI
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: public-bundled-idb-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  packaged-restart:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 70
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: h4ckf0r0day/obscura
+          ref: 8534b401898ed17b62f69bdc3d5eb186bffb0d60
+          path: upstream
+          persist-credentials: false
+      - name: Install native dependencies Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev librsvg2-dev libayatana-appindicator3-dev libgtk-3-0 libgl1 libegl1 libfontconfig1 libdbus-1-3 libasound2t64 libgstreamer1.0-0 libgstreamer-plugins-base1.0-0 libgstreamer-plugins-bad1.0-0 xvfb xdotool openbox imagemagick
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            upstream
+            browser-lab/src-tauri
+          key: patched-engine-tauri
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify pinned source and apply public IndexedDB fixes
+        shell: bash
+        run: |
+          test "$(cd upstream && git rev-parse HEAD)" = "8534b401898ed17b62f69bdc3d5eb186bffb0d60"
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/indexed_db.rs upstream/crates/obscura-js/src/indexed_db.rs
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-browser/src/context.rs upstream/crates/obscura-browser/src/context.rs
+      - name: Compile modified native Obscura with renderer
+        run: cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
+      - name: Stage patched executable and its identity as Tauri resource
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export OBSCURA_PATCHED_BINARY="$GITHUB_WORKSPACE/upstream/target/debug/obscura.exe"
+          else
+            export OBSCURA_PATCHED_BINARY="$GITHUB_WORKSPACE/upstream/target/debug/obscura"
+          fi
+          python browser-lab/scripts/stage_patched_engine.py
+          printf 'OBSCURA_PATCHED_BINARY=%s\n' "$OBSCURA_PATCHED_BINARY" >> "$GITHUB_ENV"
+      - name: Compile standalone Tauri with embedded frontend and pinned Obscura
+        shell: bash
+        run: |
+          cd browser-lab
+          npm install --no-audit --no-fund
+          npx tauri build --debug --no-bundle --config src-tauri/tauri.patched.conf.json
+      - name: Install real GUI interaction dependencies
+        shell: bash
+        run: |
+          python -m pip install Pillow==11.3.0 psutil==7.0.0
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            python -m pip install pyautogui==0.9.54
+          fi
+      - name: Real GUI IndexedDB writes and readback after full app restart
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab.exe"
+            python browser-lab/tests/packaged_idb_gui.py
+          else
+            export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"
+            xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/packaged_idb_gui.py
+          fi
+      - name: Upload packaged GUI screenshots and readback report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bundled-idb-gui-${{ matrix.os }}
+          path: artifacts/browser-lab/patched-gui/
+          retention-days: 7
