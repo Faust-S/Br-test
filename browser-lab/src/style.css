@@ -1,0 +1,54 @@
+:root {
+  font: 13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;
+  color:#1b2e48;background:#eaf0f8;font-synthesis:none;
+}
+* {box-sizing:border-box}
+html,body,#root{height:100%;margin:0;overflow:hidden}
+button,input{font:inherit} button{cursor:pointer;color:inherit}button:disabled{cursor:not-allowed;opacity:.45}
+button:focus-visible,input:focus-visible,.interactive-frame:focus-visible{outline:2px solid #2476da;outline-offset:-2px}
+.browser-shell{height:100%;display:flex;flex-direction:column;min-width:0}
+header{background:#e2eaf5;box-shadow:0 2px 10px #162e4518;z-index:2;flex:none}
+.tab-strip,.toolbar{min-height:43px;display:flex;align-items:center;padding:4px 9px;gap:5px}
+.tab-strip{padding-bottom:0}
+.brand{margin:0 12px 0 8px;white-space:nowrap;font-size:16px;letter-spacing:-.5px}
+.brand small{font-size:10px;color:#59728c;font-weight:500;letter-spacing:0}
+.tab-list{display:flex;flex:1;min-width:0;gap:4px;overflow-x:auto;scrollbar-width:thin}
+.tab{min-width:120px;max-width:240px;flex:0 1 225px;display:flex;align-items:center;height:34px;border-radius:10px 10px 0 0;border:1px solid #b5c8df;border-bottom:0;background:#d4e0f0}
+.tab.active{background:#fff}
+.tab-select{display:flex;align-items:center;gap:7px;min-width:0;flex:1;height:31px;border:0;background:transparent;text-align:left;padding:0 4px 0 12px}
+.tab-select span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.icon-btn{display:inline-grid;place-items:center;width:33px;height:32px;flex:none;border:0;border-radius:8px;background:transparent}
+.icon-btn:hover:not(:disabled){background:#759bc52b}
+.toolbar{background:#fff;border-bottom:1px solid #c5d4e5;gap:3px;padding:7px}
+.omnibox{display:flex;align-items:center;gap:9px;flex:1;min-width:110px;height:36px;background:#f0f4fa;border:1px solid #c3d1e2;border-radius:20px;padding:0 9px 0 13px;color:#627d9f}
+.omnibox:focus-within{border-color:#6098df;background:white}
+.omnibox input{flex:1;min-width:0;border:0;background:transparent;outline:0;color:#203956}
+.omnibox button{border:0;border-radius:14px;background:#d9e8fa;color:#285d9b;font-weight:600;padding:5px 10px}
+main{flex:1;min-height:0;display:flex;position:relative}
+.page{flex:1;min-width:0;min-height:0;overflow:hidden;background:#fff}
+.interactive-frame{height:100%;width:100%;overflow:hidden}
+.interactive-frame img{width:100%;height:100%;pointer-events:none;user-select:none;display:block}
+.empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:25px;color:#425b78}
+.empty h1{margin:7px 0;font-size:24px;color:#203650}
+.empty p{max-width:570px;margin:5px 0}
+.logo{font-size:56px;color:#2d7bd0}
+.drawer{width:min(320px,45%);border-left:1px solid #cfdaeb;background:#f8faff;overflow:auto}
+.drawer-title{padding:10px 14px;display:flex;justify-content:space-between;align-items:center;font-weight:700;border-bottom:1px solid #dbe4f1}
+.drawer p{padding:10px 14px;color:#6e829b}
+.bookmark-entry{width:100%;border:0;background:transparent;padding:13px;text-align:left;overflow-wrap:anywhere}
+.bookmark-entry:hover{background:#e8f1fb}
+.error{position:absolute;z-index:4;top:12px;left:50%;transform:translateX(-50%);max-width:calc(100% - 22px);width:660px;display:flex;align-items:center;gap:9px;background:#fff0f0;border:1px solid #e9b2b2;color:#8d2b3d;padding:10px;border-radius:10px;box-shadow:0 8px 30px #1a2a4e33}
+.error span{flex:1;overflow-wrap:anywhere}
+footer{min-height:28px;background:#e2eaf5;border-top:1px solid #c5d4e5;color:#556b84;font-size:11px;padding:5px 12px;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.dot{height:7px;width:7px;border-radius:50%;background:#e6a846}
+.spacer{flex:1}
+@media(max-width:720px){.brand small{display:none}.tab{min-width:98px}.toolbar{gap:0}.toolbar .icon-btn{width:29px}footer>span:last-child{display:none}}
+@media(prefers-color-scheme:dark){
+  :root{background:#0e1c30;color:#edf5ff}
+  header,footer{background:#23364f;color:#bdcce0}
+  .tab{background:#2a415d;border-color:#536c8c}.tab.active,.toolbar{background:#14253b;color:#eaf4ff}
+  .omnibox{background:#243852;border-color:#4c6486;color:#c0d0e2}
+  .omnibox input{color:#edf5ff}.omnibox:focus-within{background:#314a6b}
+  .page,.empty{background:#152238;color:#c6d7eb}.empty h1{color:#edf5ff}
+  .drawer{background:#172942;color:#eff6ff}.bookmark-entry:hover{background:#304760}
+}
