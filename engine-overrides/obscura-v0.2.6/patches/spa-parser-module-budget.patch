@@ -1,0 +1,18 @@
+diff --git a/crates/obscura-browser/src/page.rs b/crates/obscura-browser/src/page.rs
+--- a/crates/obscura-browser/src/page.rs
++++ b/crates/obscura-browser/src/page.rs
+@@ -2704,13 +2704,13 @@
+                 })
+                 .unwrap_or(0);
+             let short_ms: u64 = module_budget_override.unwrap_or_else(|| {
+                 std::env::var("OBSCURA_MODULE_BUDGET_MS")
+                     .ok()
+                     .and_then(|s| s.parse().ok())
+-                    .unwrap_or(3_000)
++                    .unwrap_or(15_000)
+             });
+             // A rendered body has hundreds of descendants; an unmounted Vite/Next
+             // shell is <root> plus maybe a spinner.
+             if module_budget_override.is_some() || body_nodes > 50 {
+                 short_ms
+             } else {

@@ -269,6 +269,9 @@ def main():
         # DEBUG-only, local profile under test control; no fixture network
         # privileges and no origin grants are injected through the environment.
         env["OBSCURA_LAB_PROFILE_DIR"] = str(profile)
+        # Only this fresh public-page CI profile: expose upstream module
+        # preparation/evaluation warnings in the existing GUI artifact.
+        env["RUST_LOG"] = "obscura_browser::page=warn,obscura_js=warn"
         if not gui.WINDOWS:
             env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
             manager = subprocess.Popen(["openbox"], stdout=log, stderr=subprocess.STDOUT)

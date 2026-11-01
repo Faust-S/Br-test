@@ -31,3 +31,20 @@ The third overridden source file is Apache-2.0 upstream
 `8534b401898ed17b62f69bdc3d5eb186bffb0d60`. The small retry
 changes are part of the IWXA public engine experiment and are not endorsed
 by upstream.
+
+## Parser ES-module budget for prerendered SPA shells
+
+Pinned upstream `crates/obscura-browser/src/page.rs` treats a document with
+more than 50 pre-existing HTML descendants as **already rendered** and gives
+its parser-discovered modules only 3 seconds by default. That classification
+is unsafe for site-owned prerendered chrome with an unmounted React/T2 Host:
+the nav and footer exist but the module is still essential to the page.
+Our public patch changes only the **default** short parser-module budget from
+3,000 to 15,000 ms, retaining the unchanged 30,000 ms global script deadline,
+the existing 3,000 ms behavior when a user explicitly sets that value via
+`OBSCURA_MODULE_BUDGET_MS`, and all per-module watchdogs. A successful
+module incurs no extra work. No new process, renderer or storage is added.
+
+This is a bounded compatibility candidate, not T2 acceptance. Source is
+the same pinned upstream Obscura Apache-2.0; patch is distributed in the
+public repository and is applied with `git apply --check` before compilation.

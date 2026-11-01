@@ -379,3 +379,19 @@ native engine with IndexedDB persistence, then attempts the real ArtBazi
 creation/readback route. The retry is **not** considered proof of T2
 compatibility until the actual React Overview mounts and a workspace record
 survives full restart.
+
+## Pre-rendered chrome versus necessary React modules
+
+The upstream engine's parser-script classifier grants just 3 seconds to
+ES modules when a page's HTML already contains more than 50 nodes. On
+ArtBazi the site-owned header, navigation and footer can satisfy this
+heuristic even while the independent T2 Host has not mounted. The pinned
+public engine now gets a bounded **15-second** default module budget for
+such already-populated documents, never exceeding the existing page-wide
+30-second script deadline. Successful modules do not spend extra time.
+The same bundled Windows/Linux CI performs the real user route.
+
+The existing fresh-profile Linux GUI artifact now captures the engine's
+warn-level module failures, if any; no additional workflow, separate
+browser or user data source is introduced. The ArtBazi T2 Workspace
+creation/readback gate remains HOLD until its real native route succeeds.
