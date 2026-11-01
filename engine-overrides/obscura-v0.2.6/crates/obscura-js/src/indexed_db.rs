@@ -137,7 +137,8 @@ fn persist_durable(
                 schema:db.schema.clone(), records:db.records.clone(),
             });
         }
-        let data = serde_json::to_vec(&DurableSnapshot{format:1,databases:all})?;
+        let data = serde_json::to_vec(&DurableSnapshot{format:1,databases:all})
+            .map_err(io::Error::other)?;
         if data.len() as u64 > SNAPSHOT_SIZE_LIMIT {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "IndexedDB snapshot too large"));
         }
