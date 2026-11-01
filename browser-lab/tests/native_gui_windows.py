@@ -216,6 +216,11 @@ def main():
             pyautogui.write("PUBLIC-WINDOWS",interval=.06)
             wait_event("typed","one","PUBLIC-WINDOWS",count)
             report["checks"]["text_readback"]="PASS"
+            count=len(EVENTS)
+            pyautogui.hotkey("ctrl","a")
+            pyautogui.write("PUBLIC-EDIT",interval=.06)
+            wait_event("typed","one","PUBLIC-EDIT",count)
+            report["checks"]["native_field_select_all_and_replace"]="PASS"
             pyautogui.hotkey("ctrl","t")
             time.sleep(.7)
             type_url(origin+"/browser-lab/fixtures/gui-smoke.html?tab=two")

@@ -233,14 +233,22 @@ export default function App() {
     });
   }
   function keys(e: ReactKeyEvent<HTMLDivElement>) {
-    if (composing.current || e.nativeEvent.isComposing || e.ctrlKey || e.metaKey) return;
-    // The webpage is an image-backed interactive surface. Tab/Shift+Tab
-    // must reach the remote document; otherwise forms cannot be traversed.
+    if (composing.current || e.nativeEvent.isComposing) return;
+    const modified = e.ctrlKey || e.metaKey;
+    const lower = e.key.toLowerCase();
+    // Chrome shortcuts belong to the shell, not the screenshot-backed page.
+    // Everything else, including Ctrl+A for fields, is a webpage key.
+    if ((modified && !e.altKey && ["l", "t", "w", "r"].includes(lower)) ||
+        (e.altKey && !modified && ["ArrowLeft", "ArrowRight"].includes(e.key)) ||
+        (modified && e.altKey && e.shiftKey && lower === "e")) return;
     e.preventDefault();
-    if (e.key.length === 1) void issue({ type: "text", text: e.key });
-    else void issue({ type: "key", key: e.key, code: e.code, modifiers:
-      (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0)
-    });
+    if (e.key.length === 1 && !modified && !e.altKey) {
+      void issue({ type: "text", text: e.key });
+    } else {
+      void issue({ type: "key", key: e.key, code: e.code, modifiers:
+        (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0)
+      });
+    }
   }
   return <div className="browser-shell">
     <header>

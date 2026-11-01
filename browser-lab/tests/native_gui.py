@@ -130,6 +130,9 @@ def main():
             n=len(EVENTS);click(green);type_text("PUBLIC-GUI")
             await_event("typed","one","PUBLIC-GUI",n)
             report["checks"]["real_keyboard_input"]="PASS"
+            n=len(EVENTS);key("ctrl+a");type_text("PUBLIC-EDIT")
+            await_event("typed","one","PUBLIC-EDIT",n)
+            report["checks"]["native_field_select_all_and_replace"]="PASS"
             key("ctrl+t");time.sleep(.6);key("ctrl+l")
             type_text(origin+"/browser-lab/fixtures/gui-smoke.html?tab=two");key("Return")
             blue=find_color((33,106,202),"second-tab")

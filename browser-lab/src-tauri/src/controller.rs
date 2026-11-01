@@ -150,6 +150,74 @@ impl Drop for Controller {
 fn denied(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message.to_owned())
 }
+
+const TAB_FOCUS_JS: &str = r#"(function(reverse) {
+    var nodes = Array.from(document.querySelectorAll(
+        'a[href],area[href],button,input,select,textarea,[tabindex]'));
+    nodes = nodes.filter(function(el) {
+        if (el.disabled || el.hidden || el.getAttribute('aria-hidden') === 'true') return false;
+        if (el.tabIndex < 0) return false;
+        if (el.closest && el.closest('[inert]')) return false;
+        try {
+            var style = getComputedStyle(el);
+            if (style.display === 'none' || style.visibility === 'hidden' ||
+                style.visibility === 'collapse') return false;
+        } catch (_) {}
+        return true;
+    });
+    if (!nodes.length) return false;
+    // Positive tabindex precedes normal DOM order, per browser tab traversal.
+    var ordered = nodes.map(function(el, order) { return {el:el, order:order}; });
+    ordered.sort(function(a,b) {
+        var at = a.el.tabIndex, bt = b.el.tabIndex;
+        if (at === 0 && bt > 0) return 1;
+        if (at > 0 && bt === 0) return -1;
+        if (at > 0 && bt > 0 && at !== bt) return at - bt;
+        return a.order - b.order;
+    });
+    var active = document.activeElement;
+    var index = ordered.findIndex(function(item) { return item.el === active; });
+    var next = index < 0 ? (reverse ? ordered.length - 1 : 0) :
+        (index + (reverse ? -1 : 1) + ordered.length) % ordered.length;
+    ordered[next].el.focus();
+    return true;
+})"#;
+
+const SELECT_FOCUSED_TEXT_JS: &str = r#"(function() {
+    var active = document.activeElement;
+    if (!active) return false;
+    var tag = (active.tagName || '').toUpperCase();
+    if ((tag === 'INPUT' || tag === 'TEXTAREA') &&
+        typeof active.setSelectionRange === 'function' &&
+        !active.disabled) {
+        try { active.setSelectionRange(0, (active.value || '').length); return true; }
+        catch (_) { return false; }
+    }
+    if (active.isContentEditable && globalThis.getSelection &&
+        document.createRange) {
+        var sel = globalThis.getSelection();
+        var range = document.createRange();
+        range.selectNodeContents(active);
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return true;
+    }
+    return false;
+})()"#;
+
+fn editing_key_default(key: &str, modifiers: u8) -> Option<String> {
+    // A native GUI text event is a user action, not a webpage-to-Host command.
+    // Obscura 0.2.6 synthesizes keydown/keyup but does not implement the
+    // browser's default focus traversal or select-all behavior.
+    if key == "Tab" && modifiers & !8 == 0 {
+        return Some(format!("{}({})", TAB_FOCUS_JS, modifiers & 8 != 0));
+    }
+    if key.eq_ignore_ascii_case("a") && modifiers & 6 != 0 && modifiers & !14 == 0 {
+        return Some(SELECT_FOCUSED_TEXT_JS.to_owned());
+    }
+    None
+}
+
 fn fresh_cdp_token() -> String {
     // 244 bits of OS-backed randomness via two UUID v4 values. The token is
     // engine-process-local, never stored in the browser profile or argv.
@@ -945,6 +1013,14 @@ impl Controller {
                                 "type":t,"key":key,"code":code,"modifiers":modifiers
                             })).await?;
                         }
+                        if let Some(script) = editing_key_default(&key, modifiers) {
+                            // Read-only desktop key events alone do not move
+                            // focus in upstream Obscura. Apply precisely the
+                            // missing user-requested default on that page.
+                            self.page("Runtime.evaluate", json!({
+                                "expression":script,"returnByValue":false
+                            })).await?;
+                        }
                     }
                     Action::Text{text} => {
                         if text.chars().count()>256 { return Err(denied("Text too long")); }
@@ -973,6 +1049,16 @@ mod tests {
         assert!(verified_digest(&file, &"0".repeat(64)).is_err());
         assert!(verified_digest(&file, "short").is_err());
         fs::remove_file(file).unwrap();
+    }
+    #[test]
+    fn editing_shortcuts_restrict_native_default_actions() {
+        assert!(editing_key_default("Tab", 0).unwrap().ends_with("(false)"));
+        assert!(editing_key_default("Tab", 8).unwrap().ends_with("(true)"));
+        assert!(editing_key_default("a", 2).is_some());
+        assert!(editing_key_default("A", 4).is_some());
+        for (key,modifiers) in [("Tab", 2),("Tab", 1),("a", 0),("a", 1),("l", 2)] {
+            assert!(editing_key_default(key, modifiers).is_none());
+        }
     }
     #[test]
     fn cdp_screencast_rejects_wrong_session_and_oversized_frames() {

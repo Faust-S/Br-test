@@ -251,3 +251,21 @@ The native GUI probe now uses non-blocking X11 pointer movement followed by
 the same real mouse click. It still requires session persistence, exact
 approved origins and real document-ready evidence. T2 Result writes and
 readback remain unqualified.
+
+## Workspace form keyboard defaults
+
+Upstream Obscura v0.2.6 emits keydown/keyup but omits browser-native
+Tab/Shift+Tab focus traversal and Ctrl+A selection defaults. The browser's
+existing native controller now applies those limited actions to the **active
+site document** on the user's explicit key press. Tab navigation respects
+visible and enabled focusable controls and positive tabindex order. Ctrl+A
+selects the contents of an editable input, textarea or contenteditable only.
+Browser-owned shortcuts (Ctrl+L/T/W/R, Alt+Left/Right and engine restart)
+remain reserved; all other modifier keys reach the website rather than
+being silently dropped. This does not claim full OS clipboard, IME, shadow-DOM
+focus order or accessibility qualification.
+
+The already existing Windows and Linux native GUI smoke performs ordinary
+typing in a real Obscura input, then selects and replaces the text using
+Ctrl+A, and requires the real HTTP readback for the resulting value. No
+second renderer or additional workflow is introduced.
