@@ -60,7 +60,7 @@ def window_handle():
         length=user.GetWindowTextLengthW(hwnd)
         buf=ctypes.create_unicode_buffer(length+1)
         user.GetWindowTextW(hwnd,buf,len(buf))
-        if "Obscura Browser Lab" in buf.value and user.IsWindowVisible(hwnd):
+        if "IWXA Browser Preview" in buf.value and user.IsWindowVisible(hwnd):
             result.append(hwnd)
         return True
     callback_ref=callback(visit)

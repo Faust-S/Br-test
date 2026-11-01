@@ -68,3 +68,7 @@ network policy enforcement remain unqualified.
   **not** general-web, protected T2 or installed-application acceptance.
 
 Developer branch: `work/2026-11-01-public-browser-core`.
+
+## Browser chrome design (public preview)
+
+The chrome is now labelled **IWXA Browser Preview** (public code, no private IWXA components): familiar horizontal tabs, unobtrusive address bar, start page with the same search input, lightweight history and bookmarks, and a technical restart action behind the options menu. The browser retains its explicit origin restrictions; the UI must not claim that general Internet browsing is sandboxed or approved. Real Linux/Windows GUI screenshots are captured by the existing workflows.

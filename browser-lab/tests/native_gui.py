@@ -93,7 +93,7 @@ def main():
             until=time.monotonic()+80;wid=None
             while time.monotonic()<until:
                 if procs[-1].poll() is not None:raise RuntimeError("Tauri exited "+str(procs[-1].returncode))
-                result=cmd("xdotool","search","--onlyvisible","--name","Obscura Browser Lab",check=False)
+                result=cmd("xdotool","search","--onlyvisible","--name","IWXA Browser Preview",check=False)
                 if result.returncode==0 and result.stdout.strip():wid=result.stdout.splitlines()[-1];break
                 time.sleep(.4)
             if wid is None:raise AssertionError("Tauri window never appeared")

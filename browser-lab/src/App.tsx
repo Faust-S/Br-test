@@ -3,7 +3,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyEvent, MouseEvent, WheelEvent 
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft, ArrowRight, Bookmark, BookOpen, Clock3, Globe2, Home, Plus,
-  RefreshCw, RotateCcw, Search, ShieldAlert, X
+  MoreHorizontal, RefreshCw, RotateCcw, Search, ShieldAlert, X
 } from "lucide-react";
 
 type Tab = {
@@ -70,6 +70,7 @@ export default function App() {
   const [bookmarks, setBookmarks] = useState(stored);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [history, setHistory] = useState(storedHistory);
   const lastObservedVisit = useRef("");
   const queue = useRef<Promise<unknown>>(Promise.resolve());
@@ -186,7 +187,10 @@ export default function App() {
   return <div className="browser-shell">
     <header>
       <div className="tab-strip">
-        <strong className="brand">Obscura <small>Browser Lab</small></strong>
+        <div className="brand" aria-label="IWXA Browser Preview">
+          <span className="brand-mark" aria-hidden="true">i</span>
+          <span className="brand-name">IWXA<small>BROWSER</small></span>
+        </div>
         <div role="tablist" aria-label="Tabs" className="tab-list">
           {view.tabs.map(tab => <div key={tab.id} className={"tab" + (tab.id === view.active ? " active" : "")}>
             <button className="tab-select" role="tab" aria-selected={tab.id === view.active}
@@ -197,7 +201,7 @@ export default function App() {
           </div>)}
         </div>
         <IconButton label="New tab (Ctrl+T)" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Plus size={17}/></IconButton>
-        <IconButton label="Restart owned engine (Ctrl+Alt+Shift+E) and restore tabs" onClick={() => void issue({ type: "restart" })}><RotateCcw size={16}/></IconButton>
+        <div className="preview-label">PREVIEW</div>
       </div>
       <div className="toolbar">
         <IconButton label="Back (Alt+Left)" disabled={!active?.back} onClick={() => void issue({ type: "back" })}><ArrowLeft size={18}/></IconButton>
@@ -205,31 +209,51 @@ export default function App() {
         <IconButton label="Reload (Ctrl+R)" disabled={!active} onClick={() => void issue({ type: "reload" })}><RefreshCw size={17}/></IconButton>
         <IconButton label="New blank tab" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Home size={17}/></IconButton>
         <form className="omnibox" onSubmit={visit}>
-          <Search size={16} aria-hidden="true"/>
-          <input aria-label="Address or search" ref={address} placeholder="Address or search · allowlisted origins only"
+          <ShieldAlert size={16} aria-hidden="true" className="origin-icon"/>
+          <input aria-label="Address or search" ref={address} placeholder="Search or enter a web address"
             value={input} onChange={e => setInput(e.target.value)} autoComplete="off" spellCheck={false}/>
-          <button type="submit" title="Go">Go</button>
+          <button type="submit" title="Open address" className="go-button">Go</button>
         </form>
         <IconButton label={saved ? "Remove bookmark" : "Bookmark"} disabled={!active || active.url === "about:blank"}
           onClick={() => active && setBookmarks(prev => saved ? prev.filter(x => x !== active.url) : [active.url, ...prev].slice(0, 100))}>
           <Bookmark size={17} fill={saved ? "currentColor" : "none"}/></IconButton>
-        <IconButton label="Bookmarks" onClick={() => {setHistoryOpen(false);setBookmarksOpen(x => !x);}}><BookOpen size={18}/></IconButton>
-        <IconButton label="History" onClick={() => {setBookmarksOpen(false);setHistoryOpen(x => !x);}}><Clock3 size={18}/></IconButton>
+        <IconButton label="Bookmarks" onClick={() => {setHistoryOpen(false);setToolsOpen(false);setBookmarksOpen(x => !x);}}><BookOpen size={18}/></IconButton>
+        <IconButton label="History" onClick={() => {setBookmarksOpen(false);setToolsOpen(false);setHistoryOpen(x => !x);}}><Clock3 size={18}/></IconButton>
+        <div className="more-wrapper">
+          <IconButton label="Browser options" onClick={() => {setBookmarksOpen(false);setHistoryOpen(false);setToolsOpen(x => !x);}}><MoreHorizontal size={20}/></IconButton>
+          {toolsOpen && <div className="more-menu" role="menu" aria-label="Browser options">
+            <div className="more-menu-title">Browser controls</div>
+            <button role="menuitem" type="button" onClick={() => {setToolsOpen(false);void issue({type:"restart"});}}>
+              <RotateCcw size={16}/> Restart web engine
+            </button>
+            <p>Sites run in Obscura. This preview currently opens only approved addresses.</p>
+          </div>}
+        </div>
       </div>
     </header>
     <main>
       <div className="page" ref={surface}>
-        {image && active ? <div className="interactive-frame" role="application" aria-label="Obscura captured webpage"
+        {image && active && active.url !== "about:blank" ? <div className="interactive-frame" role="application" aria-label="Obscura captured webpage"
           tabIndex={0} onClick={point} onWheel={wheel} onKeyDown={keys}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={e => { composing.current = false; if (e.data) void issue({ type: "text", text: e.data }); }}>
           <img draggable={false} alt="Obscura webpage capture" src={image}/>
-        </div> : <div className="empty">
-          <div className="logo">◎</div>
-          <h1>Open Browser Lab</h1>
-          <p>Standalone public Obscura prototype. It renders webpages in Obscura, not inside the privileged Tauri WebView.</p>
-          <p>Set the explicitly allowlisted origins and verified Obscura executable in the local environment before browsing.</p>
-        </div>}
+        </div> : <section className="start-page" aria-label="New tab">
+          <div className="start-content">
+            <div className="start-emblem" aria-hidden="true">i</div>
+            <div className="start-eyebrow">IWXA BROWSER / OPEN PREVIEW</div>
+            <h1>Where would you like to go?</h1>
+            <p className="start-copy">A focused browser powered by Obscura. Start with an address or search.</p>
+            <form className="start-search" onSubmit={visit}>
+              <Search size={21} aria-hidden="true"/>
+              <input aria-label="Search or enter a web address" placeholder="Search or enter a web address"
+                value={input} onChange={e => setInput(e.target.value)} autoComplete="off" spellCheck={false}/>
+              <button type="submit">Open</button>
+            </form>
+            <div className="start-hint"><ShieldAlert size={15}/> This experimental build permits approved sites only.</div>
+            <div className="start-shortcuts"><span><kbd>Ctrl</kbd> + <kbd>L</kbd> Address</span><span><kbd>Ctrl</kbd> + <kbd>T</kbd> New tab</span></div>
+          </div>
+        </section>}
       </div>
       {bookmarksOpen && <aside className="drawer"><div className="drawer-title">Bookmarks
         <IconButton label="Close" onClick={() => setBookmarksOpen(false)}><X size={15}/></IconButton></div>
@@ -247,8 +271,9 @@ export default function App() {
       {error && <div className="error" role="alert"><ShieldAlert size={17}/><span>{error}</span>
         <IconButton label="Dismiss" onClick={() => setError(null)}><X size={15}/></IconButton></div>}
     </main>
-    <footer><span className="dot"/> {view.status}<span className="spacer"/>
-      <span>Experimental · external sites unqualified · IndexedDB restart HOLD · no downloads or protected writes</span>
+    <footer className="statusbar">
+      <span className="engine-status"><span className="dot"/>{view.status}</span><span className="spacer"/>
+      <span className="preview-note"><ShieldAlert size={13}/> Preview · restricted sites · no downloads</span>
     </footer>
   </div>;
 }

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Obscura Browser Lab",
+  "productName": "IWXA Browser Preview",
   "version": "0.1.0",
   "identifier": "org.obscura.browserlab",
   "build": {
@@ -10,7 +10,7 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{"label":"main","title":"Obscura Browser Lab","width":1200,"height":820,"minWidth":700,"minHeight":480}],
+    "windows": [{"label":"main","title":"IWXA Browser Preview","width":1200,"height":820,"minWidth":700,"minHeight":480}],
     "security": {"csp":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"}
   },
   "bundle": {"active":false}
