@@ -517,7 +517,12 @@ impl Controller {
             // capture ticks (hidden window) the upstream 2-frame bound applies.
             self.acknowledge_frames().await?;
         }
-        if self.last_metadata_refresh.elapsed() >= Duration::from_secs(2) {
+        // The first real frame can arrive before the 2s metadata interval.
+        // Refresh promptly so a stale loading overlay does not hide the page.
+        let first_navigation_frame = image.is_some() &&
+            self.selected()?.pending_navigation.is_some();
+        if first_navigation_frame ||
+            self.last_metadata_refresh.elapsed() >= Duration::from_secs(2) {
             self.refresh().await?;
             self.last_metadata_refresh = Instant::now();
         }

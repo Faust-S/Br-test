@@ -60,7 +60,12 @@ def click(x,y):
         command("xdotool","click","1")
 
 def locate(rgb,tag,seconds=50):
+    # Do not click a button first seen in a single transient frame while
+    # the Tauri loading surface is changing behind the native Obscura image.
     until=time.monotonic()+seconds
+    last=None
+    consecutive=0
+    since=0.0
     while time.monotonic()<until:
         image=screenshot("poll")
         pixels=[]
@@ -68,12 +73,23 @@ def locate(rgb,tag,seconds=50):
             for x in range(70,min(520,image.width),4):
                 r=image.getpixel((x,y))
                 if all(abs(r[i]-rgb[i])<24 for i in range(3)):pixels.append((x,y))
-        if len(pixels)>100:
-            screenshot(tag)
-            return sum(x for x,_ in pixels)//len(pixels),sum(y for _,y in pixels)//len(pixels)
+        point=(sum(x for x,_ in pixels)//len(pixels),
+            sum(y for _,y in pixels)//len(pixels)) if len(pixels)>100 else None
+        now=time.monotonic()
+        if point and last and abs(point[0]-last[0])<12 and abs(point[1]-last[1])<12:
+            consecutive+=1
+        elif point:
+            consecutive=1
+            since=now
+        else:
+            consecutive=0
+        last=point
+        if consecutive>=3 and now-since>=.7:
+            image.save(OUT/(tag+".png"))
+            return point
         time.sleep(.4)
     screenshot("failed-"+tag)
-    raise AssertionError("Missing real webpage marker "+tag)
+    raise AssertionError("Stable real webpage marker missing "+tag)
 
 def wait_event(kind,seconds=40):
     until=time.monotonic()+seconds

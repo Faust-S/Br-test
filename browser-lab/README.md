@@ -189,3 +189,17 @@ explicitly reported as PASS or HOLD without blocking the proven IndexedDB gate.
 This probe qualifies only user navigation, opt-in, and browser-owned session
 restoration. It deliberately does **not** claim page hydration, T2 Result
 creation, persistence of a real Workspace object, or hostile-site sandboxing.
+
+## Native GUI loading synchronization
+
+The Linux patched-GUI artifact from commit 1d5ebb6 showed a real fixture
+button and then an intermittent loading surface; the resulting click did not
+produce an HTTP IndexedDB write event. This does **not** establish an
+IndexedDB data-loss problem. The GUI now accepts a target only after three
+stable page screenshots, saves the verified screenshot itself, and still
+requires the original real HTTP event and committed [7,7,7] values.
+The native controller refreshes the tab metadata on the first frame after
+pending navigation, avoiding a stale loading surface until the next 2-second
+periodic refresh without increasing idle polling. The public live-sites probe
+now collects independent evidence even when the separate IDB gate fails,
+using the same compiled Obscura binary and existing workflow.
