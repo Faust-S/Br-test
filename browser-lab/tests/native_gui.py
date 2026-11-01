@@ -56,8 +56,10 @@ def assert_unauthorized_cdp_rejected(app_pid):
     for child in psutil.Process(app_pid).children(recursive=True):
         try:
             argv=child.cmdline()
-            if argv and Path(argv[0]).name.startswith("obscura") and "--port" in argv:
-                endpoints.append("ws://127.0.0.1:"+argv[argv.index("--port")+1]+"/")
+            if argv and Path(argv[0]).name.startswith("obscura"):
+                for conn in child.net_connections(kind="tcp"):
+                    if conn.status==psutil.CONN_LISTEN and conn.laddr.ip=="127.0.0.1" and conn.laddr.port>0:
+                        endpoints.append("ws://127.0.0.1:"+str(conn.laddr.port)+"/")
         except psutil.Error:
             pass
     if len(endpoints)!=1:

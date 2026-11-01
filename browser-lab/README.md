@@ -46,7 +46,9 @@ The original upstream CDP server also rejects browser-origin WebSockets.
 Native GUI tests assert that an unauthenticated local connection receives 401.
 This protects against opportunistic unauthorized CDP clients, **not** arbitrary
 same-user code execution or OS-level inspection of process environments.
-There remains a port-allocation race. A hash check alone does not establish
+The native controller now starts Obscura with `--port 0 --ready-file`
+and validates the reported PID and loopback address, removing its former
+bind-close-rebind port race. A hash check alone does not establish
 executable origin/signature authenticity. The OS process sandbox and
 network policy enforcement remain unqualified.
 

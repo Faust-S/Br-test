@@ -120,8 +120,10 @@ def assert_unauthorized_cdp_rejected(app_pid):
     for child in psutil.Process(app_pid).children(recursive=True):
         try:
             argv=child.cmdline()
-            if argv and Path(argv[0]).name.lower().startswith("obscura") and "--port" in argv:
-                candidates.append("ws://127.0.0.1:"+argv[argv.index("--port")+1]+"/")
+            if argv and Path(argv[0]).name.lower().startswith("obscura"):
+                for conn in child.net_connections(kind="tcp"):
+                    if conn.status==psutil.CONN_LISTEN and conn.laddr.ip=="127.0.0.1" and conn.laddr.port>0:
+                        candidates.append("ws://127.0.0.1:"+str(conn.laddr.port)+"/")
         except psutil.Error:
             pass
     if len(candidates)!=1:raise AssertionError("Expected exactly one Obscura CDP owner: "+str(candidates))
