@@ -129,7 +129,14 @@ def assert_unauthorized_cdp_rejected(app_pid):
         client=websocket.create_connection(candidates[0],timeout=4,suppress_origin=True)
     except websocket.WebSocketBadStatusException as error:
         if error.status_code!=401:raise AssertionError("Wrong CDP denial "+str(error.status_code))
-        return {"unauthenticated_status":401,"endpoint_private":True}
+        return {"unauthenticated_status":401,"accepted":False}
+    except ConnectionResetError as error:
+        # Windows loopback frequently resets a socket immediately after the
+        # HTTP auth refusal. This proves only denial of the WebSocket upgrade,
+        # not that the client read the server's 401 status line. Distinguish it.
+        if getattr(error,"winerror",None)!=10054 and (not error.args or error.args[0]!=10054):
+            raise
+        return {"unauthenticated_status":"WINDOWS_RESET_10054","accepted":False}
     else:
         client.close()
         raise AssertionError("Unauthenticated CDP unexpectedly accepted")
