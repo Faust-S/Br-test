@@ -421,3 +421,16 @@ load. A missing Overview after this run means the **3s/15s parser-module
 budget is not the sole blocker**, so development must move to module
 execution, React compatibility or rendering rather than increasing timers
 again.
+
+### Corrected independent navigation and CDP watchdog ceilings
+
+Source audit of upstream Obscura `docs/Environment-variables.md` and
+`crates/obscura-cdp/src/dispatch.rs` identified **two additional hard
+ceilings** which would invalidate the 180s JavaScript experiment if left
+unchanged: `OBSCURA_NAV_TIMEOUT_MS=30000` and
+`OBSCURA_CDP_COMMAND_TIMEOUT_MS=60000`. The DEBUG-only experiment now
+explicitly passes both as **200000 ms** to the owned child process, matching
+the existing diagnostic-only 200s CDP bridge. Neither changes the actual
+180000ms JavaScript/script-module budget or its 181s V8 backstop. They
+simply ensure the engine can exercise all 180 seconds without an unrelated
+earlier timeout. No release defaults are changed.

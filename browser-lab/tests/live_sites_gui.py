@@ -265,6 +265,8 @@ def main():
             "three_minute_spa_budget": THREE_MINUTE_SPA_EXPERIMENT,
             "script_deadline_ms": 180000 if THREE_MINUTE_SPA_EXPERIMENT else None,
             "module_budget_ms": 180000 if THREE_MINUTE_SPA_EXPERIMENT else None,
+            "navigation_timeout_ms": 200000 if THREE_MINUTE_SPA_EXPERIMENT else None,
+            "cdp_command_timeout_ms": 200000 if THREE_MINUTE_SPA_EXPERIMENT else None,
         },
         "checks": {},
         "not_qualified": [
@@ -426,7 +428,7 @@ def main():
     try:
         engine_log = (OUT / "native.log").read_text(encoding="utf-8", errors="replace")
         report["checks"]["engine_logging_180s_active"] = (
-            "PASS" if "IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000" in engine_log
+            "PASS" if "IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000 module_ms=180000 nav_ms=200000 cdp_ms=200000" in engine_log
             else "HOLD") if THREE_MINUTE_SPA_EXPERIMENT else "NOT_REQUESTED"
         event_signatures = {
             "module_prepare_errors": "ES module error (",

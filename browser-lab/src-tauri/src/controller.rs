@@ -754,10 +754,15 @@ impl Controller {
             std::env::var("IWXA_SPA_DIAGNOSTIC_180S").as_deref() == Ok("1") {
             child.env("OBSCURA_SCRIPT_DEADLINE_MS", "180000");
             child.env("OBSCURA_MODULE_BUDGET_MS", "180000");
+            // These independent upstream ceilings are 30s navigation and
+            // 60s CDP by default. Without raising them, a 180s JS budget
+            // would never be exercisable by the real integrated GUI.
+            child.env("OBSCURA_NAV_TIMEOUT_MS", "200000");
+            child.env("OBSCURA_CDP_COMMAND_TIMEOUT_MS", "200000");
             child.env("RUST_LOG", "obscura_browser::page=info,obscura_js=warn");
             child.stdout(std::process::Stdio::inherit());
             child.stderr(std::process::Stdio::inherit());
-            eprintln!("IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000 module_ms=180000 cdp_s=200");
+            eprintln!("IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000 module_ms=180000 nav_ms=200000 cdp_ms=200000 bridge_s=200");
         }
         if fixture_mode { child.arg("--allow-private-network"); }
         // Upstream Obscura v0.2.6 already enforces this bearer token and
