@@ -24,6 +24,10 @@ SITES = (
     ("learn", "https://learn.iwxa.ru/", "https://learn.iwxa.ru/workspace/"),
     ("artbazi", "https://artbazi.ru/", "https://artbazi.ru/workspace"),
 )
+# The flag is enabled by the existing Linux live-site CI step ONLY. It does
+# not change the normal browser, IndexedDB tests or release builds.
+THREE_MINUTE_SPA_EXPERIMENT = os.environ.get("IWXA_SPA_DIAGNOSTIC_180S") == "1"
+
 
 
 def screenshot(name):
@@ -33,6 +37,8 @@ def screenshot(name):
 
 
 def wait_session(path, condition, what, seconds=55):
+    if THREE_MINUTE_SPA_EXPERIMENT:
+        seconds=max(seconds, 215)
     until = time.monotonic() + seconds
     last = None
     while time.monotonic() < until:
@@ -93,6 +99,8 @@ def observe_workspace_document(name, seconds=8):
 
 
 def wait_remote_document(name, seconds=70):
+    if THREE_MINUTE_SPA_EXPERIMENT:
+        seconds=max(seconds, 215)
     # The browser's status marker becomes green only after the native
     # Obscura document reaches readyState=complete. This proves a real
     # remote-document load, not hydration or a T2 Result transaction.
@@ -143,6 +151,8 @@ def open_tab(session, number):
 
 
 def wait_workspace_probe(log_path, site, seconds=27, since=0):
+    if THREE_MINUTE_SPA_EXPERIMENT:
+        seconds=max(seconds, 215)
     marker = "IWXA_BROWSER_WORKSPACE_PROBE "
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
@@ -181,6 +191,8 @@ def native_workspace_click(point):
 
 
 def wait_artbazi_overview(initial, report, seconds=70):
+    if THREE_MINUTE_SPA_EXPERIMENT:
+        seconds=195
     # Remote React hydration was non-deterministic in the earlier run.
     # Never click a blank document, and never treat HTML ready as UI ready.
     state=initial
@@ -249,6 +261,11 @@ def main():
         "kind": "LIVE_SITE_NATIVE_GUI",
         "head": os.getenv("GITHUB_SHA"),
         "platform": platform.platform(),
+        "experiment": {
+            "three_minute_spa_budget": THREE_MINUTE_SPA_EXPERIMENT,
+            "script_deadline_ms": 180000 if THREE_MINUTE_SPA_EXPERIMENT else None,
+            "module_budget_ms": 180000 if THREE_MINUTE_SPA_EXPERIMENT else None,
+        },
         "checks": {},
         "not_qualified": [
             "remote document hydration", "T2 receipts", "T2 Result readback",
@@ -403,6 +420,30 @@ def main():
                 manager.terminate()
                 with contextlib.suppress(Exception):
                     manager.wait(timeout=5)
+    # The previous GUI run silently discarded Obscura stdout/stderr. Preserve
+    # only aggregate engine event counts in the report; the separate log file
+    # remains review evidence from this fresh test-only public profile.
+    try:
+        engine_log = (OUT / "native.log").read_text(encoding="utf-8", errors="replace")
+        report["checks"]["engine_logging_180s_active"] = (
+            "PASS" if "IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000" in engine_log
+            else "HOLD") if THREE_MINUTE_SPA_EXPERIMENT else "NOT_REQUESTED"
+        event_signatures = {
+            "module_prepare_errors": "ES module error (",
+            "module_evaluation_errors": "ES module evaluation error",
+            "module_loaded": "ES module loaded:",
+            "parser_script_deadline": "deadline reached",
+            "module_budget_exhausted": "ES module exhausted",
+            "classic_script_errors": "Script error (",
+            "inline_script_errors": "Inline script error:",
+            "network_module_fetch_errors": "Failed to fetch module",
+        }
+        report["checks"]["engine_script_events"] = {
+            key: engine_log.count(marker) for key, marker in event_signatures.items()
+        }
+        report["checks"]["engine_log_line_count"] = len(engine_log.splitlines())
+    except OSError:
+        report["checks"]["engine_logging_180s_active"] = "HOLD"
     (OUT / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False))
     return 0 if report["status"] == "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION" else 1

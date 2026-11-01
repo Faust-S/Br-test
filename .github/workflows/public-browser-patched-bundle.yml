@@ -110,6 +110,9 @@ jobs:
       - name: Real public Learn and ArtBazi routes (reuses the bundled Linux build)
         if: runner.os == 'Linux' && !cancelled()
         continue-on-error: true
+        # One bounded experiment; normal browsing and production are untouched.
+        env:
+          IWXA_SPA_DIAGNOSTIC_180S: "1"
         shell: bash
         run: |
           export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"

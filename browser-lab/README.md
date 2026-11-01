@@ -395,3 +395,29 @@ The existing fresh-profile Linux GUI artifact now captures the engine's
 warn-level module failures, if any; no additional workflow, separate
 browser or user data source is introduced. The ArtBazi T2 Workspace
 creation/readback gate remains HOLD until its real native route succeeds.
+
+## 180-second SPA script budget experiment — one controlled real-site run
+
+Owner requested a conclusive check of the timer hypothesis. In this existing
+Linux bundled-browser live-site step **only**, `IWXA_SPA_DIAGNOSTIC_180S=1`
+enables a DEBUG-only native controller path that launches its **existing**
+Obscura child with both `OBSCURA_SCRIPT_DEADLINE_MS=180000` and
+`OBSCURA_MODULE_BUDGET_MS=180000`. The CDP command timeout becomes
+200 seconds only in the same experiment, and live GUI readiness waits are
+large enough not to stop the page before the engine's 180-second execution
+budget. The upstream global watchdog remains armed, now at 181 seconds.
+Release builds, normal desktop browsing and IndexedDB regression scenarios
+retain their original defaults and do not expose these environment controls.
+
+Previous `RUST_LOG` settings in the GUI harness did **nothing** because
+the Tauri controller uses `env_clear()` and discards the engine's stdout and
+stderr. The diagnostic launch now forwards one fixed, bounded log filter
+and inherits child stdio into the existing `native.log` artifact, with
+no token, saved Result contents or credentials deliberately logged.
+The report records whether the controller applied the 180s configuration
+and aggregate module preparation/evaluation/deadline warning counts.
+The probe still distinguishes real Overview/record rendering from HTML
+load. A missing Overview after this run means the **3s/15s parser-module
+budget is not the sole blocker**, so development must move to module
+execution, React compatibility or rendering rather than increasing timers
+again.

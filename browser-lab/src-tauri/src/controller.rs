@@ -608,11 +608,18 @@ impl Controller {
         }
         let transport = self.connection.as_mut()
             .ok_or_else(|| denied("Obscura CDP is not connected"))?;
-        timeout(Duration::from_secs(20), transport.send(Message::Text(message.to_string().into())))
+        // An explicit, DEBUG-only 180s SPA experiment needs the CDP bridge
+        // to outlive the engine watchdog; the normal product stays at 20s.
+        let diagnostic = cfg!(debug_assertions) && !self.fixture_mode &&
+            std::env::var("IWXA_SPA_DIAGNOSTIC_180S").as_deref() == Ok("1");
+        let command_limit = if diagnostic {
+            Duration::from_secs(200)
+        } else { Duration::from_secs(20) };
+        timeout(command_limit, transport.send(Message::Text(message.to_string().into())))
             .await.map_err(|_| denied("Timed out sending to Obscura"))?
             .map_err(|e| denied(&e.to_string()))?;
         loop {
-            let response = self.read_cdp(Duration::from_secs(20)).await?
+            let response = self.read_cdp(command_limit).await?
                 .ok_or_else(|| denied("CDP response timed out; action outcome uncertain"))?;
             if response["id"].as_u64() != Some(id) { continue; }
             if !response["error"].is_null() {
@@ -737,6 +744,20 @@ impl Controller {
             if let Some(val) = std::env::var_os(key) {
                 child.env(key,val);
             }
+        }
+        // Engine environment is intentionally sanitized above. Previous
+        // attempts set RUST_LOG in the GUI harness but it never reached
+        // Obscura and both engine stdio handles were discarded. This is an
+        // isolated, DEBUG-only experiment in the public real-site test.
+        // No user-controlled timeout or log setting reaches release builds.
+        if cfg!(debug_assertions) && !fixture_mode &&
+            std::env::var("IWXA_SPA_DIAGNOSTIC_180S").as_deref() == Ok("1") {
+            child.env("OBSCURA_SCRIPT_DEADLINE_MS", "180000");
+            child.env("OBSCURA_MODULE_BUDGET_MS", "180000");
+            child.env("RUST_LOG", "obscura_browser::page=info,obscura_js=warn");
+            child.stdout(std::process::Stdio::inherit());
+            child.stderr(std::process::Stdio::inherit());
+            eprintln!("IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000 module_ms=180000 cdp_s=200");
         }
         if fixture_mode { child.arg("--allow-private-network"); }
         // Upstream Obscura v0.2.6 already enforces this bearer token and
