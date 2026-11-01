@@ -134,6 +134,12 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
     ip.is_loopback() || ip.is_unspecified() || ip.is_unique_local() ||
     ip.is_unicast_link_local() || ip.is_multicast()
 }
+fn is_fixture_endpoint(url: &Url) -> bool {
+    // The test-only private-network flag must never accompany a public site.
+    // This is a controller guard, NOT a network sandbox for subresources.
+    matches!(url.host(), Some(Host::Ipv4(ip)) if ip == Ipv4Addr::LOCALHOST)
+}
+
 fn allowed_url(raw: &str, allow: &HashSet<String>, fixture_mode: bool) -> io::Result<String> {
     if raw == "about:blank" {
         return Ok(raw.to_owned());
@@ -146,6 +152,9 @@ fn allowed_url(raw: &str, allow: &HashSet<String>, fixture_mode: bool) -> io::Re
         return Err(denied("Only HTTPS browsing is allowed outside a local test fixture"));
     }
     let host = url.host().ok_or_else(|| denied("URL has no host"))?;
+    if fixture_mode && !is_fixture_endpoint(&url) {
+        return Err(denied("Test-only private-network mode requires 127.0.0.1"));
+    }
     match host {
         Host::Ipv4(ip) if is_blocked_ipv4(ip) && !(fixture_mode && ip.is_loopback()) =>
             return Err(denied("Private IP address blocked")),
@@ -172,6 +181,9 @@ fn grants() -> io::Result<(HashSet<String>, bool)> {
         }
         if url.scheme() != "https" && !(fixture && url.scheme() == "http") {
             return Err(denied("Non-HTTPS origin grant refused"));
+        }
+        if fixture && !is_fixture_endpoint(&url) {
+            return Err(denied("Fixture grants require the exact 127.0.0.1 origin"));
         }
         origins.insert(grant.to_owned());
     }
@@ -514,16 +526,20 @@ mod tests {
             assert!(allowed_url(item,&allow,false).is_err(),"{item}");
         }
     }
-    #[tokio::test]
-    async fn missing_owner_refuses_cdp_and_leaves_restart_available() {
+    #[test]
+    fn missing_owner_refuses_cdp_and_leaves_restart_available() {
         let mut controller = Controller::default();
-        controller.connection = None;
-        let err = match controller.execute(Action::Capture).await {
-            Err(e) => e,
-            Ok(_) => panic!("Capture without owned process unexpectedly succeeded"),
-        };
+        let err = controller.check_owned_process().expect_err("missing owner must refuse");
         assert_eq!(err.kind(), io::ErrorKind::PermissionDenied);
+        assert!(controller.connection.is_none());
         assert!(controller.status.contains("Restart"));
+    }
+    #[test]
+    fn fixture_rejects_remote_origins_even_when_explicitly_granted() {
+        let allow = HashSet::from(["http://127.0.0.1:8080".into(), "https://example.org".into()]);
+        assert!(allowed_url("http://127.0.0.1:8080/path", &allow, true).is_ok());
+        assert!(allowed_url("https://example.org/", &allow, true).is_err());
+        assert!(allowed_url("http://127.0.0.2:8080/", &allow, true).is_err());
     }
     #[test]
     fn localhost_requires_explicit_fixture_allowance() {

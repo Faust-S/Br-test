@@ -75,6 +75,22 @@ def main():
             cmd("xdotool","windowmove",wid,"0","0")
             cmd("xdotool","windowsize",wid,"1250","850")
             cmd("xdotool","windowactivate","--sync",wid)
+            # The window can be created before React has mounted, before
+            # the Rust Boot invoke returns, and before Ctrl+L is registered.
+            # Wait for the actual browser chrome and initial tab, not just an
+            # X11 window ID; never send keystrokes to an unready UI.
+            ready_deadline=time.monotonic()+40
+            while time.monotonic()<ready_deadline:
+                im=Image.open(shot("startup-poll")).convert("RGB")
+                if (im.getpixel((200,42)) == (255,255,255) and
+                    all(abs(im.getpixel((500,80))[i]-[240,244,250][i])<8 for i in range(3))):
+                    break
+                if procs[-1].poll() is not None:
+                    raise RuntimeError("Tauri exited while loading browser chrome")
+                time.sleep(.3)
+            else:
+                raise AssertionError("Browser chrome never became interactive")
+            time.sleep(.65)
             shot("initial");report["checks"]["native_window"]="PASS"
             key("ctrl+l");type_text(origin+"/browser-lab/fixtures/gui-smoke.html");key("Return")
             red=find_color((238,53,78),"first-tab")

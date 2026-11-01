@@ -33,8 +33,11 @@ two tabs, owned-process restart and network readback. It does **not** certify
 an installed Windows app or a native compositor.
 
 Only for local test fixtures, set `OBSCURA_LAB_FIXTURE=1` and explicitly grant
-the particular `http://127.0.0.1:PORT` origin. The engine's private-network
-flag is enabled in this mode and **must not be used for ordinary browsing**.
+the particular `http://127.0.0.1:PORT` origin. Fixture mode now refuses all
+non-127.0.0.1 grants and navigations, because the engine's private-network
+flag is enabled for this test mode; it **must not be used for ordinary browsing**.
+This guard does not constrain subresources, redirects, DNS rebinding or socket
+access; a future OS and engine network sandbox must enforce those policies.
 
 There is **no** arbitrary-page native command bridge. CDP is loopback-only but
 not authenticated against other local processes. It has a port-allocation race.
