@@ -269,3 +269,26 @@ The already existing Windows and Linux native GUI smoke performs ordinary
 typing in a real Obscura input, then selects and replaces the text using
 Ctrl+A, and requires the real HTTP readback for the resulting value. No
 second renderer or additional workflow is introduced.
+
+## Real T2 bootstrap diagnosis: no false document-ready claims
+
+Screenshots from the accepted real-site navigation revealed that Learn's
+Workspace was still displaying `Loading domain configuration` and ArtBazi's
+Workspace contained only site chrome and an empty content region. Thus
+`document.readyState=complete` proved HTML load, **not** operational T2
+Workspace hydration. The source T2 Host fetches three exact same-origin
+configuration documents in parallel, before mounting the Workspace.
+
+To identify the actual compatibility failure without duplicating T2, a
+**DEBUG-only** keyboard action (Ctrl+Alt+Shift+D) runs a fixed read-only
+site-local probe. It reports HTTP codes, JSON validity, response lengths
+and basic DOM-size counts for those three required files to native stderr.
+It never logs fetched configuration contents, page text, user data or
+credentials. It is absent from release builds and forbidden in fixture mode.
+No additional user-menu item, background process, database, Host or Kernel
+was added.
+
+The existing bundled Linux GUI workflow invokes the probe after loading
+both real Workspace routes. The artifact can now distinguish missing
+configuration responses, script readiness and a merely loaded HTML page.
+Actual T2 Results and receipt readback remain HOLD until witnessed.

@@ -133,6 +133,22 @@ def open_tab(session, number):
     wait_picker("new-tab-picker")
 
 
+def wait_workspace_probe(log_path, site, seconds=27):
+    marker = "IWXA_BROWSER_WORKSPACE_PROBE "
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        try:
+            lines = log_path.read_text(encoding="utf-8",errors="replace").splitlines()
+            for line in reversed(lines):
+                if marker not in line: continue
+                data = json.loads(line.split(marker,1)[1])
+                if data.get("site")==site: return data
+        except (OSError,ValueError):
+            pass
+        time.sleep(.4)
+    raise AssertionError(f"Native debug-only Workspace probe {site} did not respond")
+
+
 def main():
     app = Path(os.environ["OBSCURA_LAB_GUI_BINARY"]).resolve(strict=True)
     report = {
@@ -219,6 +235,10 @@ def main():
                     report["checks"]["artbazi_workspace_address"] = "PASS"
                     wait_remote_document("artbazi-workspace-capture")
                     report["checks"]["artbazi_workspace_document_ready"] = "PASS"
+                    gui.key("ctrl+alt+shift+d")
+                    report["checks"]["artbazi_bootstrap_probe"] = wait_workspace_probe(
+                        OUT/"native.log", "artbazi")
+                    report["checks"]["artbazi_t2_result_readback"] = "UNQUALIFIED"
 
                     reliable_click(145, 43)  # original Learn tab
                     time.sleep(.6)
@@ -229,6 +249,10 @@ def main():
                     report["checks"]["learn_workspace_address"] = "PASS"
                     wait_remote_document("learn-workspace-capture")
                     report["checks"]["learn_workspace_document_ready"] = "PASS"
+                    gui.key("ctrl+alt+shift+d")
+                    report["checks"]["learn_bootstrap_probe"] = wait_workspace_probe(
+                        OUT/"native.log", "learn")
+                    report["checks"]["learn_t2_result_readback"] = "UNQUALIFIED"
                 gui.stop_tree(process)
                 process = None
             report["status"] = "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"

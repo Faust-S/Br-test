@@ -53,6 +53,8 @@ pub enum Action {
     Boot,
     Restart,
     Capture,
+    #[cfg(debug_assertions)]
+    ProbeWorkspace,
     OpenSite { site: String, url: Option<String> },
     ResetSites,
     NewTab { url: String },
@@ -88,6 +90,7 @@ pub struct View {
     status: String,
     granted_sites: Vec<String>,
     site_picker_available: bool,
+    debug_probe_available: bool,
 }
 struct Page {
     tab: Tab,
@@ -147,6 +150,41 @@ impl Drop for Controller {
         }
     }
 }
+
+#[cfg(debug_assertions)]
+const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
+    var origin = location.origin;
+    if (!['https://learn.iwxa.ru','https://artbazi.ru'].includes(origin) ||
+        !location.pathname.startsWith('/workspace')) {
+        return {scope:'outside-preview-workspace'};
+    }
+    var text = document.body ? (document.body.textContent || '') : '';
+    var stage = text.includes('Loading domain configuration') ? 'config-loading' :
+        text.includes('Activating profile') ? 'profile-loading' : 'not-detected';
+    var root = document.querySelector('#root');
+    var paths = ['/_iwxa/domain.json','/_iwxa/domain-shell.json',
+                 '/workspace/workspace.config.json'];
+    var responses = await Promise.all(paths.map(async function(path) {
+        var ctrl = new AbortController();
+        var timer = setTimeout(function(){ctrl.abort()}, 6500);
+        try {
+            var response = await fetch(path,{cache:'no-cache',signal:ctrl.signal});
+            var data = await response.text();
+            var isJson = false;
+            try { JSON.parse(data); isJson = true; } catch (_) {}
+            return {path:path,http:response.status,json:isJson,bytes:data.length};
+        } catch (error) {
+            return {path:path,error:String(error && error.name || 'network-error').slice(0,48)};
+        } finally { clearTimeout(timer); }
+    }));
+    var mains = Array.from(document.querySelectorAll('main'));
+    return {scope:'public-workspace',stage:stage,
+        rootChildren:root ? root.children.length : 0,
+        mainTextLength:mains.reduce(function(n,element) {
+            return n+(element.textContent||'').trim().length;
+        },0), responses:responses};
+})()"#;
+
 fn denied(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message.to_owned())
 }
@@ -444,6 +482,7 @@ impl Controller {
                 ids
             },
             site_picker_available: !self.fixture_mode,
+            debug_probe_available: cfg!(debug_assertions) && !self.fixture_mode,
         }
     }
     fn selected(&self) -> io::Result<&Page> {
@@ -904,6 +943,31 @@ impl Controller {
                         if self.active.is_none() { return Ok(self.view(None)); }
                         let frame = self.poll_screencast().await?;
                         return Ok(self.view(frame));
+                    }
+                    #[cfg(debug_assertions)]
+                    Action::ProbeWorkspace => {
+                        if self.fixture_mode { return Err(denied("No probe in fixture mode")); }
+                        let page_url = Url::parse(&self.selected()?.tab.url)
+                            .map_err(|_| denied("Invalid tab URL"))?;
+                        let known = session::PREVIEW_SITES.iter()
+                            .any(|(_, origin)| page_url.origin().ascii_serialization() == *origin);
+                        if !known || !page_url.path().starts_with("/workspace") {
+                            return Err(denied("Debug probe requires an approved public Workspace"));
+                        }
+                        let result = self.page("Runtime.evaluate", json!({
+                            "expression":WORKSPACE_CONFIG_PROBE,
+                            "awaitPromise":true,
+                            "returnByValue":true
+                        })).await?;
+                        // Fixed allowlisted endpoints only: no credentials, URLs
+                        // with query parameters, page contents or user Results.
+                        eprintln!("IWXA_BROWSER_WORKSPACE_PROBE {}", json!({
+                            "site": if page_url.host_str() == Some("learn.iwxa.ru") {
+                                "learn"
+                            } else { "artbazi" },
+                            "result":result["result"]["value"],
+                            "exception": !result["exceptionDetails"].is_null()
+                        }));
                     }
                     Action::NewTab{url} => self.spawn_tab(url).await?,
                     Action::OpenSite{site,url} => {

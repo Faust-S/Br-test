@@ -22,6 +22,7 @@ type View = {
   status: string;
   granted_sites: string[];
   site_picker_available: boolean;
+  debug_probe_available: boolean;
 };
 type SiteId = "learn" | "artbazi";
 type SiteApproval = {site: SiteId; url: string};
@@ -34,7 +35,7 @@ function previewSiteFor(url: string): SiteId | null {
   } catch { /* Native validation remains the authority for URL syntax. */ }
   return null;
 }
-type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "reload" }
+type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "reload" | "probe_workspace" }
   | { type: "new_tab" | "navigate"; url: string }
   | { type: "open_site"; site: SiteId; url?: string }
   | { type: "reset_sites" }
@@ -47,7 +48,7 @@ type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "rel
 
 const blank: View = {
   active: null, tabs: [], frame: null, width: 960, height: 620, status: "Engine not started",
-  granted_sites: [], site_picker_available: false
+  granted_sites: [], site_picker_available: false, debug_probe_available: false
 };
 const bookmarksKey = "obscura-browser-lab.bookmarks";
 const historyKey = "obscura-browser-lab.history";
@@ -169,6 +170,9 @@ export default function App() {
       if (siteApproval) return;
       if (e.ctrlKey || e.metaKey) {
         if (e.altKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); void issue({ type: "restart" }); }
+        if (e.altKey && e.shiftKey && e.key.toLowerCase() === "d" && activeView.current.debug_probe_available) {
+          e.preventDefault(); void issue({type:"probe_workspace"}); return;
+        }
         if (e.key.toLowerCase() === "l") { e.preventDefault(); address.current?.focus(); address.current?.select(); }
         if (e.key.toLowerCase() === "t") { e.preventDefault(); void issue({ type: "new_tab", url: "about:blank" }); }
         if (e.key.toLowerCase() === "w") { e.preventDefault(); const id = activeView.current.active; if (id) void issue({ type: "close_tab", id }); }
@@ -240,7 +244,7 @@ export default function App() {
     // Everything else, including Ctrl+A for fields, is a webpage key.
     if ((modified && !e.altKey && ["l", "t", "w", "r"].includes(lower)) ||
         (e.altKey && !modified && ["ArrowLeft", "ArrowRight"].includes(e.key)) ||
-        (modified && e.altKey && e.shiftKey && lower === "e")) return;
+        (modified && e.altKey && e.shiftKey && (lower === "e" || lower === "d"))) return;
     e.preventDefault();
     if (e.key.length === 1 && !modified && !e.altKey) {
       void issue({ type: "text", text: e.key });
