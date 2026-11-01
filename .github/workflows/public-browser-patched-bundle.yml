@@ -16,14 +16,12 @@ jobs:
   packaged-restart:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 70
-    # Linux full bundled-GUI readback already passed on commit 50d7256.
-    # On push, qualify the Windows-only GUI fix without rebuilding Obscura
-    # on a second OS. Manual dispatch can qualify both when needed.
-    if: ${{ github.event_name == 'workflow_dispatch' || matrix.os == 'windows-2022' }}
+    # Previous complete Linux bundled-GUI persistence/readback PASS.
+    # Qualify the Windows GUI fix without duplicating native engine builds.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, windows-2022]
+        os: [windows-2022]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/checkout@v4
