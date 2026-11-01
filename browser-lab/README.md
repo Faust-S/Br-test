@@ -203,3 +203,21 @@ pending navigation, avoiding a stale loading surface until the next 2-second
 periodic refresh without increasing idle polling. The public live-sites probe
 now collects independent evidence even when the separate IDB gate fails,
 using the same compiled Obscura binary and existing workflow.
+
+## Corrected public-site GUI entry synchronization
+
+The live-site test initially typed its first URL while the frontend still
+displayed `Engine not started`: Tauri window creation and the light toolbar
+are **not** proof that the native Obscura engine finished `Boot`. The test
+then sent `Tab`/`Enter` without an open consent dialog, inadvertently
+creating another empty tab. The screenshots and browser-owned session file
+showed two blank tabs with no approved origins, not a remote-site failure.
+
+The revised single live-site probe waits for a **new native session write**
+and visible Learn/ArtBazi site cards before interacting. Learn uses a real
+card click; ArtBazi uses the typed URL and validates a visible consent modal
+before choosing Allow. The probe keeps original tab and consent readback,
+cold restart, and Workspace-address navigation in the **same bundled engine
+build**. It captures screenshots of the remote pages for independent visual
+review. It does **not** upgrade URL persistence into proof of page hydration
+or T2 Result persistence.
