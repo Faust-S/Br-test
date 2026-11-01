@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Public Obscura GUI Lab</title>
+<style>
+  html,body{margin:0;width:100%;min-height:100%;font:20px system-ui,sans-serif;background:white;color:#202834}
+  .action{position:absolute;left:90px;top:115px;width:205px;height:85px;border:0;background:#ee354e;color:white;font-weight:700;font-size:20px}
+  #entry{position:absolute;left:90px;top:260px;width:310px;height:70px;border:3px solid #297a48;background:#28b85d;color:#0a2715;font-size:22px;padding:12px}
+  #banner{position:absolute;left:90px;top:365px;font-size:18px}
+  body.second .action{background:#216aca}
+  #state{position:absolute;left:90px;top:425px}
+</style></head>
+<body><button type="button" class="action" id="action">REAL NATIVE CLICK</button>
+<input id="entry" aria-label="Typed input" placeholder="TYPE INTO OBSCURA"/>
+<div id="banner">Real native Obscura viewport • public test fixture</div>
+<output id="state">No clicks</output>
+<script>
+  let clicks=0, inputTimer;
+  const second=new URLSearchParams(location.search).get("tab")==="two";
+  if(second){document.body.classList.add("second");document.title="Public Obscura GUI Lab — Tab 2";}
+  function report(kind,detail=""){
+    fetch("/lab-event",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({kind,detail,tab:second?"two":"one"})}).catch(()=>{});
+  }
+  document.getElementById("action").addEventListener("click",()=>{
+    clicks++;document.getElementById("state").textContent="Clicks: "+clicks;report("click",String(clicks));
+  });
+  document.getElementById("entry").addEventListener("input",event=>{
+    clearTimeout(inputTimer);
+    inputTimer=setTimeout(()=>report("typed",event.target.value),240);
+  });
+</script>
+</body></html>

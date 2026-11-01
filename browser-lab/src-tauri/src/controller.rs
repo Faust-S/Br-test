@@ -233,8 +233,20 @@ impl Controller {
         let (allow, fixture_mode) = grants()?;
         self.allowed = allow;
         self.fixture_mode = fixture_mode;
-        let profile = dirs::data_local_dir().ok_or_else(|| denied("Missing local data directory"))?
+        let default_profile = dirs::data_local_dir().ok_or_else(|| denied("Missing local data directory"))?
             .join("ObscuraBrowserLab").join("profile-v1");
+        // Only explicit local fixture runs can override the engine profile.
+        // Normal browsing always uses its dedicated per-product directory.
+        let profile = if fixture_mode {
+            match std::env::var_os("OBSCURA_LAB_PROFILE_DIR") {
+                Some(path) => {
+                    let path = PathBuf::from(path);
+                    if !path.is_absolute() { return Err(denied("Fixture profile must be an absolute path")); }
+                    path
+                }
+                None => default_profile,
+            }
+        } else { default_profile };
         fs::create_dir_all(&profile)?;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();

@@ -10,7 +10,7 @@ not as a hidden fallback page engine.
 - Native Rust controller starts a pinned Obscura binary, manages CDP targets, sends
   click, key, text, wheel and viewport-size updates, captures PNG from same engine.
 - The browser chrome keeps its own bookmarks and history. The restart-engine command
-  terminates only its **owned** Obscura child and reopens permitted tab URLs;
+  terminates only its **owned** Obscura child and reopens permitted tab URLs (Ctrl+Alt+Shift+E);
   runtime restart/recovery still requires installed-GUI acceptance.
 - A publicly reproducible Windows/Linux workflow compiles the desktop source and
   executes real native Obscura against a generic local fixture.
@@ -25,6 +25,12 @@ not as a hidden fallback page engine.
    - `OBSCURA_LAB_SHA256`: full verified executable SHA-256
    - `OBSCURA_LAB_ALLOWED_ORIGINS`: explicit comma-separated HTTPS origins
 4. `cd browser-lab && npm install && npm run tauri:dev`.
+
+The public GUI smoke uses a verified official Obscura v0.2.6 executable, a
+local-only HTTP fixture, a temporary profile, an Xvfb desktop, and the **actual
+Tauri window**. In Linux CI it checks page rendering, mouse/keyboard input,
+two tabs, owned-process restart and network readback. It does **not** certify
+an installed Windows app or a native compositor.
 
 Only for local test fixtures, set `OBSCURA_LAB_FIXTURE=1` and explicitly grant
 the particular `http://127.0.0.1:PORT` origin. The engine's private-network

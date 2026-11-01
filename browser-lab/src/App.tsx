@@ -137,6 +137,7 @@ export default function App() {
   useEffect(() => {
     const handle = (e: globalThis.KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey) {
+        if (e.altKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); void issue({ type: "restart" }); }
         if (e.key.toLowerCase() === "l") { e.preventDefault(); address.current?.focus(); address.current?.select(); }
         if (e.key.toLowerCase() === "t") { e.preventDefault(); void issue({ type: "new_tab", url: "about:blank" }); }
         if (e.key.toLowerCase() === "w") { e.preventDefault(); const id = activeView.current.active; if (id) void issue({ type: "close_tab", id }); }
@@ -196,7 +197,7 @@ export default function App() {
           </div>)}
         </div>
         <IconButton label="New tab (Ctrl+T)" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Plus size={17}/></IconButton>
-        <IconButton label="Restart owned engine and restore tabs" onClick={() => void issue({ type: "restart" })}><RotateCcw size={16}/></IconButton>
+        <IconButton label="Restart owned engine (Ctrl+Alt+Shift+E) and restore tabs" onClick={() => void issue({ type: "restart" })}><RotateCcw size={16}/></IconButton>
       </div>
       <div className="toolbar">
         <IconButton label="Back (Alt+Left)" disabled={!active?.back} onClick={() => void issue({ type: "back" })}><ArrowLeft size={18}/></IconButton>
