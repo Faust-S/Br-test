@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/public-browser-patched-bundle.yml"
       - "browser-lab/tests/packaged_idb_gui.py"
+      - "browser-lab/src-tauri/src/controller.rs"
   workflow_dispatch:
 permissions:
   contents: read
@@ -63,6 +64,20 @@ jobs:
           fi
           python browser-lab/scripts/stage_patched_engine.py
           printf 'OBSCURA_PATCHED_BINARY=%s\n' "$OBSCURA_PATCHED_BINARY" >> "$GITHUB_ENV"
+      - name: Verify staged public engine identity before bundling
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib,os
+          from pathlib import Path
+          root=Path("browser-lab/src-tauri/resources/obscura")
+          name="obscura.exe" if os.name=="nt" else "obscura"
+          file=root/name
+          checksum=(root/"obscura.sha256").read_text(encoding="ascii").strip()
+          if hashlib.sha256(file.read_bytes()).hexdigest()!=checksum:
+              raise SystemExit("FAIL: staged Obscura binary digest mismatch")
+          print("STAGED_PATCHED_ENGINE_SHA256",checksum)
+          PY
       - name: Compile standalone Tauri with embedded frontend and pinned Obscura
         shell: bash
         run: |
