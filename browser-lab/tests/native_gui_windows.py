@@ -169,9 +169,29 @@ def main():
             user.ShowWindow(hwnd,9)
             user.SetWindowPos(hwnd,None,0,0,1200,800,0x0040)
             user.SetForegroundWindow(hwnd)
-            time.sleep(2)
+            # WebView2 is asynchronous: HWND creation is not React readiness.
+            # The first captured HWND can be entirely white for several seconds.
+            # Wait for two independent chrome regions from real rendered CSS
+            # before touching the omnibox, otherwise early SendInput is lost.
+            until_ready=time.monotonic()+55
+            while time.monotonic()<until_ready:
+                if process.poll() is not None:
+                    raise RuntimeError("Tauri exited before rendering browser chrome")
+                image=pyautogui.screenshot().convert("RGB")
+                if image.width>850 and image.height>130:
+                    tab=image.getpixel((750,50))
+                    omnibox=image.getpixel((750,100))
+                    if all(abs(tab[i]-(226,234,245)[i])<15 for i in range(3)) and all(
+                        abs(omnibox[i]-(240,244,250)[i])<15 for i in range(3)):
+                        break
+                time.sleep(.35)
+            else:
+                capture("chrome-not-ready")
+                raise AssertionError("WebView2 browser chrome never finished mounting")
+            time.sleep(.75)
             capture("initial")
             report["checks"]["native_window"]="PASS"
+            report["checks"]["chrome_ready"]="PASS"
             report["startup_window_ms"]=round((time.monotonic()-start)*1000)
             type_url(origin+"/browser-lab/fixtures/gui-smoke.html")
             red=wait_color((238,53,78),"first-tab",seconds=55)
