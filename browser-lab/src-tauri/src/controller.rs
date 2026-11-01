@@ -258,7 +258,9 @@ fn grants() -> io::Result<(HashSet<String>, bool)> {
 }
 impl Controller {
     pub fn with_resource_dir(resource_dir: Option<PathBuf>) -> Self {
-        Self { bundle_resource_dir: resource_dir, ..Self::default() }
+        let mut controller = Self::default();
+        controller.bundle_resource_dir = resource_dir;
+        controller
     }
     fn view(&self, frame: Option<String>) -> View {
         View {
