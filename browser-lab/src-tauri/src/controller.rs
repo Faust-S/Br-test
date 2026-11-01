@@ -28,6 +28,7 @@ type Transport = WebSocketStream<MaybeTlsStream<TcpStream>>;
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Action {
     Boot,
+    Restart,
     Capture,
     NewTab { url: String },
     SelectTab { id: String },
@@ -275,6 +276,40 @@ impl Controller {
         self.status = "Obscura CDP connected · laboratory mode".into();
         Ok(())
     }
+    async fn restart_owned(&mut self) -> io::Result<()> {
+        // Never discover a process by name or port and never terminate a
+        // foreign process. All handles originate from this controller.
+        let addresses = self.pages.iter().map(|p| p.tab.url.clone()).collect::<Vec<_>>();
+        let active_index = self.pages.iter().position(|p| Some(&p.tab.id) == self.active.as_ref());
+        for address in &addresses { self.guard(address)?; }
+
+        self.connection.take();
+        if let Some(mut child) = self.owned.take() {
+            // Already-exited children are harmless; their exit is read back.
+            if child.try_wait()?.is_none() {
+                child.start_kill()?;
+            }
+            child.wait().await?;
+        }
+        self.pages.clear();
+        self.active = None;
+        self.status = "Restarting owned Obscura process".into();
+        self.start().await?;
+        if addresses.is_empty() {
+            self.spawn_tab("about:blank".into()).await?;
+        } else {
+            for address in addresses { self.spawn_tab(address).await?; }
+            if let Some(index) = active_index {
+                if let Some(page) = self.pages.get(index) {
+                    self.active = Some(page.tab.id.clone());
+                    self.resize().await?;
+                    self.refresh().await?;
+                }
+            }
+        }
+        Ok(())
+    }
+
     async fn spawn_tab(&mut self, url: String) -> io::Result<()> {
         if self.pages.len() >= 10 { return Err(denied("10-tab limit")); }
         let url = self.guard(&url)?;
@@ -355,6 +390,7 @@ impl Controller {
                 self.start().await?;
                 if self.pages.is_empty() { self.spawn_tab("about:blank".into()).await?; }
             }
+            Action::Restart => self.restart_owned().await?,
             other => {
                 if self.connection.is_none() { return Err(denied("Obscura must be started first")); }
                 match other {
@@ -430,7 +466,7 @@ impl Controller {
                         if text.chars().count()>256 { return Err(denied("Text too long")); }
                         self.page("Input.insertText",json!({"text":text})).await?;
                     }
-                    Action::Boot => unreachable!(),
+                    Action::Boot | Action::Restart => unreachable!(),
                 }
             }
         }

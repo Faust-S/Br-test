@@ -3,7 +3,7 @@ import type { FormEvent, KeyboardEvent as ReactKeyEvent, MouseEvent, WheelEvent 
 import { invoke } from "@tauri-apps/api/core";
 import {
   ArrowLeft, ArrowRight, Bookmark, BookOpen, Clock3, Globe2, Home, Plus,
-  RefreshCw, Search, ShieldAlert, X
+  RefreshCw, RotateCcw, Search, ShieldAlert, X
 } from "lucide-react";
 
 type Tab = {
@@ -21,7 +21,7 @@ type View = {
   height: number;
   status: string;
 };
-type Action = { type: "boot" | "capture" | "back" | "forward" | "reload" }
+type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "reload" }
   | { type: "new_tab" | "navigate"; url: string }
   | { type: "select_tab" | "close_tab"; id: string }
   | { type: "resize"; width: number; height: number }
@@ -95,7 +95,7 @@ export default function App() {
         }
       }
       if (next.frame && action.type === "capture") setImage("data:image/png;base64," + next.frame);
-      if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload"].includes(action.type)) setImage("");
+      if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload", "restart"].includes(action.type)) setImage("");
       if (action.type !== "capture" && action.type !== "resize") setError(null);
       if (document.activeElement !== address.current) {
         const tab = next.tabs.find(t => t.id === next.active);
@@ -196,6 +196,7 @@ export default function App() {
           </div>)}
         </div>
         <IconButton label="New tab (Ctrl+T)" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Plus size={17}/></IconButton>
+        <IconButton label="Restart owned engine and restore tabs" onClick={() => void issue({ type: "restart" })}><RotateCcw size={16}/></IconButton>
       </div>
       <div className="toolbar">
         <IconButton label="Back (Alt+Left)" disabled={!active?.back} onClick={() => void issue({ type: "back" })}><ArrowLeft size={18}/></IconButton>
