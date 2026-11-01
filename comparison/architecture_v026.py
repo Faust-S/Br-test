@@ -16,15 +16,30 @@ def acquire_v026():
     global CACHE
     if CACHE: return CACHE
     tag='v0.2.6'
-    obj=paired.old.read_json('https://api.github.com/repos/h4ckf0r0day/obscura/releases/tags/'+tag)
+    # Official release asset digests recorded at qualification time and pinned
+    # into this public source. Never trust a mutable release API response at
+    # build time: anonymous GitHub API requests may also fail with HTTP 403.
+    pinned={
+      'obscura-x86_64-windows.zip':'0a110d0693753a252ed7ffd61e682363e8622caf79697f564c529099a31a6242',
+      'obscura-x86_64-linux.tar.gz':'eed986e478c5ec5439f531f2d7fb6b0e36a356f1df7a6c44a8e8fd4f2486bd76',
+    }
     filename='obscura-x86_64-windows.zip' if sys.platform=='win32' else 'obscura-x86_64-linux.tar.gz'
-    asset=next(a for a in obj['assets'] if a['name']==filename)
-    expected=asset.get('digest','')
-    if not expected.startswith('sha256:'):raise RuntimeError('Missing official digest')
+    expected=pinned[filename]
+    download_url=f'https://github.com/h4ckf0r0day/obscura/releases/download/{tag}/{filename}'
     archive=OUT/filename
-    with urllib.request.urlopen(asset['browser_download_url'],timeout=120) as r,archive.open('wb') as f:shutil.copyfileobj(r,f)
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest()!=expected:
+        part=OUT/(filename+'.incomplete')
+        try:
+            request=urllib.request.Request(download_url,headers={'User-Agent':'IWXA-Public-Obscura-Qualification/0.2.6'})
+            with urllib.request.urlopen(request,timeout=120) as source,part.open('wb') as output:
+                shutil.copyfileobj(source,output)
+            digest=hashlib.sha256(part.read_bytes()).hexdigest()
+            if digest!=expected:raise RuntimeError('Pinned official release checksum mismatch')
+            part.replace(archive)
+        finally:
+            part.unlink(missing_ok=True)
     sha=hashlib.sha256(archive.read_bytes()).hexdigest()
-    if sha!=expected.split(':')[1]:raise RuntimeError('Official asset hash mismatch')
+    if sha!=expected:raise RuntimeError('Pinned official release checksum mismatch')
     dest=OUT/'obscura-bin'
     dest.mkdir(exist_ok=True)
     if filename.endswith('.zip'):
@@ -33,7 +48,7 @@ def acquire_v026():
         with tarfile.open(archive) as t:t.extractall(dest,filter='data')
     executable=next(p for p in dest.rglob('obscura.exe' if sys.platform=='win32' else 'obscura') if p.is_file())
     executable.chmod(0o700)
-    CACHE=(executable,{'tag':tag,'asset':filename,'sha256':sha})
+    CACHE=(executable,{'tag':tag,'asset':filename,'sha256':sha,'source':download_url,'digest_source':'pinned-official-release-metadata'})
     return CACHE
 
 def current_mib(e):
