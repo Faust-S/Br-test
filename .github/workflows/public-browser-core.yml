@@ -11,6 +11,9 @@ on:
       - "browser-lab/tests/native_route.py"
       - ".github/workflows/public-browser-core.yml"
   workflow_dispatch:
+concurrency:
+  group: public-obscura-browser-${{ github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
