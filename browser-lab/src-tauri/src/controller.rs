@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use std::{
     collections::HashSet,
     fs,
-    io,
+    io::{self, Read},
     net::{Ipv4Addr, Ipv6Addr},
     path::{Path, PathBuf},
     time::{Duration, Instant},
@@ -169,7 +169,17 @@ fn verified_digest(path: &Path, expected: &str) -> io::Result<PathBuf> {
     }
     let path = fs::canonicalize(path)?;
     if !path.is_file() { return Err(denied("Obscura executable missing")); }
-    let digest = hex::encode(Sha256::digest(fs::read(&path)?));
+    // Hash the packaged executable in a small bounded buffer rather than
+    // reading the entire engine binary into transient browser-shell memory.
+    let mut file = fs::File::open(&path)?;
+    let mut hasher = Sha256::new();
+    let mut chunk = [0u8; 64 * 1024];
+    loop {
+        let bytes = file.read(&mut chunk)?;
+        if bytes == 0 { break; }
+        hasher.update(&chunk[..bytes]);
+    }
+    let digest = hex::encode(hasher.finalize());
     if digest != expected.to_ascii_lowercase() {
         return Err(denied("Obscura executable does not match compiled SHA-256"));
     }
@@ -939,6 +949,17 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn packaged_engine_integrity_check_reads_multiple_bounded_chunks() {
+        let file = std::env::temp_dir().join(format!("iwxa-engine-digest-{}", Uuid::new_v4()));
+        let data = vec![0x5au8; 2 * 64 * 1024 + 19];
+        fs::write(&file, &data).unwrap();
+        let digest = hex::encode(Sha256::digest(&data));
+        assert_eq!(verified_digest(&file, &digest).unwrap(), fs::canonicalize(&file).unwrap());
+        assert!(verified_digest(&file, &"0".repeat(64)).is_err());
+        assert!(verified_digest(&file, "short").is_err());
+        fs::remove_file(file).unwrap();
+    }
     #[test]
     fn cdp_screencast_rejects_wrong_session_and_oversized_frames() {
         let mut controller=Controller::default();

@@ -221,3 +221,21 @@ cold restart, and Workspace-address navigation in the **same bundled engine
 build**. It captures screenshots of the remote pages for independent visual
 review. It does **not** upgrade URL persistence into proof of page hydration
 or T2 Result persistence.
+
+## Real Learn render confirmed and compact startup hashing
+
+GitHub's `effbac1` Linux artifact contains the actual bundled Obscura page
+with the Learn product rendered, not merely a saved address. The test next
+missed the tab `+` button: the live screenshot puts it around x=253 after
+one tab, whereas the old action clicked x=285 outside the hit region.
+The existing live-site test now clicks the real button correctly and requires
+a green native document-ready indicator after opening each public domain and
+each /workspace route. Document-ready is not proof of hydrated React,
+real T2 Result persistence or receipt readback; those still require
+independent product evidence.
+
+At browser start, packaged-engine SHA-256 verification previously loaded
+the entire Obscura executable into the shell's heap with `fs::read`.
+The controller now hashes in 64 KiB chunks, retaining byte-for-byte digest
+validation and reducing peak transient memory on both Windows and Linux.
+This does not modify the engine binary, database or process topology.

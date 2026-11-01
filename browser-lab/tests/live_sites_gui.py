@@ -83,6 +83,22 @@ def wait_consent_dialog(seconds=18):
     raise AssertionError("ArtBazi approval modal did not appear after address input")
 
 
+def wait_remote_document(name, seconds=70):
+    # The browser's status marker becomes green only after the native
+    # Obscura document reaches readyState=complete. This proves a real
+    # remote-document load, not hydration or a T2 Result transaction.
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        image = screenshot("poll-" + name)
+        pixel = image.getpixel((16, 857))
+        if pixel[1] > pixel[0] + 60 and pixel[1] > pixel[2] + 35:
+            image.save(OUT / (name + ".png"))
+            return
+        time.sleep(.6)
+    screenshot(name + "-not-ready")
+    raise AssertionError(name + ": Obscura remote document never reached ready state")
+
+
 def type_address(url):
     # Actual pointer path works on both WebKitGTK and Windows WebView2.
     gui.click(430, 86)
@@ -95,7 +111,9 @@ def type_address(url):
 def open_tab(session, number):
     # A real user click on the small '+' control, not a keyboard accelerator
     # potentially consumed by GTK/WebView2 while a remote page is loading.
-    gui.click(285, 42)
+    # In the 1250px native window the new-tab button is directly after
+    # a single 220px tab; x=285 is outside its 34px hit target.
+    gui.click(253, 42)
     wait_session(session, lambda state:
         len(state.get("tabs", [])) == number and
         state["tabs"][state["active"]] == "about:blank",
@@ -153,8 +171,8 @@ def main():
                         "Learn card approval and native navigation", seconds=65)
                     report["checks"]["learn_card_approved"] = "PASS"
                     report["checks"]["learn_saved_url"] = saved["tabs"][saved["active"]]
-                    time.sleep(8)
-                    screenshot("learn-public-page")
+                    wait_remote_document("learn-public-page")
+                    report["checks"]["learn_native_document_ready"] = "PASS"
 
                     open_tab(session, 2)
                     type_address(SITES[1][1])  # ArtBazi address + user consent
@@ -169,8 +187,8 @@ def main():
                         "ArtBazi consent and native navigation", seconds=65)
                     report["checks"]["artbazi_address_approved"] = "PASS"
                     report["checks"]["artbazi_saved_url"] = saved["tabs"][saved["active"]]
-                    time.sleep(8)
-                    screenshot("artbazi-public-page")
+                    wait_remote_document("artbazi-public-page")
+                    report["checks"]["artbazi_native_document_ready"] = "PASS"
                     report["checks"]["browser_session_before_restart"] = saved["tabs"]
                 else:
                     saved = wait_session(session, lambda state:
@@ -187,8 +205,8 @@ def main():
                         any(url.startswith(SITES[1][2]) for url in state.get("tabs", [])),
                         "ArtBazi Workspace address")
                     report["checks"]["artbazi_workspace_address"] = "PASS"
-                    time.sleep(7)
-                    screenshot("artbazi-workspace-capture")
+                    wait_remote_document("artbazi-workspace-capture")
+                    report["checks"]["artbazi_workspace_document_ready"] = "PASS"
 
                     gui.click(145, 43)  # original Learn tab
                     time.sleep(.6)
@@ -197,8 +215,8 @@ def main():
                         any(url.startswith(SITES[0][2]) for url in state.get("tabs", [])),
                         "Learn Workspace address")
                     report["checks"]["learn_workspace_address"] = "PASS"
-                    time.sleep(7)
-                    screenshot("learn-workspace-capture")
+                    wait_remote_document("learn-workspace-capture")
+                    report["checks"]["learn_workspace_document_ready"] = "PASS"
                 gui.stop_tree(process)
                 process = None
             report["status"] = "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"
