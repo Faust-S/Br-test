@@ -9,6 +9,9 @@ not as a hidden fallback page engine.
 - Desktop top tabs, address/search input, back/forward, bookmarks, keyboard shortcuts.
 - Native Rust controller starts a pinned Obscura binary, manages CDP targets, sends
   click, key, text, wheel and viewport-size updates, captures PNG from same engine.
+- The browser chrome keeps its own bookmarks and history. The restart-engine command
+  terminates only its **owned** Obscura child and reopens permitted tab URLs;
+  runtime restart/recovery still requires installed-GUI acceptance.
 - A publicly reproducible Windows/Linux workflow compiles the desktop source and
   executes real native Obscura against a generic local fixture.
 - The public fixture exercises mouse, keyboard, wheel, new tab, history and PNG.
