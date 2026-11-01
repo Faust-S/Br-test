@@ -53,7 +53,7 @@ pub enum Action {
     Boot,
     Restart,
     Capture,
-    OpenSite { site: String },
+    OpenSite { site: String, url: Option<String> },
     ResetSites,
     NewTab { url: String },
     SelectTab { id: String },
@@ -266,6 +266,17 @@ fn parse_grants(raw: Option<&str>, fixture: bool) -> io::Result<HashSet<String>>
     }
     if origins.is_empty() { return Err(denied("Empty origin grant")); }
     Ok(origins)
+}
+fn validated_preview_destination(site: &str, destination: Option<&str>) -> io::Result<String> {
+    let origin = session::preview_site_origin(site)
+        .ok_or_else(|| denied("Unknown public preview site"))?;
+    let default = format!("{origin}/");
+    let requested = destination.unwrap_or(&default);
+    if requested == "about:blank" {
+        return Err(denied("Site approval must open its site"));
+    }
+    let exact = HashSet::from([origin.to_owned()]);
+    allowed_url(requested, &exact, false)
 }
 fn grants() -> io::Result<(HashSet<String>, bool)> {
     let raw = match std::env::var("OBSCURA_LAB_ALLOWED_ORIGINS") {
@@ -523,13 +534,13 @@ impl Controller {
         self.fixture_mode = fixture_mode;
         let default_profile = dirs::data_local_dir().ok_or_else(|| denied("Missing local data directory"))?
             .join("ObscuraBrowserLab").join("profile-v1");
-        // Only explicit local fixture runs can override the engine profile.
-        // Normal browsing always uses its dedicated per-product directory.
-        let profile = if fixture_mode {
+        // An explicit profile override is available to DEBUG test builds only.
+        // Release builds always use the native product profile, without env grants.
+        let profile = if cfg!(debug_assertions) {
             match std::env::var_os("OBSCURA_LAB_PROFILE_DIR") {
                 Some(path) => {
                     let path = PathBuf::from(path);
-                    if !path.is_absolute() { return Err(denied("Fixture profile must be an absolute path")); }
+                    if !path.is_absolute() { return Err(denied("Debug profile must be absolute")); }
                     path
                 }
                 None => default_profile,
@@ -804,15 +815,17 @@ impl Controller {
                         return Ok(self.view(frame));
                     }
                     Action::NewTab{url} => self.spawn_tab(url).await?,
-                    Action::OpenSite{site} => {
+                    Action::OpenSite{site,url} => {
                         if self.fixture_mode {
                             return Err(denied("Public site picker disabled in fixture mode"));
                         }
+                        // Validate before granting: the UI may pass a deep link,
+                        // but only under the exact compiled HTTPS origin.
+                        let destination = validated_preview_destination(&site, url.as_deref())?;
                         let origin = session::preview_site_origin(&site)
                             .ok_or_else(|| denied("Unknown public preview site"))?;
                         self.granted_sites.insert(site);
                         self.allowed.insert(origin.to_owned());
-                        let destination = format!("{origin}/");
                         if self.active.is_some() { self.navigate(destination).await?; }
                         else { self.spawn_tab(destination).await?; }
                     }
@@ -1028,6 +1041,25 @@ mod tests {
         assert!(allowed_url("http://127.0.0.1:8080/page",&allow,true).is_ok());
         assert!(allowed_url("http://127.0.0.1:8080/page",&allow,false).is_err());
         assert!(allowed_url("http://127.0.0.1:8090/page",&allow,true).is_err());
+    }
+    #[test]
+    fn typed_approved_site_links_are_validated_natively() {
+        assert_eq!(
+            validated_preview_destination("learn", Some("https://learn.iwxa.ru/workspace/#results")).unwrap(),
+            "https://learn.iwxa.ru/workspace/#results"
+        );
+        assert_eq!(validated_preview_destination("artbazi", None).unwrap(), "https://artbazi.ru/");
+        for (id,raw) in [
+            ("learn", "https://evil.example/"),
+            ("learn", "https://learn.iwxa.ru.evil.example/"),
+            ("learn", "http://learn.iwxa.ru/"),
+            ("learn", "file:///etc/passwd"),
+            ("learn", "about:blank"),
+            ("learn", "https://user:pass@learn.iwxa.ru/"),
+            ("missing", "https://learn.iwxa.ru/"),
+        ] {
+            assert!(validated_preview_destination(id, Some(raw)).is_err(), "{id}:{raw}");
+        }
     }
     #[test]
     fn no_environment_grants_required_for_normal_browsing() {

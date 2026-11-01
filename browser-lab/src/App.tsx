@@ -23,9 +23,20 @@ type View = {
   granted_sites: string[];
   site_picker_available: boolean;
 };
+type SiteId = "learn" | "artbazi";
+type SiteApproval = {site: SiteId; url: string};
+const siteNames: Record<SiteId,string> = {learn: "Learn", artbazi: "ArtBazi"};
+function previewSiteFor(url: string): SiteId | null {
+  try {
+    const origin = new URL(url).origin;
+    if (origin === "https://learn.iwxa.ru") return "learn";
+    if (origin === "https://artbazi.ru") return "artbazi";
+  } catch { /* Native validation remains the authority for URL syntax. */ }
+  return null;
+}
 type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "reload" }
   | { type: "new_tab" | "navigate"; url: string }
-  | { type: "open_site"; site: "learn" | "artbazi" }
+  | { type: "open_site"; site: SiteId; url?: string }
   | { type: "reset_sites" }
   | { type: "select_tab" | "close_tab"; id: string }
   | { type: "resize"; width: number; height: number }
@@ -72,6 +83,7 @@ export default function App() {
   const [image, setImage] = useState("");
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [siteApproval, setSiteApproval] = useState<SiteApproval | null>(null);
   const [bookmarks, setBookmarks] = useState(stored);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -148,6 +160,12 @@ export default function App() {
 
   useEffect(() => {
     const handle = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape" && siteApproval) {
+        e.preventDefault();
+        setSiteApproval(null);
+        return;
+      }
+      if (siteApproval) return;
       if (e.ctrlKey || e.metaKey) {
         if (e.altKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); void issue({ type: "restart" }); }
         if (e.key.toLowerCase() === "l") { e.preventDefault(); address.current?.focus(); address.current?.select(); }
@@ -159,7 +177,7 @@ export default function App() {
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [issue]);
+  }, [issue, siteApproval]);
 
   useEffect(() => { activeTabButton.current?.scrollIntoView({block: "nearest", inline: "nearest"}); }, [view.active]);
   useEffect(() => { localStorage.setItem(bookmarksKey, JSON.stringify(bookmarks)); }, [bookmarks]);
@@ -170,7 +188,20 @@ export default function App() {
 
   function visit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    void issue({ type: "navigate", url: addressToUrl(input) });
+    const url = addressToUrl(input);
+    if (view.site_picker_available && url !== "about:blank") {
+      const site = previewSiteFor(url);
+      if (!site) {
+        setError("This preview accepts only HTTPS addresses on Learn or ArtBazi.");
+      } else if (!view.granted_sites.includes(site)) {
+        setSiteApproval({site, url});
+        setError(null);
+      } else {
+        void issue({type:"navigate",url});
+      }
+    } else {
+      void issue({type:"navigate",url});
+    }
     address.current?.blur();
   }
   function point(e: MouseEvent<HTMLDivElement>) {
@@ -297,6 +328,26 @@ export default function App() {
             <strong>{item.title}</strong><small>{item.url}</small>
           </button>)}
       </aside>}
+      {siteApproval && <div className="approval-backdrop">
+        <section className="approval-dialog" role="dialog" aria-modal="true"
+          aria-labelledby="approval-title" aria-describedby="approval-message">
+          <ShieldAlert size={23} aria-hidden="true"/>
+          <h2 id="approval-title">Open {siteNames[siteApproval.site]}?</h2>
+          <p id="approval-message">This preview opens only selected IWXA sites.
+            Allow this exact HTTPS site for this browser profile?</p>
+          <code>{siteApproval.url}</code>
+          <div className="approval-actions">
+            <button type="button" className="approval-cancel" autoFocus
+              onClick={() => setSiteApproval(null)}>Cancel</button>
+            <button type="button" className="approval-allow"
+              onClick={() => {
+                const choice=siteApproval;
+                setSiteApproval(null);
+                void issue({type:"open_site",site:choice.site,url:choice.url});
+              }}>Allow and open</button>
+          </div>
+        </section>
+      </div>}
       {error && <div className="error" role="alert"><ShieldAlert size={17}/><span>{error}</span>
         <IconButton label="Dismiss" onClick={() => setError(null)}><X size={15}/></IconButton></div>}
     </main>

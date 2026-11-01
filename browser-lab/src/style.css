@@ -90,6 +90,18 @@ kbd{font-family:inherit;display:inline-block;padding:2px 6px;border:1px solid #e
 .bookmark-entry{display:flex;flex-direction:column;gap:4px;width:100%;border:0;border-bottom:1px solid #edf2f8;background:transparent;padding:12px 16px;text-align:left;overflow-wrap:anywhere}
 .bookmark-entry:hover{background:#eef5ff}
 .bookmark-entry strong{font-size:12px}.bookmark-entry small{color:#7a91aa;font-size:11px}
+.approval-backdrop{position:absolute;inset:0;z-index:10;display:grid;place-items:center;
+  padding:18px;background:#0d203a66}
+.approval-dialog{width:min(460px,100%);border:1px solid #cad8e9;border-radius:17px;
+  box-shadow:0 18px 60px #10284255;background:#fff;padding:25px;color:#273f60}
+.approval-dialog h2{font-size:20px;margin:8px 0}
+.approval-dialog p{font-size:13px;color:#55708d}
+.approval-dialog code{display:block;overflow-wrap:anywhere;padding:10px;border:1px solid #e0e9f4;
+  background:#f4f7fb;border-radius:9px;color:#255d9b;font-size:12px}
+.approval-actions{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}
+.approval-actions button{border:1px solid #bbd0ec;padding:9px 15px;border-radius:8px;font-weight:650}
+.approval-cancel{background:#fff}.approval-allow{background:#286ee3;color:#fff}
+.approval-actions button:hover{filter:brightness(.96)}
 .error{position:absolute;z-index:7;top:12px;left:50%;transform:translateX(-50%);max-width:calc(100% - 22px);width:660px;
   display:flex;align-items:center;gap:9px;background:#fff8f6;border:1px solid #f0c6c0;color:#8f3d3e;padding:11px;border-radius:12px;box-shadow:0 8px 30px #1a2a4e20}
 .error span{flex:1;overflow-wrap:anywhere}
@@ -134,6 +146,10 @@ kbd{font-family:inherit;display:inline-block;padding:2px 6px;border:1px solid #e
   .site-choice small,.site-picker-label{color:#9bc1f4}
   .statusbar{background:#1a2a42;border-color:#344961;color:#b2c3d8}
   .more-menu,.drawer{background:#233650;border-color:#455c7a;color:#eef6ff}
+  .approval-dialog{background:#233650;border-color:#455c7a;color:#eaf2ff}
+  .approval-dialog p{color:#adc4dc}
+  .approval-dialog code{background:#1b2c45;border-color:#3b5578;color:#bcd9ff}
+  .approval-cancel{background:#2a3c56;color:#eaf2ff;border-color:#547293}
   .more-menu p{color:#aabed7;border-color:#455c7a}
   .more-menu button:hover,.bookmark-entry:hover{background:#314969}
 }

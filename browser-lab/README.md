@@ -151,6 +151,20 @@ This is a restricted preview, not a secure arbitrary-Internet browser.
 Subresource requests, redirects, DNS rebinding, OS process isolation,
 downloads, and full T2 Workspace routes remain outside acceptance.
 
+## Typed-address consent flow
+
+Typing a Learn or ArtBazi deep link in the address bar on a fresh profile
+opens an explicit, keyboard-accessible approval dialog instead of producing an
+opaque "not granted" error. Approving passes the full requested URL to the
+existing native OpenSite command; Rust validates that URL against the selected
+compiled-in exact HTTPS origin **before** granting it. Cancel leaves site
+permissions unchanged. Addresses on other sites do not prompt or navigate.
+Debug fixture runs retain their existing explicit-origin test behavior.
+
+For an isolated normal-mode test, DEBUG builds may override the native
+profile with an absolute `OBSCURA_LAB_PROFILE_DIR` without enabling fixture
+network mode. Release builds ignore that profile environment override.
+
 ## Pending external HTTPS navigation
 
 An HTTPS page may still be loading when Page.navigate acknowledges. The native
@@ -160,3 +174,18 @@ surface until a real Obscura frame arrives. On subsequent metadata refreshes
 the actual document URL, title and readiness replace the pending state.
 The stale-document grace is bounded at 25 seconds. This is not a network
 sandbox and it does not qualify an external website as a T2 Result.
+
+## Real public-site desktop probe
+
+The existing patched-engine bundled-GUI workflow now reuses the **same built
+Linux binary** for an additional real-user Learn/ArtBazi route. It starts
+the browser without origin-grant environment variables and with a unique
+DEBUG profile, types each public domain, approves via the new dialog, opens
+both sites, terminates the app, and checks that both tabs and approvals restore.
+Then it visits each published /workspace route and captures desktop evidence.
+No separate build or workflow is introduced; the live network probe is
+explicitly reported as PASS or HOLD without blocking the proven IndexedDB gate.
+
+This probe qualifies only user navigation, opt-in, and browser-owned session
+restoration. It deliberately does **not** claim page hydration, T2 Result
+creation, persistence of a real Workspace object, or hostile-site sandboxing.

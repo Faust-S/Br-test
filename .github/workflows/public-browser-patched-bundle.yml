@@ -5,6 +5,7 @@ on:
     paths:
       - ".github/workflows/public-browser-patched-bundle.yml"
       - "browser-lab/tests/packaged_idb_gui.py"
+      - "browser-lab/tests/live_sites_gui.py"
       - "browser-lab/src-tauri/src/controller.rs"
   workflow_dispatch:
 permissions:
@@ -102,10 +103,19 @@ jobs:
             export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"
             xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/packaged_idb_gui.py
           fi
+      - name: Real public Learn and ArtBazi routes (reuses the bundled Linux build)
+        if: runner.os == 'Linux'
+        continue-on-error: true
+        shell: bash
+        run: |
+          export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"
+          xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/live_sites_gui.py
       - name: Upload packaged GUI screenshots and readback report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: bundled-idb-gui-${{ matrix.os }}
-          path: artifacts/browser-lab/patched-gui/
+          path: |
+            artifacts/browser-lab/patched-gui/
+            artifacts/browser-lab/live-sites/
           retention-days: 7
