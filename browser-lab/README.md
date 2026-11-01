@@ -80,3 +80,34 @@ The permanent IWXA logo and preview badge were removed from the tab strip. The O
 ## Event-driven Obscura frames (native integration)
 
 The browser now uses Obscura's upstream `Page.startScreencast` and activity-driven `Page.screencastFrame` events rather than calling `Page.captureScreenshot` every 750 ms. A short native CDP read on a 125-ms UI tick coalesces frames and acknowledges consumption with `Page.screencastFrameAck`; no new render process or IPC authority is introduced. Only one selected tab streams at a time. Hidden windows stop read ticks, and Obscura's in-flight cap handles backpressure. The original browser engine still draws and encodes PNG, so this is not yet zero-copy GPU compositing. Real GUI/Windows acceptance is required; the public fixture alone is insufficient.
+
+
+## One-engine patched installation candidate
+
+The first **resource-bundled patched-engine** route now lives in the public
+`browser-lab/scripts/stage_patched_engine.py` and
+`src-tauri/tauri.patched.conf.json`. It is not a final signed release.
+
+1. Check out upstream Obscura at exactly
+   `8534b401898ed17b62f69bdc3d5eb186bffb0d60`.
+2. Apply the two existing public source overrides from `engine-overrides/`.
+3. Build `obscura-cli` with `--features render --bin obscura`.
+4. Set `OBSCURA_PATCHED_BINARY` to the resulting executable and run
+   `python browser-lab/scripts/stage_patched_engine.py`.
+5. Build from `browser-lab/` with
+   `npx tauri build --debug --no-bundle --config src-tauri/tauri.patched.conf.json`.
+
+The build script validates the staged executable and embeds its exact SHA-256
+in the native application; runtime validates the packaged Obscura again before
+executing it. A DEBUG-only override may use an adopted
+`OBSCURA_LAB_BINARY` plus `OBSCURA_LAB_SHA256`, while a release build cannot
+select its engine from those environment variables. Packaging a binary does
+**not** make it safe to run untrusted Internet pages and does not certify
+cross-platform installation, automatic updates, executable signing or
+isolation from the operating system.
+
+The dedicated public patched-bundle workflow executes an independent,
+real Tauri GUI IndexedDB write and readback after terminating the complete
+owned process tree and relaunching the application using the **same** engine
+profile. This is a browser session qualification, not acceptance of T2
+Workspace receipts or Exchange.
