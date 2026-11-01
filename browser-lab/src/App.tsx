@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyEvent, MouseEvent, WheelEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
-  ArrowLeft, ArrowRight, Bookmark, BookOpen, Globe2, Home, Plus,
+  ArrowLeft, ArrowRight, Bookmark, BookOpen, Clock3, Globe2, Home, Plus,
   RefreshCw, Search, ShieldAlert, X
 } from "lucide-react";
 
@@ -34,6 +34,16 @@ const blank: View = {
   active: null, tabs: [], frame: null, width: 960, height: 620, status: "Engine not started"
 };
 const bookmarksKey = "obscura-browser-lab.bookmarks";
+const historyKey = "obscura-browser-lab.history";
+type Visit = {url:string;title:string;visitedAt:number};
+function storedHistory(): Visit[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(historyKey) || "[]");
+    return Array.isArray(raw) ? raw.filter((x): x is Visit =>
+      typeof x?.url === "string" && typeof x?.title === "string" &&
+      typeof x?.visitedAt === "number" && x.url.length < 2048).slice(0,100) : [];
+  } catch { return []; }
+}
 function stored(): string[] {
   try {
     const parsed: unknown = JSON.parse(localStorage.getItem(bookmarksKey) || "[]");
@@ -59,6 +69,9 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [bookmarks, setBookmarks] = useState(stored);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [history, setHistory] = useState(storedHistory);
+  const lastObservedVisit = useRef("");
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const pending = useRef(0);
   const surface = useRef<HTMLDivElement>(null);
@@ -72,6 +85,15 @@ export default function App() {
     const work = queue.current.then(async () => {
       const next = await invoke<View>("command", { action });
       setView(next);
+      const tab = next.tabs.find(t => t.id === next.active);
+      if (tab && tab.url !== "about:blank" && !["capture", "resize"].includes(action.type)) {
+        const visitKey = tab.id + ":" + tab.url;
+        if (lastObservedVisit.current !== visitKey) {
+          lastObservedVisit.current = visitKey;
+          setHistory(items => [{url:tab.url,title:tab.title || tab.url,visitedAt:Date.now()},
+            ...items.filter(item=>item.url!==tab.url)].slice(0,100));
+        }
+      }
       if (next.frame && action.type === "capture") setImage("data:image/png;base64," + next.frame);
       if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload"].includes(action.type)) setImage("");
       if (action.type !== "capture" && action.type !== "resize") setError(null);
@@ -127,6 +149,7 @@ export default function App() {
   }, [issue]);
 
   useEffect(() => { localStorage.setItem(bookmarksKey, JSON.stringify(bookmarks)); }, [bookmarks]);
+  useEffect(() => { localStorage.setItem(historyKey, JSON.stringify(history)); }, [history]);
 
   const active = view.tabs.find(t => t.id === view.active);
   const saved = Boolean(active && bookmarks.includes(active.url));
@@ -188,7 +211,8 @@ export default function App() {
         <IconButton label={saved ? "Remove bookmark" : "Bookmark"} disabled={!active || active.url === "about:blank"}
           onClick={() => active && setBookmarks(prev => saved ? prev.filter(x => x !== active.url) : [active.url, ...prev].slice(0, 100))}>
           <Bookmark size={17} fill={saved ? "currentColor" : "none"}/></IconButton>
-        <IconButton label="Bookmarks" onClick={() => setBookmarksOpen(x => !x)}><BookOpen size={18}/></IconButton>
+        <IconButton label="Bookmarks" onClick={() => {setHistoryOpen(false);setBookmarksOpen(x => !x);}}><BookOpen size={18}/></IconButton>
+        <IconButton label="History" onClick={() => {setBookmarksOpen(false);setHistoryOpen(x => !x);}}><Clock3 size={18}/></IconButton>
       </div>
     </header>
     <main>
@@ -209,6 +233,14 @@ export default function App() {
         <IconButton label="Close" onClick={() => setBookmarksOpen(false)}><X size={15}/></IconButton></div>
         {bookmarks.length === 0 ? <p>No bookmarks.</p> : bookmarks.map(url =>
           <button className="bookmark-entry" key={url} onClick={() => {void issue({type:"navigate",url});setBookmarksOpen(false);}}>{url}</button>)}
+      </aside>}
+      {historyOpen && <aside className="drawer"><div className="drawer-title">History
+        <IconButton label="Close history" onClick={() => setHistoryOpen(false)}><X size={15}/></IconButton></div>
+        {history.length === 0 ? <p>No visited pages yet.</p> : history.map(item =>
+          <button className="bookmark-entry" key={item.url} title={item.url}
+            onClick={() => {void issue({type:"navigate",url:item.url});setHistoryOpen(false);}}>
+            <strong>{item.title}</strong><small>{item.url}</small>
+          </button>)}
       </aside>}
       {error && <div className="error" role="alert"><ShieldAlert size={17}/><span>{error}</span>
         <IconButton label="Dismiss" onClick={() => setError(null)}><X size={15}/></IconButton></div>}
