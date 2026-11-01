@@ -3,10 +3,9 @@ on:
   push:
     branches: [work/2026-11-01-public-browser-core]
     paths:
-      - "engine-overrides/**"
+      - "engine-overrides/obscura-v0.2.6/crates/**/*.rs"
       - "browser-lab/tests/idb_restart.py"
       - "browser-lab/fixtures/idb-crash-recovery.html"
-      - ".github/workflows/public-idb-restart.yml"
   workflow_dispatch:
 concurrency:
   group: public-obscura-idb-${{ github.ref }}
