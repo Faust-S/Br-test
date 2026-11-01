@@ -100,25 +100,28 @@ def main():
             cmd("xdotool","windowmove",wid,"0","0")
             cmd("xdotool","windowsize",wid,"1250","850")
             cmd("xdotool","windowactivate","--sync",wid)
-            # The window can be created before React has mounted, before
-            # the Rust Boot invoke returns, and before Ctrl+L is registered.
-            # Wait for the actual browser chrome and initial tab, not just an
-            # X11 window ID; never send keystrokes to an unready UI.
-            ready_deadline=time.monotonic()+40
-            while time.monotonic()<ready_deadline:
-                im=Image.open(shot("startup-poll")).convert("RGB")
-                if (all(abs(im.getpixel((200,45))[i]-255)<12 for i in range(3)) and
-                    all(abs(im.getpixel((500,65))[i]-[240,244,250][i])<19 for i in range(3))):
-                    break
+            # Window creation alone is not UI readiness. Instead of pixel-
+            # matching the changing browser chrome, prove readiness by the
+            # actual Obscura webpage appearing after address navigation.
+            # Retry the user's navigation if the React shortcut had not yet
+            # mounted. Do not mark navigation PASS until the content is visible.
+            shot("initial")
+            report["checks"]["native_window"]="PASS"
+            red=None
+            for attempt in range(3):
                 if procs[-1].poll() is not None:
-                    raise RuntimeError("Tauri exited while loading browser chrome")
-                time.sleep(.3)
-            else:
-                raise AssertionError("Browser chrome never became interactive")
-            time.sleep(.65)
-            shot("initial");report["checks"]["native_window"]="PASS"
-            key("ctrl+l");type_text(origin+"/browser-lab/fixtures/gui-smoke.html");key("Return")
-            red=find_color((238,53,78),"first-tab")
+                    raise RuntimeError("Tauri exited before navigation")
+                time.sleep(1.3)
+                key("ctrl+l")
+                type_text(origin+"/browser-lab/fixtures/gui-smoke.html")
+                key("Return")
+                try:
+                    red=find_color((238,53,78),"first-tab",seconds=16)
+                    break
+                except AssertionError:
+                    shot("navigation-attempt-"+str(attempt+1))
+            if red is None:
+                raise AssertionError("Address navigation never rendered Obscura fixture")
             report["checks"]["real_obscura_page_render"]="PASS"
             report["checks"]["unauthenticated_cdp_refused"]=assert_unauthorized_cdp_rejected(procs[-1].pid)
             n=len(EVENTS);click(red);await_event("click","one","1",n)
