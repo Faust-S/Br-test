@@ -363,3 +363,19 @@ fragment URL in the native saved tab session, then requires the real T2
 `workspace-view` and absence of record errors. If hydration is unavailable
 the run reports HOLD with screenshots rather than a false PASS. No domain
 Result or revision receipt is claimed.
+
+## Bounded module-script transport recovery
+
+Public Obscura issue #1222 identifies transient module-script loading
+failures that can strand Vite/React SPAs on their shell. Its proposed
+PR #1226 was still unmerged and out of date against pinned 0.2.6. The
+public engine overlay now uses a conservative three-attempt transport retry
+with short backoff in Obscura's **existing** JS module loader. There are
+no extra browser processes, requests on the normal successful path,
+new databases, custom React fallback or second network client.
+
+The existing packaged Windows/Linux workflow builds and tests the same
+native engine with IndexedDB persistence, then attempts the real ArtBazi
+creation/readback route. The retry is **not** considered proof of T2
+compatibility until the actual React Overview mounts and a workspace record
+survives full restart.

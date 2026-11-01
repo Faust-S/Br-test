@@ -7,6 +7,7 @@ on:
       - "browser-lab/tests/packaged_idb_gui.py"
       - "browser-lab/tests/live_sites_gui.py"
       - "browser-lab/src-tauri/src/controller.rs"
+      - "engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs"
   workflow_dispatch:
 permissions:
   contents: read
@@ -48,11 +49,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Verify pinned source and apply public IndexedDB fixes
+      - name: Verify pinned source and apply public native engine fixes
         shell: bash
         run: |
           test "$(cd upstream && git rev-parse HEAD)" = "8534b401898ed17b62f69bdc3d5eb186bffb0d60"
           cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/indexed_db.rs upstream/crates/obscura-js/src/indexed_db.rs
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs upstream/crates/obscura-js/src/module_loader.rs
           cp engine-overrides/obscura-v0.2.6/crates/obscura-browser/src/context.rs upstream/crates/obscura-browser/src/context.rs
       - name: Compile modified native Obscura with renderer
         run: cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
