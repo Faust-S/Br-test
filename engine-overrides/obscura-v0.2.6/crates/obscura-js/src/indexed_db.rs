@@ -529,3 +529,95 @@ mod tests {
         assert_eq!(second.command("https://idb.test","open_ready",json!({"name":"shared","opening":b})),json!(true));
     }
 }
+
+#[cfg(test)]
+mod durability_tests {
+    use super::*;
+    fn location() -> PathBuf {
+        let path = std::env::temp_dir().join(format!("obscura-idb-durable-test-{}", std::process::id()))
+            .join(format!("{}", TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)));
+        fs::create_dir_all(&path).unwrap();
+        path
+    }
+    fn transact(owner: &IndexedDbOwner, action: &str, name: &str,
+        mode: &str, value: Option<&str>) {
+        let origin = "https://idb.example";
+        let connection = owner.command(origin, "connect", json!({"name":name})).as_u64().unwrap();
+        let transaction = owner.command(origin, "begin",
+            json!({"name":name,"connection":connection,"mode":mode,"stores":["records","heads","audit"]})).as_u64().unwrap();
+        assert!(!owner.command(origin,"ready",json!({"id":transaction})).is_null());
+        if let Some(value) = value {
+            for store in ["records","heads","audit"] {
+                assert!(owner.command(origin,"put",json!({
+                    "id":transaction,"store":store,"key":"x","value":value})).is_null());
+            }
+        }
+        let schema = vec![json!({"name":"records"}),json!({"name":"heads"}),json!({"name":"audit"})];
+        let command = if action == "abort" { "abort" } else { "commit" };
+        assert!(owner.command(origin,command,json!({
+            "id":transaction,"schema":schema,"version":1})).is_null());
+    }
+    #[test]
+    fn commit_survives_a_real_new_storage_instance_abort_does_not() {
+        let path = location();
+        {
+            let storage = Arc::new(IndexedDbStorage::with_storage_dir(Some(&path)));
+            assert!(!storage.blocked);
+            let owner = IndexedDbOwner::new(storage);
+            transact(&owner,"commit","workspace","versionchange",Some("revision-1"));
+            transact(&owner,"abort","workspace","readwrite",Some("discarded"));
+        }
+        {
+            let storage = Arc::new(IndexedDbStorage::with_storage_dir(Some(&path)));
+            assert!(!storage.blocked);
+            let owner = IndexedDbOwner::new(storage);
+            let origin = "https://idb.example";
+            assert_eq!(owner.command(origin,"info",json!({"name":"workspace"}))["version"],1);
+            for store in ["records","heads","audit"] {
+                let connection = owner.command(origin,"connect",json!({"name":"workspace"}));
+                let tx = owner.command(origin,"begin",json!({
+                    "name":"workspace","connection":connection,"mode":"readonly","stores":[store]}));
+                let id = tx.as_u64().unwrap();
+                assert_eq!(owner.command(origin,"get",json!({"id":id,"store":store,"key":"x"})),
+                    json!("revision-1"));
+                owner.command(origin,"abort",json!({"id":id}));
+            }
+            assert_eq!(owner.command("https://other.example","databases",json!({})),json!([]));
+        }
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn damaged_snapshot_refuses_writes_and_preserves_damaged_file() {
+        let path = location();
+        let root = path.join("indexedDB");
+        fs::create_dir_all(&root).unwrap();
+        let file = root.join("snapshot-v1.json");
+        fs::write(&file,b"not valid JSON").unwrap();
+        let store = Arc::new(IndexedDbStorage::with_storage_dir(Some(&path)));
+        assert!(store.blocked);
+        let owner = IndexedDbOwner::new(store);
+        assert_eq!(owner.command("https://idb.example","info",json!({"name":"db"}))["error"],"UnknownError");
+        assert_eq!(fs::read(&file).unwrap(),b"not valid JSON");
+        fs::remove_dir_all(path).unwrap();
+    }
+    #[test]
+    fn deleted_database_stays_deleted_across_storage_restart() {
+        let path = location();
+        {
+            let store = Arc::new(IndexedDbStorage::with_storage_dir(Some(&path)));
+            let owner = IndexedDbOwner::new(store);
+            transact(&owner,"commit","deleted","versionchange",Some("before-delete"));
+        }
+        {
+            let store = Arc::new(IndexedDbStorage::with_storage_dir(Some(&path)));
+            let owner = IndexedDbOwner::new(store);
+            assert_eq!(owner.command("https://idb.example","delete",json!({"name":"deleted"})),json!(true));
+        }
+        {
+            let store = Arc::new(IndexedDbStorage::with_storage_dir(Some(&path)));
+            let owner = IndexedDbOwner::new(store);
+            assert_eq!(owner.command("https://idb.example","databases",json!({})),json!([]));
+        }
+        fs::remove_dir_all(path).unwrap();
+    }
+}
