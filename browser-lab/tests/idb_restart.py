@@ -66,7 +66,9 @@ def main():
             for i in (1,2):
                 value=session(binary,profile,url,f"restart-{i}")
                 report["checks"][f"restart_{i}"]=value
-                if value.get("status")!="PASS" or value.get("values")!=[7,7,7]:
+                report["checks"][f"restart_{i}_indexeddb"]={"status":"PASS" if value.get("values")==[7,7,7] else "FAIL"}
+                report["checks"][f"restart_{i}_localstorage_observed"]=value.get("local")
+                if value.get("values")!=[7,7,7]:
                     raise AssertionError(value)
         report["status"]="PASS_REAL_PROCESS_RESTART"
     except Exception as e:
