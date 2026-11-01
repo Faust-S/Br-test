@@ -83,6 +83,14 @@ def wait_consent_dialog(seconds=18):
     raise AssertionError("ArtBazi approval modal did not appear after address input")
 
 
+def observe_workspace_document(name, seconds=8):
+    # A Workspace can load HTML successfully without actually mounting
+    # canonical T2. Capture its visible state, but do not mark it ready.
+    time.sleep(seconds)
+    screenshot(name)
+    return "HTML_OBSERVED_T2_NOT_YET_QUALIFIED"
+
+
 def wait_remote_document(name, seconds=70):
     # The browser's status marker becomes green only after the native
     # Obscura document reaches readyState=complete. This proves a real
@@ -233,11 +241,14 @@ def main():
                         any(url.startswith(SITES[1][2]) for url in state.get("tabs", [])),
                         "ArtBazi Workspace address")
                     report["checks"]["artbazi_workspace_address"] = "PASS"
-                    wait_remote_document("artbazi-workspace-capture")
-                    report["checks"]["artbazi_workspace_document_ready"] = "PASS"
+                    report["checks"]["artbazi_workspace_html"] = observe_workspace_document(
+                        "artbazi-workspace-capture")
                     gui.key("ctrl+alt+shift+d")
-                    report["checks"]["artbazi_bootstrap_probe"] = wait_workspace_probe(
-                        OUT/"native.log", "artbazi")
+                    artbazi_probe = wait_workspace_probe(OUT/"native.log","artbazi")
+                    report["checks"]["artbazi_bootstrap_probe"] = artbazi_probe
+                    report["checks"]["artbazi_t2_host_mount"] = (
+                        "PASS" if artbazi_probe["result"].get("hostMounted") else "HOLD")
+                    screenshot("artbazi-workspace-after-probe")
                     report["checks"]["artbazi_t2_result_readback"] = "UNQUALIFIED"
 
                     reliable_click(145, 43)  # original Learn tab
@@ -247,11 +258,14 @@ def main():
                         any(url.startswith(SITES[0][2]) for url in state.get("tabs", [])),
                         "Learn Workspace address")
                     report["checks"]["learn_workspace_address"] = "PASS"
-                    wait_remote_document("learn-workspace-capture")
-                    report["checks"]["learn_workspace_document_ready"] = "PASS"
+                    report["checks"]["learn_workspace_html"] = observe_workspace_document(
+                        "learn-workspace-capture")
                     gui.key("ctrl+alt+shift+d")
-                    report["checks"]["learn_bootstrap_probe"] = wait_workspace_probe(
-                        OUT/"native.log", "learn")
+                    learn_probe = wait_workspace_probe(OUT/"native.log","learn")
+                    report["checks"]["learn_bootstrap_probe"] = learn_probe
+                    report["checks"]["learn_t2_host_mount"] = (
+                        "PASS" if learn_probe["result"].get("hostMounted") else "HOLD")
+                    screenshot("learn-workspace-after-probe")
                     report["checks"]["learn_t2_result_readback"] = "UNQUALIFIED"
                 gui.stop_tree(process)
                 process = None

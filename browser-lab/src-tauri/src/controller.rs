@@ -161,6 +161,7 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
     var text = document.body ? (document.body.textContent || '') : '';
     var stage = text.includes('Loading domain configuration') ? 'config-loading' :
         text.includes('Activating profile') ? 'profile-loading' : 'not-detected';
+    var hostMounted = !!document.querySelector('[data-t2-ui="workspace"]');
     var root = document.querySelector('#root');
     var paths = ['/_iwxa/domain.json','/_iwxa/domain-shell.json',
                  '/workspace/workspace.config.json'];
@@ -178,12 +179,20 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
         } finally { clearTimeout(timer); }
     }));
     var mains = Array.from(document.querySelectorAll('main'));
-    return {scope:'public-workspace',stage:stage,
+    return {scope:'public-workspace',stage:stage,hostMounted:hostMounted,
         rootChildren:root ? root.children.length : 0,
         mainTextLength:mains.reduce(function(n,element) {
             return n+(element.textContent||'').trim().length;
         },0), responses:responses};
 })()"#;
+
+
+fn is_preview_workspace(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else { return false; };
+    parsed.path().starts_with("/workspace") &&
+        session::PREVIEW_SITES.iter()
+            .any(|(_, origin)| parsed.origin().ascii_serialization() == *origin)
+}
 
 fn denied(message: &str) -> io::Error {
     io::Error::new(io::ErrorKind::PermissionDenied, message.to_owned())
@@ -840,7 +849,7 @@ impl Controller {
     async fn refresh(&mut self) -> io::Result<()> {
         if self.active.is_none() { return Ok(()); }
         let evaluation = self.page("Runtime.evaluate", json!({
-            "expression":"({url:location.href,title:document.title,ready:document.readyState})",
+            "expression":"({url:location.href,title:document.title,ready:document.readyState,t2Mounted:!!document.querySelector('[data-t2-ui=workspace]')})",
             "returnByValue":true
         })).await?;
         let value = &evaluation["result"]["value"];
@@ -869,6 +878,14 @@ impl Controller {
         }
         self.status = if url == "about:blank" {
             "Obscura connected · approved sites only".into()
+        } else if is_preview_workspace(url) {
+            // HTML readiness is not T2 readiness. Do not show a green
+            // "ready" indicator until the canonical Host actually mounted.
+            if value["t2Mounted"] == true {
+                "Workspace ready · Host mounted".into()
+            } else {
+                "Workspace initializing · Host not mounted".into()
+            }
         } else if value["ready"] == "complete" {
             "Page ready · approved origin".into()
         } else { "Loading approved website".into() };
@@ -1123,6 +1140,16 @@ mod tests {
         for (key,modifiers) in [("Tab", 2),("Tab", 1),("a", 0),("a", 1),("l", 2)] {
             assert!(editing_key_default(key, modifiers).is_none());
         }
+    }
+    #[test]
+    fn workspace_ready_is_exactly_scoped_to_the_two_public_site_origins() {
+        assert!(is_preview_workspace("https://learn.iwxa.ru/workspace/"));
+        assert!(is_preview_workspace("https://artbazi.ru/workspace/#/overview"));
+        assert!(!is_preview_workspace("https://learn.iwxa.ru.evil.example/workspace/"));
+        assert!(!is_preview_workspace("http://learn.iwxa.ru/workspace/"));
+        assert!(!is_preview_workspace("https://unknown.example/workspace/"));
+        assert!(!is_preview_workspace("https://learn.iwxa.ru/"));
+        assert!(!is_preview_workspace("about:blank"));
     }
     #[test]
     fn cdp_screencast_rejects_wrong_session_and_oversized_frames() {

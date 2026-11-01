@@ -292,3 +292,21 @@ The existing bundled Linux GUI workflow invokes the probe after loading
 both real Workspace routes. The artifact can now distinguish missing
 configuration responses, script readiness and a merely loaded HTML page.
 Actual T2 Results and receipt readback remain HOLD until witnessed.
+
+## T2 Host mount is distinct from HTML load
+
+In the public packaged-browser route (027a30e), Learn and ArtBazi each returned
+HTTP 200 and valid JSON from all **three** normative Host configuration paths.
+The early screenshot of Learn still displayed the bootstrap placeholder; the
+ArtBazi screenshot showed site-owned chrome but no workspace content. No
+config request was missing. The canonical T2 Host has the explicit
+`data-t2-ui="workspace"` root marker in its source.
+
+The normal browser now marks an approved `/workspace` URL **ready** only
+after that canonical marker exists in the actual Obscura document. A loaded
+HTML page without mounted Host stays in an amber `Workspace initializing`
+state rather than falsely displaying `Page ready`. The same already-present
+debug-only probe records a boolean Host-mount result and captures the
+post-probe window; it is not a release diagnostic or user menu action.
+The real-site route retains separate indicators for HTML navigation, Host
+mount and T2 Result readback, never claiming a Result on URL persistence.
