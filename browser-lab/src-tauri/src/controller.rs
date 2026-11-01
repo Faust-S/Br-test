@@ -161,7 +161,25 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
     var text = document.body ? (document.body.textContent || '') : '';
     var stage = text.includes('Loading domain configuration') ? 'config-loading' :
         text.includes('Activating profile') ? 'profile-loading' : 'not-detected';
-    var hostMounted = !!document.querySelector('[data-t2-ui="workspace"]');
+    // Inspect the same real DOM that is visible in the window. In particular,
+    // detect the actual overview, not only a fragile attribute selector.
+    var hostMounted = false, overviewRendered = false, createDialog = false;
+    var buttons = {};
+    var all = document.getElementsByTagName('*');
+    for (var n = 0; n < all.length; n++) {
+        var el = all[n];
+        var ui = el.getAttribute('data-t2-ui');
+        var testid = el.getAttribute('data-testid');
+        if (ui === 'workspace') hostMounted = true;
+        if (testid === 'overview-view') overviewRendered = true;
+        if (testid === 'create-workspace-dialog') createDialog = true;
+        if ((testid === 'new-workspace-toggle' || testid === 'create-workspace-confirm')
+            && el.getBoundingClientRect) {
+            var rect = el.getBoundingClientRect();
+            buttons[testid] = {x:Math.round(rect.left+rect.width/2),
+                y:Math.round(rect.top+rect.height/2)};
+        }
+    }
     var root = document.querySelector('#root');
     var paths = ['/_iwxa/domain.json','/_iwxa/domain-shell.json',
                  '/workspace/workspace.config.json'];
@@ -180,7 +198,8 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
     }));
     var mains = Array.from(document.querySelectorAll('main'));
     return {scope:'public-workspace',stage:stage,hostMounted:hostMounted,
-        rootChildren:root ? root.children.length : 0,
+        overviewRendered:overviewRendered,createDialog:createDialog,
+        buttons:buttons,rootChildren:root ? root.children.length : 0,
         mainTextLength:mains.reduce(function(n,element) {
             return n+(element.textContent||'').trim().length;
         },0), responses:responses};
@@ -849,7 +868,20 @@ impl Controller {
     async fn refresh(&mut self) -> io::Result<()> {
         if self.active.is_none() { return Ok(()); }
         let evaluation = self.page("Runtime.evaluate", json!({
-            "expression":"({url:location.href,title:document.title,ready:document.readyState,t2Mounted:!!document.querySelector('[data-t2-ui=workspace]')})",
+            "expression":r#"(() => {
+                var mounted=false, overview=false;
+                if (location.pathname.startsWith('/workspace')) {
+                    var nodes=document.getElementsByTagName('*');
+                    for (var i=0; i<nodes.length; i++) {
+                        var el=nodes[i];
+                        if (el.getAttribute('data-t2-ui')==='workspace') mounted=true;
+                        if (el.getAttribute('data-testid')==='overview-view') overview=true;
+                        if (mounted && overview) break;
+                    }
+                }
+                return {url:location.href,title:document.title,
+                    ready:document.readyState,t2Mounted:mounted,t2Overview:overview};
+            })()"#,
             "returnByValue":true
         })).await?;
         let value = &evaluation["result"]["value"];
@@ -881,10 +913,14 @@ impl Controller {
         } else if is_preview_workspace(url) {
             // HTML readiness is not T2 readiness. Do not show a green
             // "ready" indicator until the canonical Host actually mounted.
-            if value["t2Mounted"] == true {
-                "Workspace ready · Host mounted".into()
+            if value["t2Mounted"] == true && value["t2Overview"] == true {
+                "Workspace overview rendered".into()
+            } else if value["t2Mounted"] == true {
+                "Workspace Host mounted · loading view".into()
+            } else if value["t2Overview"] == true {
+                "Workspace overview visible · verifying Host".into()
             } else {
-                "Workspace initializing · Host not mounted".into()
+                "Workspace initializing · waiting for UI".into()
             }
         } else if value["ready"] == "complete" {
             "Page ready · approved origin".into()

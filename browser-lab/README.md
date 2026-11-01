@@ -310,3 +310,24 @@ debug-only probe records a boolean Host-mount result and captures the
 post-probe window; it is not a release diagnostic or user menu action.
 The real-site route retains separate indicators for HTML navigation, Host
 mount and T2 Result readback, never claiming a Result on URL persistence.
+
+## Live ArtBazi user operation, not merely document readiness
+
+The 76270bc Windows/Linux native and bundled checks passed. In real Linux
+screenshots the ArtBazi T2 Overview was rendered, including the actionable
+"Новая рабочая область" button, while the one-element Host CSS selector
+incorrectly reported "not mounted". Learn's navigation also appeared but
+multiple lazy cards were still loading. The status now checks the canonical
+Host attribute and the normative `overview-view` marker **independently**,
+using actual DOM attributes, so a partial Host and a visible Overview are
+not conflated. Merely loading the HTML document is still not "ready".
+
+The existing one-pass real-site GUI now attempts the first genuine
+user-level T2 operation: the visible ArtBazi "Новая рабочая область" action,
+followed by its real confirmation dialog. The existing DEBUG-only, read-only
+probe returns only the bounding-box center for the two fixed T2 user
+controls and whether the dialog/Overview is present. The test then uses
+actual native mouse clicks. No T2 API call, Kernel fabrication, injected
+state, or separate Workspace database is introduced. A successful click
+is **not** a Result receipt and is not qualified as persistence until T2
+readback after a full restart is independently demonstrated.

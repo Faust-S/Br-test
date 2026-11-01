@@ -141,12 +141,14 @@ def open_tab(session, number):
     wait_picker("new-tab-picker")
 
 
-def wait_workspace_probe(log_path, site, seconds=27):
+def wait_workspace_probe(log_path, site, seconds=27, since=0):
     marker = "IWXA_BROWSER_WORKSPACE_PROBE "
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline:
         try:
-            lines = log_path.read_text(encoding="utf-8",errors="replace").splitlines()
+            with log_path.open("rb") as handle:
+                handle.seek(since)
+                lines = handle.read().decode("utf-8", errors="replace").splitlines()
             for line in reversed(lines):
                 if marker not in line: continue
                 data = json.loads(line.split(marker,1)[1])
@@ -155,6 +157,51 @@ def wait_workspace_probe(log_path, site, seconds=27):
             pass
         time.sleep(.4)
     raise AssertionError(f"Native debug-only Workspace probe {site} did not respond")
+
+
+def request_probe(site, log_path=OUT/"native.log"):
+    # Distinguish a new user-triggered observation from the previous one.
+    since=log_path.stat().st_size if log_path.exists() else 0
+    gui.key("ctrl+alt+shift+d")
+    return wait_workspace_probe(log_path,site,since=since)
+
+
+def native_workspace_click(point):
+    # Debug DOM gives only public action geometry. The action itself remains
+    # a real native pointer click through the Tauri/Obscura input path.
+    if not isinstance(point,dict) or not all(isinstance(point.get(k),int) for k in ("x","y")):
+        raise AssertionError("Visible T2 user action has no usable native geometry")
+    x,y=point["x"],point["y"]
+    if not (0<x<1200 and 0<y<730):
+        raise AssertionError("T2 action would be outside expected viewport")
+    # Linux native title/tab/address chrome consumes 111 vertical pixels;
+    # read back actual click outcome rather than asserting coordinates alone.
+    reliable_click(x,y+111)
+
+
+def attempt_artbazi_create(initial, report):
+    view=initial.get("result") or {}
+    report["checks"]["artbazi_overview_rendered"] = (
+        "PASS" if view.get("overviewRendered") else "HOLD")
+    if not view.get("overviewRendered"):
+        raise AssertionError("ArtBazi overview not rendered; cannot create T2 Workspace")
+    toggle=(view.get("buttons") or {}).get("new-workspace-toggle")
+    native_workspace_click(toggle)
+    time.sleep(1.1)
+    screenshot("artbazi-create-dialog")
+    dialog=request_probe("artbazi")
+    report["checks"]["artbazi_create_dialog_present"] = (
+        "PASS" if dialog["result"].get("createDialog") else "HOLD")
+    if not dialog["result"].get("createDialog"):
+        raise AssertionError("T2 create dialog not mounted after real user click")
+    confirm=(dialog["result"].get("buttons") or {}).get("create-workspace-confirm")
+    native_workspace_click(confirm)
+    time.sleep(3)
+    screenshot("artbazi-after-create")
+    report["checks"]["artbazi_create_submitted"] = "USER_ACTION_PERFORMED"
+    # The next acceptance step must read the created Workspace from T2
+    # catalog after a full restart. A click alone is not a T2 receipt.
+
 
 
 def main():
@@ -243,13 +290,13 @@ def main():
                     report["checks"]["artbazi_workspace_address"] = "PASS"
                     report["checks"]["artbazi_workspace_html"] = observe_workspace_document(
                         "artbazi-workspace-capture")
-                    gui.key("ctrl+alt+shift+d")
-                    artbazi_probe = wait_workspace_probe(OUT/"native.log","artbazi")
-                    report["checks"]["artbazi_bootstrap_probe"] = artbazi_probe
-                    report["checks"]["artbazi_t2_host_mount"] = (
+                    artbazi_probe=request_probe("artbazi")
+                    report["checks"]["artbazi_bootstrap_probe"]=artbazi_probe
+                    report["checks"]["artbazi_t2_host_mount"]=(
                         "PASS" if artbazi_probe["result"].get("hostMounted") else "HOLD")
                     screenshot("artbazi-workspace-after-probe")
-                    report["checks"]["artbazi_t2_result_readback"] = "UNQUALIFIED"
+                    attempt_artbazi_create(artbazi_probe,report)
+                    report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
 
                     reliable_click(145, 43)  # original Learn tab
                     time.sleep(.6)
@@ -260,8 +307,7 @@ def main():
                     report["checks"]["learn_workspace_address"] = "PASS"
                     report["checks"]["learn_workspace_html"] = observe_workspace_document(
                         "learn-workspace-capture")
-                    gui.key("ctrl+alt+shift+d")
-                    learn_probe = wait_workspace_probe(OUT/"native.log","learn")
+                    learn_probe = request_probe("learn")
                     report["checks"]["learn_bootstrap_probe"] = learn_probe
                     report["checks"]["learn_t2_host_mount"] = (
                         "PASS" if learn_probe["result"].get("hostMounted") else "HOLD")
