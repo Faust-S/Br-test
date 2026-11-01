@@ -77,4 +77,28 @@ window.startReadback = () => begin(async db => {
     localStorageRestartRequired: false };
 });
 </script>
+<style>
+body { margin:0;background:#fff;color:#233447;font:19px system-ui,sans-serif; }
+h1{margin:24px 60px;font-size:28px}
+button{position:absolute;top:180px;width:180px;height:88px;color:white;border:0;font-size:20px;font-weight:bold}
+#write{left:80px;background:rgb(238,53,78)}
+#read{left:310px;background:rgb(33,106,202)}
+#result{position:absolute;left:80px;top:300px}
+</style>
+<button id="write">Save IndexedDB</button>
+<button id="read">Read IndexedDB</button>
+<output id="result" aria-live="polite">Ready</output>
+<script>
+const sendResult=(kind)=>(async()=>{
+  const deadline=Date.now()+24000;
+  while(window.__persist.phase!=="done" && Date.now()<deadline)await new Promise(r=>setTimeout(r,100));
+  const record=window.__persist;
+  document.getElementById("result").textContent=kind+": "+JSON.stringify(record);
+  await fetch("/lab-event",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({kind,tab:"idb",detail:record.status||"TIMEOUT",
+    values:record.values||record.committed||[]})});
+})();
+document.getElementById("write").addEventListener("click",()=>{window.startPersist();void sendResult("idb_write");});
+document.getElementById("read").addEventListener("click",()=>{window.startReadback();void sendResult("idb_read");});
+</script>
 </body></html>
