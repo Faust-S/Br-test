@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "public-browser-lab",
+  "description": "Only chrome UI is loaded in Tauri; sites execute in Obscura.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
