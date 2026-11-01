@@ -1,0 +1,72 @@
+name: Public native Windows Tauri Obscura GUI acceptance
+on:
+  push:
+    branches: [work/2026-11-01-public-browser-core]
+    paths:
+      - "browser-lab/src/**"
+      - "browser-lab/src-tauri/**"
+      - "browser-lab/fixtures/gui-smoke.html"
+      - "browser-lab/tests/native_gui_windows.py"
+      - ".github/workflows/public-browser-windows-gui.yml"
+  workflow_dispatch:
+concurrency:
+  group: public-browser-windows-gui-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  gui-windows:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: browser-lab/src-tauri
+          key: native-windows-gui
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build standalone Windows Tauri browser with embedded React assets
+        shell: pwsh
+        run: |
+          Set-Location browser-lab
+          npm install --no-audit --no-fund
+          npx tauri build --debug --no-bundle
+      - name: Install public native GUI tools
+        shell: pwsh
+        run: python -m pip install Pillow==11.3.0 pyautogui==0.9.54 psutil==7.0.0 websocket-client==1.8.0
+      - name: Acquire SHA-256 verified official Obscura v0.2.6 executable
+        shell: pwsh
+        run: |
+          @'
+          import os,sys
+          sys.path.insert(0, "comparison")
+          from architecture_v026 import acquire_v026
+          path,identity=acquire_v026()
+          with open(os.environ["GITHUB_ENV"],"a",encoding="utf-8") as f:
+              f.write("OBSCURA_LAB_BINARY="+str(path.resolve())+"\n")
+          print(identity)
+          '@ | python -
+      - name: Execute actual Windows desktop clicks text and engine restart
+        shell: pwsh
+        run: |
+          $env:OBSCURA_LAB_GUI_BINARY="$env:GITHUB_WORKSPACE\browser-lab\src-tauri\target\debug\obscura-browser-lab.exe"
+          python browser-lab/tests/native_gui_windows.py
+      - name: Print diagnostics on Windows GUI failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Get-Content artifacts/browser-lab/windows-gui/report.json -ErrorAction SilentlyContinue
+          Get-Content artifacts/browser-lab/windows-gui/tauri-stdout.log -ErrorAction SilentlyContinue | Select-Object -Last 100
+      - name: Save real Windows GUI evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-browser-native-windows-gui
+          path: artifacts/browser-lab/windows-gui/
+          retention-days: 7
