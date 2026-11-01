@@ -52,24 +52,25 @@ def main():
         "source_sha":os.environ.get("GITHUB_SHA"),"not_t2_acceptance":True,"checks":{}}
     server=http.server.ThreadingHTTPServer(("127.0.0.1",0),Handler)
     threading.Thread(target=server.serve_forever,daemon=True).start()
-    url=f"http://127.0.0.1:{server.server_port}/comparison/iwxa-ui-fixture.html"
+    url=f"http://127.0.0.1:{server.server_port}/browser-lab/fixtures/idb-crash-recovery.html"
     try:
         with tempfile.TemporaryDirectory(prefix="idb-public-") as folder:
             profile=Path(folder)/"profile"
             profile.mkdir()
             write=session(binary,profile,url,"write")
             report["checks"]["commit_and_abort"]=write
-            if write.get("status")!="PASS":raise AssertionError(write)
+            if write.get("status")!="PASS" or write.get("committed")!=[7,7,7] or write.get("rolledBack")!=[7,7,7]:
+                raise AssertionError("Atomic commit/abort fixture failed: "+str(write))
             snapshot=profile/"indexedDB"/"snapshot-v1.json"
             if not snapshot.is_file():raise AssertionError("No durable engine snapshot")
             report["checks"]["snapshot_bytes"]=snapshot.stat().st_size
             for i in (1,2):
                 value=session(binary,profile,url,f"restart-{i}")
                 report["checks"][f"restart_{i}"]=value
-                report["checks"][f"restart_{i}_indexeddb"]={"status":"PASS" if value.get("values")==[7,7,7] else "FAIL"}
-                report["checks"][f"restart_{i}_localstorage_observed"]=value.get("local")
-                if value.get("values")!=[7,7,7]:
-                    raise AssertionError(value)
+                if value.get("status")!="PASS" or value.get("values")!=[7,7,7]:
+                    raise AssertionError("IndexedDB restart readback failed: "+str(value))
+                report["checks"][f"restart_{i}_indexeddb"]="PASS"
+                report["checks"][f"restart_{i}_localstorage_observed_only"]=value.get("localStorageAfterRestart")
         report["status"]="PASS_REAL_PROCESS_RESTART"
     except Exception as e:
         report["status"]="FAIL_REAL_PROCESS_RESTART"

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Public Obscura IndexedDB crash recovery</title>
+<body><h1>IndexedDB durability fixture</h1>
+<script>
+"use strict";
+const stores = ["records", "heads", "audit"];
+const dbName = "obscura-lab-idb-v1";
+window.__persist = { phase: "idle" };
+function openDb() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(dbName, 1);
+    request.onupgradeneeded = () => {
+      for (const name of stores) {
+        if (!request.result.objectStoreNames.contains(name)) request.result.createObjectStore(name);
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+function txDone(tx) {
+  return new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve(true);
+    tx.onabort = () => reject(tx.error || Error("Transaction aborted"));
+    tx.onerror = () => reject(tx.error || Error("Transaction failed"));
+  });
+}
+function readStore(db, name) {
+  return new Promise((resolve, reject) => {
+    const request = db.transaction(name, "readonly").objectStore(name).get("entry");
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+function begin(action) {
+  window.__persist = { phase: "running" };
+  (async () => {
+    const db = await openDb();
+    try { return await action(db); }
+    finally { db.close(); }
+  })().then(
+    data => window.__persist = { phase: "done", status: "PASS", ...data },
+    error => window.__persist = { phase: "done", status: "FAIL", error: String(error) }
+  );
+}
+window.startPersist = () => begin(async db => {
+  const tx = db.transaction(stores, "readwrite");
+  const complete = txDone(tx);
+  for (const name of stores) tx.objectStore(name).put({ v: 7, revision: 1 }, "entry");
+  await complete;
+  const committed = [];
+  for (const name of stores) committed.push((await readStore(db, name))?.v ?? null);
+  if (JSON.stringify(committed) !== "[7,7,7]") throw Error("Commit not visible");
+
+  // Abort a multi-store replacement; no changed record may leak to disk.
+  const abort = db.transaction(stores, "readwrite");
+  const aborted = new Promise((resolve, reject) => {
+    abort.onabort = () => resolve(true);
+    abort.oncomplete = () => reject(Error("Explicit abort unexpectedly committed"));
+  });
+  for (const name of stores) {
+    const request = abort.objectStore(name).put({ v: 999 }, "entry");
+    if (name === "audit") request.onsuccess = () => abort.abort();
+  }
+  await aborted;
+  const rolledBack = [];
+  for (const name of stores) rolledBack.push((await readStore(db, name))?.v ?? null);
+  if (JSON.stringify(rolledBack) !== "[7,7,7]") throw Error("Abort leaked to store");
+  localStorage.setItem("lab-local-control", "saved");
+  return { committed, rolledBack, localStorageInProcess: localStorage.getItem("lab-local-control") };
+});
+window.startReadback = () => begin(async db => {
+  const values = [];
+  for (const name of stores) values.push((await readStore(db, name))?.v ?? null);
+  if (JSON.stringify(values) !== "[7,7,7]") throw Error("IndexedDB process-restart readback mismatch: " + JSON.stringify(values));
+  return { values, localStorageAfterRestart: localStorage.getItem("lab-local-control"),
+    localStorageRestartRequired: false };
+});
+</script>
+</body></html>

@@ -5,6 +5,7 @@ on:
     paths:
       - "engine-overrides/**"
       - "browser-lab/tests/idb_restart.py"
+      - "browser-lab/fixtures/idb-crash-recovery.html"
       - ".github/workflows/public-idb-restart.yml"
   workflow_dispatch:
 concurrency:

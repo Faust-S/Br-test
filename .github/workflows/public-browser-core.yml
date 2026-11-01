@@ -4,7 +4,11 @@ on:
     branches:
       - work/2026-11-01-public-browser-core
     paths:
-      - "browser-lab/**"
+      - "browser-lab/src/**"
+      - "browser-lab/src-tauri/**"
+      - "browser-lab/index.html"
+      - "browser-lab/package.json"
+      - "browser-lab/tests/native_route.py"
       - ".github/workflows/public-browser-core.yml"
   workflow_dispatch:
 permissions:
