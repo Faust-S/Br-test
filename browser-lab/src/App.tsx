@@ -77,6 +77,7 @@ export default function App() {
   const pending = useRef(0);
   const surface = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
+  const activeTabButton = useRef<HTMLButtonElement>(null);
   const activeView = useRef(view);
   const composing = useRef(false);
   activeView.current = view;
@@ -150,6 +151,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handle);
   }, [issue]);
 
+  useEffect(() => { activeTabButton.current?.scrollIntoView({block: "nearest", inline: "nearest"}); }, [view.active]);
   useEffect(() => { localStorage.setItem(bookmarksKey, JSON.stringify(bookmarks)); }, [bookmarks]);
   useEffect(() => { localStorage.setItem(historyKey, JSON.stringify(history)); }, [history]);
 
@@ -187,27 +189,24 @@ export default function App() {
   return <div className="browser-shell">
     <header>
       <div className="tab-strip">
-        <div className="brand" aria-label="IWXA Browser Preview">
-          <span className="brand-mark" aria-hidden="true">i</span>
-          <span className="brand-name">IWXA<small>BROWSER</small></span>
-        </div>
         <div role="tablist" aria-label="Tabs" className="tab-list">
           {view.tabs.map(tab => <div key={tab.id} className={"tab" + (tab.id === view.active ? " active" : "")}>
             <button className="tab-select" role="tab" aria-selected={tab.id === view.active}
+              ref={tab.id === view.active ? activeTabButton : null}
               onClick={() => void issue({ type: "select_tab", id: tab.id })}>
-              <Globe2 size={14}/><span>{tab.title || "New tab"}</span>
+              <Globe2 size={14}/><span>{tab.url === "about:blank" ? "New tab" : tab.title || tab.url}</span>
             </button>
             <IconButton label="Close tab" onClick={() => void issue({ type: "close_tab", id: tab.id })}><X size={13}/></IconButton>
           </div>)}
         </div>
         <IconButton label="New tab (Ctrl+T)" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Plus size={17}/></IconButton>
-        <div className="preview-label">PREVIEW</div>
       </div>
       <div className="toolbar">
         <IconButton label="Back (Alt+Left)" disabled={!active?.back} onClick={() => void issue({ type: "back" })}><ArrowLeft size={18}/></IconButton>
         <IconButton label="Forward (Alt+Right)" disabled={!active?.forward} onClick={() => void issue({ type: "forward" })}><ArrowRight size={18}/></IconButton>
         <IconButton label="Reload (Ctrl+R)" disabled={!active} onClick={() => void issue({ type: "reload" })}><RefreshCw size={17}/></IconButton>
-        <IconButton label="New blank tab" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Home size={17}/></IconButton>
+        <IconButton label="Home" disabled={!active || active.url === "about:blank"}
+          onClick={() => void issue({ type: "navigate", url: "about:blank" })}><Home size={17}/></IconButton>
         <form className="omnibox" onSubmit={visit}>
           <ShieldAlert size={16} aria-hidden="true" className="origin-icon"/>
           <input aria-label="Address or search" ref={address} placeholder="Search or enter a web address"

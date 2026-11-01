@@ -31,8 +31,8 @@ def find_color(rgb,name,seconds=50):
         shot("current")
         im=Image.open(OUT/"current.png").convert("RGB")
         pts=[]
-        for y in range(100,min(im.height,810),3):
-            for x in range(10,min(im.width,1200),3):
+        for y in range(175,min(im.height,810),3):
+            for x in range(60,min(im.width,455),3):
                 c=im.getpixel((x,y))
                 if all(abs(c[i]-rgb[i])<=23 for i in range(3)):pts.append((x,y))
         if len(pts)>100:
@@ -107,8 +107,8 @@ def main():
             ready_deadline=time.monotonic()+40
             while time.monotonic()<ready_deadline:
                 im=Image.open(shot("startup-poll")).convert("RGB")
-                if (im.getpixel((200,65)) == (255,255,255) and
-                    all(abs(im.getpixel((500,110))[i]-[240,244,250][i])<8 for i in range(3))):
+                if (im.getpixel((200,45)) == (255,255,255) and
+                    all(abs(im.getpixel((500,86))[i]-[240,244,250][i])<8 for i in range(3))):
                     break
                 if procs[-1].poll() is not None:
                     raise RuntimeError("Tauri exited while loading browser chrome")

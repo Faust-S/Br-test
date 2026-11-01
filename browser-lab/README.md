@@ -72,3 +72,7 @@ Developer branch: `work/2026-11-01-public-browser-core`.
 ## Browser chrome design (public preview)
 
 The chrome is now labelled **IWXA Browser Preview** (public code, no private IWXA components): familiar horizontal tabs, unobtrusive address bar, start page with the same search input, lightweight history and bookmarks, and a technical restart action behind the options menu. The browser retains its explicit origin restrictions; the UI must not claim that general Internet browsing is sandboxed or approved. Real Linux/Windows GUI screenshots are captured by the existing workflows.
+
+## Compact tab strip (2026-11-01)
+
+The permanent IWXA logo and preview badge were removed from the tab strip. The OS window icon/title and the new-tab page retain identity. The strip is ~41 CSS pixels tall and starts tabs at the left edge; the new-tab button follows the tab rail. Multiple tabs scroll horizontally, with the selected tab scrolled into view. The Home control now returns the current tab to the browser start page rather than duplicating the new-tab action. Native fixture UI checks only accept page-colored targets inside the Obscura content area, not similarly colored UI logos.

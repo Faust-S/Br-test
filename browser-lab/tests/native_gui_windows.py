@@ -77,8 +77,8 @@ def wait_color(rgb,name,seconds=45):
     while time.monotonic()<until:
         image=pyautogui.screenshot().convert("RGB")
         pts=[]
-        for y in range(90,min(image.height,780),4):
-            for x in range(20,min(image.width,1200),4):
+        for y in range(175,min(image.height,780),4):
+            for x in range(60,min(image.width,455),4):
                 v=image.getpixel((x,y))
                 if all(abs(v[i]-rgb[i])<28 for i in range(3)):
                     pts.append((x,y))
@@ -106,7 +106,7 @@ def type_url(url):
     # Windows WebView2 can consume Ctrl+L as a browser accelerator. Test the
     # ordinary pointer route first so we do not mistake the accelerator for
     # a navigation/engine regression.
-    pyautogui.click(430,125)
+    pyautogui.click(430,96)
     time.sleep(.28)
     pyautogui.hotkey("ctrl","a")
     pyautogui.write(url,interval=.025)
@@ -189,7 +189,7 @@ def main():
                 image=pyautogui.screenshot().convert("RGB")
                 if image.width>850 and image.height>130:
                     tab=image.getpixel((750,50))
-                    omnibox=image.getpixel((750,123))
+                    omnibox=image.getpixel((750,98))
                     if all(abs(tab[i]-(226,234,245)[i])<15 for i in range(3)) and all(
                         abs(omnibox[i]-(240,244,250)[i])<15 for i in range(3)):
                         break
