@@ -434,3 +434,25 @@ the existing diagnostic-only 200s CDP bridge. Neither changes the actual
 180000ms JavaScript/script-module budget or its 181s V8 backstop. They
 simply ensure the engine can exercise all 180 seconds without an unrelated
 earlier timeout. No release defaults are changed.
+
+## Lazy restored background tabs: one live product load per user selection
+
+The 180-second, full-logging experiment demonstrated that ArtBazi's T2
+Overview, create dialog and new Workspace record can render in the bundled
+engine. The same address persisted after a full Tauri restart but its record
+view did not reappear. Module loads completed without budget or evaluation
+errors. Upstream Obscura explicitly removed its old forced other-tab
+`suspend_js` behavior, so that mechanism is **not** asserted as the cause.
+
+The local browser controller nonetheless launched **every** saved tab during
+cold boot, then selected the last-saved active tab. That needlessly schedules
+unrelated SPA loads and increases concurrent V8 and network work. Instead,
+the same native CDP engine now restores each background tab as an inert
+`about:blank` target with its original allowed URL retained in the
+**existing** tab-session structure. Only the selected tab navigates at boot;
+a background tab navigates normally on its first user selection. Closing the
+active tab activates any selected deferred tab. No new engine process,
+additional store, privileged T2 call or unsandboxed URL is introduced.
+All restored URLs still pass the existing origin guard. The existing real
+ArtBazi create -> cold restart -> same-record GUI readback is the only
+product gate for this change, and its final status must be read from CI.

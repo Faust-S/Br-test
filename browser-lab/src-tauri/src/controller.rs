@@ -97,6 +97,9 @@ struct Page {
     target: String,
     session: String,
     pending_navigation: Option<(String, String, Instant)>,
+    // Persisted background tabs keep their address without starting a page.
+    // First activation performs a fresh, normal navigation in Obscura.
+    deferred_url: Option<String>,
 }
 pub struct Controller {
     owned: Option<Child>,
@@ -484,13 +487,14 @@ impl Controller {
             .and_then(session::read)
             .and_then(|state| self.admitted_session(state));
         if let Some(saved) = saved {
+            let active = saved.active;
             for url in saved.tabs {
-                self.spawn_tab(url).await?;
+                // Restore addresses in their original order but only navigate
+                // the selected tab. Background sites must not boot React and
+                // compete for the same engine during cold startup.
+                self.stage_restored_tab(url).await?;
             }
-            if let Some(tab) = self.pages.get(saved.active) {
-                self.active = Some(tab.tab.id.clone());
-                self.resize().await?;
-            }
+            self.activate_restored_tab(active).await?;
         }
         if self.pages.is_empty() {
             self.spawn_tab("about:blank".to_string()).await?;
@@ -833,18 +837,45 @@ impl Controller {
         if addresses.is_empty() {
             self.spawn_tab("about:blank".into()).await?;
         } else {
-            for address in addresses { self.spawn_tab(address).await?; }
-            if let Some(index) = active_index {
-                if let Some(page) = self.pages.get(index) {
-                    self.active = Some(page.tab.id.clone());
-                    self.resize().await?;
-                    self.refresh().await?;
-                }
-            }
+            for address in addresses { self.stage_restored_tab(address).await?; }
+            self.activate_restored_tab(active_index.unwrap_or(0)).await?;
         }
         Ok(())
     }
 
+    async fn stage_restored_tab(&mut self, url: String) -> io::Result<()> {
+        let allowed = self.guard(&url)?;
+        self.spawn_tab("about:blank".to_owned()).await?;
+        if allowed != "about:blank" {
+            let page = self.pages.last_mut()
+                .ok_or_else(|| denied("Restored tab was not created"))?;
+            page.tab.url = allowed.clone();
+            page.tab.title = "Restored tab · open to load".into();
+            page.deferred_url = Some(allowed);
+        }
+        Ok(())
+    }
+    async fn load_active_deferred(&mut self) -> io::Result<bool> {
+        let active = self.active.clone();
+        let page = self.pages.iter_mut()
+            .find(|p| Some(&p.tab.id) == active.as_ref())
+            .ok_or_else(|| denied("Restored tab not selected"))?;
+        let Some(url) = page.deferred_url.take() else { return Ok(false); };
+        // The engine still has about:blank. Reset only this tab's UI address
+        // before navigating so the existing pending-navigation guard can
+        // distinguish the true old document from the saved destination.
+        page.tab.url = "about:blank".into();
+        self.navigate(url).await?;
+        Ok(true)
+    }
+    async fn activate_restored_tab(&mut self, index: usize) -> io::Result<()> {
+        if let Some(page) = self.pages.get(index) {
+            self.active = Some(page.tab.id.clone());
+            self.resize().await?;
+            self.load_active_deferred().await?;
+        }
+        Ok(())
+    }
     async fn spawn_tab(&mut self, url: String) -> io::Result<()> {
         if self.pages.len() >= 10 { return Err(denied("10-tab limit")); }
         let url = self.guard(&url)?;
@@ -856,7 +887,8 @@ impl Controller {
         self.pages.push(Page {
             tab: Tab { id:id.clone(), url:"about:blank".into(),
                 title:"New tab".into(), back:false, forward:false },
-            target, session:session.clone(), pending_navigation: None
+            target, session:session.clone(), pending_navigation: None,
+            deferred_url: None
         });
         self.active = Some(id);
         self.cdp("Page.enable", json!({}), Some(session.clone())).await?;
@@ -1095,7 +1127,9 @@ impl Controller {
                         self.release_screencast().await;
                         self.active=Some(id);
                         self.resize().await?;
-                        self.refresh().await?;
+                        if !self.load_active_deferred().await? {
+                            self.refresh().await?;
+                        }
                     }
                     Action::CloseTab{id} => {
                         let index=self.pages.iter().position(|p| p.tab.id==id).ok_or_else(|| denied("Unknown tab"))?;
@@ -1108,7 +1142,10 @@ impl Controller {
                             self.active=self.pages.last().map(|p| p.tab.id.clone());
                         }
                         if self.pages.is_empty() { self.spawn_tab("about:blank".into()).await?; }
-                        else { self.resize().await?; }
+                        else {
+                            self.resize().await?;
+                            self.load_active_deferred().await?;
+                        }
                     }
                     Action::Navigate{url} => self.navigate(url).await?,
                     Action::Back => {
