@@ -86,7 +86,12 @@ export default function App() {
     pending.current++;
     const work = queue.current.then(async () => {
       const next = await invoke<View>("command", { action });
-      setView(next);
+      const previous = activeView.current;
+      if (action.type !== "capture" || previous.active !== next.active ||
+        previous.status !== next.status || JSON.stringify(previous.tabs) !== JSON.stringify(next.tabs)) {
+        activeView.current = next;
+        setView(next);
+      }
       const tab = next.tabs.find(t => t.id === next.active);
       if (tab && tab.url !== "about:blank") {
         const visitKey = tab.id + ":" + tab.url;
@@ -116,7 +121,7 @@ export default function App() {
   useEffect(() => {
     const timer = window.setInterval(() => {
       if (pending.current === 0 && !document.hidden && activeView.current.active) void issue({ type: "capture" });
-    }, 750);
+    }, 125);
     return () => window.clearInterval(timer);
   }, [issue]);
 

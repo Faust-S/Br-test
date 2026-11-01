@@ -11,7 +11,7 @@ use std::{
     io,
     net::{Ipv4Addr, Ipv6Addr},
     path::PathBuf,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::{
     net::TcpStream,
@@ -99,6 +99,10 @@ pub struct Controller {
     allowed: HashSet<String>,
     status: String,
     fixture_mode: bool,
+    stream_session: Option<String>,
+    stream_latest: Option<String>,
+    stream_ack_ids: Vec<i64>,
+    last_metadata_refresh: Instant,
 }
 impl Default for Controller {
     fn default() -> Self {
@@ -113,6 +117,10 @@ impl Default for Controller {
             allowed: HashSet::new(),
             status: "Not started".into(),
             fixture_mode: false,
+            stream_session: None,
+            stream_latest: None,
+            stream_ack_ids: Vec::new(),
+            last_metadata_refresh: Instant::now(),
         }
     }
 }
@@ -246,6 +254,78 @@ impl Controller {
     fn guard(&self, url: &str) -> io::Result<String> {
         allowed_url(url, &self.allowed, self.fixture_mode)
     }
+    // There is one native CDP reader. Responses and asynchronous screencast
+    // events MUST pass through the same decoder; otherwise a command can
+    // silently consume frames that arrived before its response.
+    async fn read_cdp(&mut self, duration: Duration) -> io::Result<Option<Value>> {
+        let transport = self.connection.as_mut()
+            .ok_or_else(|| denied("Obscura CDP is not connected"))?;
+        let packet = match timeout(duration, transport.next()).await {
+            Err(_) => return Ok(None),
+            Ok(None) => return Err(denied("Obscura CDP disconnected")),
+            Ok(Some(Err(error))) => return Err(denied(&format!("CDP transport: {error}"))),
+            Ok(Some(Ok(packet))) => packet,
+        };
+        let Message::Text(data) = packet else {
+            if matches!(packet, Message::Close(_)) {
+                return Err(denied("Obscura closed the CDP connection"));
+            }
+            return Ok(Some(json!({})));
+        };
+        let message: Value = serde_json::from_str(&data)
+            .map_err(|_| denied("Invalid Obscura CDP JSON"))?;
+        if message["method"] == "Page.screencastFrame" {
+            self.ingest_screencast_frame(&message)?;
+        }
+        Ok(Some(message))
+    }
+
+    fn ingest_screencast_frame(&mut self, message: &Value) -> io::Result<()> {
+        if self.stream_session.as_deref() != message["sessionId"].as_str() {
+            return Ok(());
+        }
+        // The numeric params.sessionId identifies a screencast stream and
+        // is distinct from the outer CDP target sessionId string.
+        let stream_id = message["params"]["sessionId"].as_i64()
+            .ok_or_else(|| denied("Obscura screencast stream ID missing"))?;
+        let data = message["params"]["data"].as_str()
+            .ok_or_else(|| denied("Obscura screencast frame missing"))?;
+        if data.len() > 16 * 1024 * 1024 || !data.starts_with("iVBORw0KGgo") {
+            return Err(denied("Oversized or invalid Obscura screencast frame"));
+        }
+        if self.stream_ack_ids.len() >= 4 {
+            return Err(denied("Obscura screencast backpressure exceeded"));
+        }
+        self.stream_latest = Some(data.to_owned());
+        self.stream_ack_ids.push(stream_id);
+        Ok(())
+    }
+
+    async fn send_cdp_unawaited(&mut self, method: &str, params: Value,
+        session: String) -> io::Result<()> {
+        self.request_id += 1;
+        let message = json!({
+            "id":self.request_id,"method":method,
+            "params":params,"sessionId":session
+        });
+        let transport = self.connection.as_mut()
+            .ok_or_else(|| denied("Obscura CDP is not connected"))?;
+        timeout(Duration::from_secs(3), transport.send(Message::Text(message.to_string().into())))
+            .await.map_err(|_| denied("Timed out acknowledging Obscura frame"))?
+            .map_err(|e| denied(&format!("Obscura ACK failed: {e}")))?;
+        Ok(())
+    }
+
+    async fn acknowledge_frames(&mut self) -> io::Result<()> {
+        if let Some(session) = self.stream_session.clone() {
+            for id in std::mem::take(&mut self.stream_ack_ids) {
+                self.send_cdp_unawaited("Page.screencastFrameAck",
+                    json!({"sessionId":id}),session.clone()).await?;
+            }
+        }
+        Ok(())
+    }
+
     async fn cdp(&mut self, method: &str, params: Value, session: Option<String>) -> io::Result<Value> {
         self.request_id += 1;
         let id = self.request_id;
@@ -253,23 +333,75 @@ impl Controller {
         if let Some(sid) = session {
             message["sessionId"] = sid.into();
         }
-        let transport = self.connection.as_mut().ok_or_else(|| denied("Obscura CDP is not connected"))?;
+        let transport = self.connection.as_mut()
+            .ok_or_else(|| denied("Obscura CDP is not connected"))?;
         timeout(Duration::from_secs(20), transport.send(Message::Text(message.to_string().into())))
             .await.map_err(|_| denied("Timed out sending to Obscura"))?
             .map_err(|e| denied(&e.to_string()))?;
         loop {
-            let frame = timeout(Duration::from_secs(20), transport.next())
-                .await.map_err(|_| denied("CDP response timed out; action outcome uncertain"))?
-                .ok_or_else(|| denied("CDP disconnected"))?
-                .map_err(|e| denied(&e.to_string()))?;
-            let Message::Text(data) = frame else { continue };
-            let response: Value = serde_json::from_str(&data).map_err(|_| denied("Invalid CDP JSON"))?;
+            let response = self.read_cdp(Duration::from_secs(20)).await?
+                .ok_or_else(|| denied("CDP response timed out; action outcome uncertain"))?;
             if response["id"].as_u64() != Some(id) { continue; }
             if !response["error"].is_null() {
                 return Err(denied(&format!("{method}: {}", response["error"])));
             }
             return Ok(response.get("result").cloned().unwrap_or(json!({})));
         }
+    }
+
+    async fn release_screencast(&mut self) {
+        if let Some(session) = self.stream_session.take() {
+            // If the target has already closed, the best-effort stop may fail.
+            let _ = self.cdp("Page.stopScreencast",json!({}),Some(session)).await;
+        }
+        self.stream_latest = None;
+        self.stream_ack_ids.clear();
+    }
+
+    async fn poll_screencast(&mut self) -> io::Result<Option<String>> {
+        let active_session = self.selected()?.session.clone();
+        if self.selected()?.tab.url == "about:blank" {
+            self.release_screencast().await;
+            return Ok(None);
+        }
+        if self.stream_session.as_deref() != Some(active_session.as_str()) {
+            self.release_screencast().await;
+            self.stream_session = Some(active_session.clone());
+            let result = self.cdp("Page.startScreencast",json!({
+                "format":"png","everyNthFrame":1,
+                "maxWidth":self.width,"maxHeight":self.height
+            }),Some(active_session)).await;
+            match result {
+                Ok(value) if value["obscuraAutonomousFrames"] == true => {}
+                Ok(_) => {
+                    self.stream_session = None;
+                    return Err(denied("Obscura native screencast support is unavailable"));
+                }
+                Err(error) => {
+                    self.stream_session = None;
+                    return Err(error);
+                }
+            }
+        }
+        // Keep capture work bounded; idle pages do not trigger rasterization.
+        // The native compositor generates frames only after page activity.
+        for _ in 0..4 {
+            if self.stream_latest.is_some() { break; }
+            if self.read_cdp(Duration::from_millis(12)).await?.is_none() {
+                break;
+            }
+        }
+        let image = self.stream_latest.take();
+        if image.is_some() {
+            // Ack only frames actually consumed by a capture tick. Without
+            // capture ticks (hidden window) the upstream 2-frame bound applies.
+            self.acknowledge_frames().await?;
+        }
+        if self.last_metadata_refresh.elapsed() >= Duration::from_secs(2) {
+            self.refresh().await?;
+            self.last_metadata_refresh = Instant::now();
+        }
+        Ok(image)
     }
     async fn page(&mut self, method: &str, params: Value) -> io::Result<Value> {
         let session = self.selected()?.session.clone();
@@ -367,6 +499,9 @@ impl Controller {
         let active_index = self.pages.iter().position(|p| Some(&p.tab.id) == self.active.as_ref());
         for address in &addresses { self.guard(address)?; }
 
+        self.stream_session = None;
+        self.stream_latest = None;
+        self.stream_ack_ids.clear();
         self.connection.take();
         if let Some(mut child) = self.owned.take() {
             // Already-exited children are harmless; their exit is read back.
@@ -424,6 +559,7 @@ impl Controller {
     }
     async fn navigate(&mut self, url: String) -> io::Result<()> {
         let url = self.guard(&url)?;
+        self.release_screencast().await;
         self.page("Page.navigate", json!({"url":url})).await?;
         self.refresh().await
     }
@@ -477,6 +613,9 @@ impl Controller {
         };
         if !alive {
             self.connection.take();
+            self.stream_session = None;
+            self.stream_latest = None;
+            self.stream_ack_ids.clear();
             self.status = "Owned Obscura process stopped; use Restart".into();
             return Err(denied("Obscura process stopped; restart owned engine to recover"));
         }
@@ -496,17 +635,13 @@ impl Controller {
                 match other {
                     Action::Capture => {
                         if self.active.is_none() { return Ok(self.view(None)); }
-                        self.refresh().await?;
-                        let value=self.page("Page.captureScreenshot",json!({"format":"png"})).await?;
-                        let png=value["data"].as_str().ok_or_else(|| denied("Screenshot missing"))?;
-                        if png.len()>16*1024*1024 || !png.starts_with("iVBORw0KGgo") {
-                            return Err(denied("Invalid or oversized PNG"));
-                        }
-                        return Ok(self.view(Some(png.to_owned())));
+                        let frame = self.poll_screencast().await?;
+                        return Ok(self.view(frame));
                     }
                     Action::NewTab{url} => self.spawn_tab(url).await?,
                     Action::SelectTab{id} => {
                         if !self.pages.iter().any(|p| p.tab.id==id) { return Err(denied("Unknown tab")); }
+                        self.release_screencast().await;
                         self.active=Some(id);
                         self.resize().await?;
                         self.refresh().await?;
@@ -514,6 +649,9 @@ impl Controller {
                     Action::CloseTab{id} => {
                         let index=self.pages.iter().position(|p| p.tab.id==id).ok_or_else(|| denied("Unknown tab"))?;
                         let removed=self.pages.remove(index);
+                        if self.stream_session.as_deref() == Some(removed.session.as_str()) {
+                            self.release_screencast().await;
+                        }
                         self.cdp("Target.closeTarget",json!({"targetId":removed.target}),None).await?;
                         if self.active.as_deref()==Some(id.as_str()) {
                             self.active=self.pages.last().map(|p| p.tab.id.clone());
@@ -522,11 +660,18 @@ impl Controller {
                         else { self.resize().await?; }
                     }
                     Action::Navigate{url} => self.navigate(url).await?,
-                    Action::Back => self.history(-1).await?,
-                    Action::Forward => self.history(1).await?,
+                    Action::Back => {
+                        self.release_screencast().await;
+                        self.history(-1).await?
+                    }
+                    Action::Forward => {
+                        self.release_screencast().await;
+                        self.history(1).await?
+                    }
                     Action::Reload => {
                         let current=self.selected()?.tab.url.clone();
                         self.guard(&current)?;
+                        self.release_screencast().await;
                         self.page("Page.reload",json!({})).await?;
                         self.refresh().await?;
                     }
@@ -534,8 +679,11 @@ impl Controller {
                         if !(160..=4096).contains(&width) || !(160..=4096).contains(&height) {
                             return Err(denied("Invalid viewport size"));
                         }
-                        self.width=width;self.height=height;
-                        self.resize().await?;
+                        if self.width != width || self.height != height {
+                            self.release_screencast().await;
+                            self.width=width;self.height=height;
+                            self.resize().await?;
+                        }
                     }
                     Action::Click{x,y} => {
                         self.check_point(x,y)?;
@@ -576,6 +724,21 @@ impl Controller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cdp_screencast_rejects_wrong_session_and_oversized_frames() {
+        let mut controller=Controller::default();
+        controller.stream_session=Some("page-1".into());
+        let wrong=json!({"sessionId":"page-2","params":{"sessionId":7,"data":"iVBORw0KGgo="}});
+        controller.ingest_screencast_frame(&wrong).unwrap();
+        assert!(controller.stream_latest.is_none());
+        let invalid=json!({"sessionId":"page-1","params":{"sessionId":7,"data":"bogus"}});
+        assert!(controller.ingest_screencast_frame(&invalid).is_err());
+        let valid=json!({"sessionId":"page-1","params":{"sessionId":9,"data":"iVBORw0KGgo="}});
+        controller.ingest_screencast_frame(&valid).unwrap();
+        assert_eq!(controller.stream_latest.as_deref(),Some("iVBORw0KGgo="));
+        assert_eq!(controller.stream_ack_ids,[9]);
+    }
+
     #[test]
     fn native_ready_identity_is_bound_to_spawned_pid_and_loopback() {
         let valid = r#"{"pid":1234,"host":"127.0.0.1","port":49152,"websocket_path":"/devtools/browser"}"#;

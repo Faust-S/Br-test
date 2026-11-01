@@ -76,3 +76,7 @@ The chrome is now labelled **IWXA Browser Preview** (public code, no private IWX
 ## Compact tab strip (2026-11-01)
 
 The permanent IWXA logo and preview badge were removed from the tab strip. The OS window icon/title and the new-tab page retain identity. The strip is ~41 CSS pixels tall and starts tabs at the left edge; the new-tab button follows the tab rail. Multiple tabs scroll horizontally, with the selected tab scrolled into view. The Home control now returns the current tab to the browser start page rather than duplicating the new-tab action. Native fixture UI checks only accept page-colored targets inside the Obscura content area, not similarly colored UI logos.
+
+## Event-driven Obscura frames (native integration)
+
+The browser now uses Obscura's upstream `Page.startScreencast` and activity-driven `Page.screencastFrame` events rather than calling `Page.captureScreenshot` every 750 ms. A short native CDP read on a 125-ms UI tick coalesces frames and acknowledges consumption with `Page.screencastFrameAck`; no new render process or IPC authority is introduced. Only one selected tab streams at a time. Hidden windows stop read ticks, and Obscura's in-flight cap handles backpressure. The original browser engine still draws and encodes PNG, so this is not yet zero-copy GPU compositing. Real GUI/Windows acceptance is required; the public fixture alone is insufficient.
