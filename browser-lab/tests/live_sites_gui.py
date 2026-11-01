@@ -99,9 +99,21 @@ def wait_remote_document(name, seconds=70):
     raise AssertionError(name + ": Obscura remote document never reached ready state")
 
 
+def reliable_click(x, y):
+    # Xvfb/Openbox sometimes stalls on xdotool mousemove --sync when the
+    # restored Obscura page is busy, although the window remains responsive.
+    # Send an ordinary pointer movement and click, without waiting for an
+    # exact X11 pointer position acknowledgement. This still uses native UI.
+    if gui.WINDOWS:
+        gui.click(x, y)
+    else:
+        gui.command("xdotool", "mousemove", str(x), str(y))
+        gui.command("xdotool", "click", "1")
+
+
 def type_address(url):
     # Actual pointer path works on both WebKitGTK and Windows WebView2.
-    gui.click(430, 86)
+    reliable_click(430, 86)
     time.sleep(.3)
     gui.key("ctrl+a")
     gui.text(url)
@@ -113,7 +125,7 @@ def open_tab(session, number):
     # potentially consumed by GTK/WebView2 while a remote page is loading.
     # In the 1250px native window the new-tab button is directly after
     # a single 220px tab; x=285 is outside its 34px hit target.
-    gui.click(253, 42)
+    reliable_click(253, 42)
     wait_session(session, lambda state:
         len(state.get("tabs", [])) == number and
         state["tabs"][state["active"]] == "about:blank",
@@ -164,7 +176,7 @@ def main():
 
                 if stage == "visit":
                     wait_picker("learn-picker-ready")
-                    gui.click(475, 597)  # Learn card, actual new-tab UI
+                    reliable_click(475, 597)  # Learn card, actual new-tab UI
                     saved = wait_session(session, lambda state:
                         "learn" in state.get("granted_sites", []) and
                         state["tabs"][state["active"]].startswith(SITES[0][1]),
@@ -208,7 +220,7 @@ def main():
                     wait_remote_document("artbazi-workspace-capture")
                     report["checks"]["artbazi_workspace_document_ready"] = "PASS"
 
-                    gui.click(145, 43)  # original Learn tab
+                    reliable_click(145, 43)  # original Learn tab
                     time.sleep(.6)
                     type_address(SITES[0][2])
                     wait_session(session, lambda state:

@@ -239,3 +239,15 @@ the entire Obscura executable into the shell's heap with `fs::read`.
 The controller now hashes in 64 KiB chunks, retaining byte-for-byte digest
 validation and reducing peak transient memory on both Windows and Linux.
 This does not modify the engine binary, database or process topology.
+
+## Confirmed two real sites and X11 pointer recovery
+
+The bundled Linux run for 11e5241 confirmed both Learn and ArtBazi actually
+loaded, with visible green document-ready status and user-approved origins.
+After a complete Tauri restart, both tabs and approvals were read back
+successfully. The subsequent Workspace navigation stalled in an X11 test
+helper: `xdotool mousemove --sync` timed out on a busy restored page.
+The native GUI probe now uses non-blocking X11 pointer movement followed by
+the same real mouse click. It still requires session persistence, exact
+approved origins and real document-ready evidence. T2 Result writes and
+readback remain unqualified.

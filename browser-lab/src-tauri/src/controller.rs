@@ -64,6 +64,7 @@ pub enum Action {
     Reload,
     Resize { width: u32, height: u32 },
     Click { x: f64, y: f64 },
+    Move { x: f64, y: f64 },
     Wheel { x: f64, y: f64, dx: f64, dy: f64 },
     Key { key: String, code: String, modifiers: u8 },
     Text { text: String },
@@ -704,11 +705,7 @@ impl Controller {
         }
         Ok(())
     }
-    async fn navigate(&mut self, url: String) -> io::Result<()> {
-        let url = self.guard(&url)?;
-        let previous = self.selected()?.tab.url.clone();
-        self.release_screencast().await;
-        self.page("Page.navigate", json!({"url":url})).await?;
+    fn mark_pending_navigation(&mut self, url: String, previous: String) {
         let active = self.active.clone();
         if let Some(page) = self.pages.iter_mut().find(|p| Some(&p.tab.id) == active.as_ref()) {
             page.pending_navigation = if url != previous {
@@ -724,6 +721,13 @@ impl Controller {
         self.status = if url == "about:blank" {
             "Obscura connected · approved sites only".to_owned()
         } else { "Loading approved website".to_owned() };
+    }
+    async fn navigate(&mut self, url: String) -> io::Result<()> {
+        let url = self.guard(&url)?;
+        let previous = self.selected()?.tab.url.clone();
+        self.release_screencast().await;
+        self.page("Page.navigate", json!({"url":url})).await?;
+        self.mark_pending_navigation(url, previous);
         Ok(())
     }
     async fn refresh(&mut self) -> io::Result<()> {
@@ -774,10 +778,14 @@ impl Controller {
         if index < 0 || index as usize >= items.len() { return Ok(()); }
         let item = &items[index as usize];
         let url = item["url"].as_str().ok_or_else(|| denied("History URL missing"))?;
-        self.guard(url)?;
+        let destination = self.guard(url)?;
         let entry = item["id"].as_u64().ok_or_else(|| denied("History ID missing"))?;
+        let previous = self.selected()?.tab.url.clone();
         self.page("Page.navigateToHistoryEntry",json!({"entryId":entry})).await?;
-        self.refresh().await
+        // History navigation can be asynchronous for HTTPS pages. Do not
+        // immediately query and re-save the previous document as the target.
+        self.mark_pending_navigation(destination, previous);
+        Ok(())
     }
     fn check_point(&self,x:f64,y:f64) -> io::Result<()> {
         if !x.is_finite() || !y.is_finite() || x < 0.0 || y < 0.0 ||
@@ -914,6 +922,12 @@ impl Controller {
                                 "type":t,"x":x,"y":y,"button":"left","clickCount":1
                             })).await?;
                         }
+                    }
+                    Action::Move{x,y} => {
+                        self.check_point(x,y)?;
+                        self.page("Input.dispatchMouseEvent",json!({
+                            "type":"mouseMoved","x":x,"y":y
+                        })).await?;
                     }
                     Action::Wheel{x,y,dx,dy} => {
                         self.check_point(x,y)?;

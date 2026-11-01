@@ -40,7 +40,7 @@ type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "rel
   | { type: "reset_sites" }
   | { type: "select_tab" | "close_tab"; id: string }
   | { type: "resize"; width: number; height: number }
-  | { type: "click"; x: number; y: number }
+  | { type: "click" | "move"; x: number; y: number }
   | { type: "wheel"; x: number; y: number; dx: number; dy: number }
   | { type: "key"; key: string; code: string; modifiers: number }
   | { type: "text"; text: string };
@@ -92,6 +92,7 @@ export default function App() {
   const lastObservedVisit = useRef("");
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const pending = useRef(0);
+  const lastPointerMove = useRef(0);
   const surface = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
   const activeTabButton = useRef<HTMLButtonElement>(null);
@@ -212,6 +213,18 @@ export default function App() {
     });
     e.currentTarget.focus();
   }
+  function move(e: MouseEvent<HTMLDivElement>) {
+    // Hover menus need real mouseMoved events inside Obscura, but not a
+    // high-frequency CDP stream. Keep shell CPU and IPC bounded.
+    const now = performance.now();
+    if (now - lastPointerMove.current < 120 || pending.current > 1) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    lastPointerMove.current = now;
+    void issue({ type: "move",
+      x: Math.round((e.clientX - rect.left) * view.width / rect.width),
+      y: Math.round((e.clientY - rect.top) * view.height / rect.height)
+    });
+  }
   function wheel(e: WheelEvent<HTMLDivElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
     void issue({ type: "wheel", dx: e.deltaX, dy: e.deltaY,
@@ -220,7 +233,9 @@ export default function App() {
     });
   }
   function keys(e: ReactKeyEvent<HTMLDivElement>) {
-    if (composing.current || e.nativeEvent.isComposing || e.ctrlKey || e.metaKey || e.key === "Tab") return;
+    if (composing.current || e.nativeEvent.isComposing || e.ctrlKey || e.metaKey) return;
+    // The webpage is an image-backed interactive surface. Tab/Shift+Tab
+    // must reach the remote document; otherwise forms cannot be traversed.
     e.preventDefault();
     if (e.key.length === 1) void issue({ type: "text", text: e.key });
     else void issue({ type: "key", key: e.key, code: e.code, modifiers:
@@ -278,7 +293,7 @@ export default function App() {
     <main>
       <div className="page" ref={surface}>
         {image && active && active.url !== "about:blank" ? <div className="interactive-frame" role="application" aria-label="Obscura captured webpage"
-          tabIndex={0} onClick={point} onWheel={wheel} onKeyDown={keys}
+          tabIndex={0} onClick={point} onMouseMove={move} onWheel={wheel} onKeyDown={keys}
           onCompositionStart={() => { composing.current = true; }}
           onCompositionEnd={e => { composing.current = false; if (e.data) void issue({ type: "text", text: e.data }); }}>
           <img draggable={false} alt="Obscura webpage capture" src={image}/>
