@@ -764,6 +764,23 @@ impl Controller {
     }
 
     async fn cdp(&mut self, method: &str, params: Value, session: Option<String>) -> io::Result<Value> {
+        // An explicit, DEBUG-only 180s SPA experiment needs the CDP bridge
+        // to outlive the engine watchdog; the normal product stays at 20s.
+        let diagnostic = cfg!(debug_assertions) && !self.fixture_mode &&
+            std::env::var("IWXA_SPA_DIAGNOSTIC_180S").as_deref() == Ok("1");
+        let command_limit = if diagnostic {
+            Duration::from_secs(200)
+        } else { Duration::from_secs(20) };
+        self.cdp_with_limit(method, params, session, command_limit).await
+    }
+
+    // A CDP command owns one absolute wall-clock budget, not a fresh budget
+    // for every unsolicited console/network/screencast event. Otherwise a
+    // busy or hostile page can keep the native controller hung indefinitely
+    // by sending unrelated events before its missing command response.
+    async fn cdp_with_limit(&mut self, method: &str, params: Value,
+        session: Option<String>, command_limit: Duration) -> io::Result<Value> {
+        let deadline = Instant::now() + command_limit;
         self.request_id += 1;
         let id = self.request_id;
         let mut message = json!({"id": id, "method": method, "params": params});
@@ -772,18 +789,16 @@ impl Controller {
         }
         let transport = self.connection.as_mut()
             .ok_or_else(|| denied("Obscura CDP is not connected"))?;
-        // An explicit, DEBUG-only 180s SPA experiment needs the CDP bridge
-        // to outlive the engine watchdog; the normal product stays at 20s.
-        let diagnostic = cfg!(debug_assertions) && !self.fixture_mode &&
-            std::env::var("IWXA_SPA_DIAGNOSTIC_180S").as_deref() == Ok("1");
-        let command_limit = if diagnostic {
-            Duration::from_secs(200)
-        } else { Duration::from_secs(20) };
-        timeout(command_limit, transport.send(Message::Text(message.to_string().into())))
+        let send_limit = deadline.saturating_duration_since(Instant::now());
+        timeout(send_limit, transport.send(Message::Text(message.to_string().into())))
             .await.map_err(|_| denied("Timed out sending to Obscura"))?
             .map_err(|e| denied(&e.to_string()))?;
         loop {
-            let response = self.read_cdp(command_limit).await?
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(denied("CDP response timed out; action outcome uncertain"));
+            }
+            let response = self.read_cdp(remaining).await?
                 .ok_or_else(|| denied("CDP response timed out; action outcome uncertain"))?;
             if response["id"].as_u64() != Some(id) { continue; }
             if !response["error"].is_null() {
@@ -1425,6 +1440,65 @@ fn is_unavailable_confirmation_notice(message: &Value, active_session: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cdp_deadline_cannot_be_extended_by_unrelated_events() {
+        // In-process protocol peer only. The peer keeps publishing valid
+        // unsolicited events instead of responding to the requested command.
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let request = socket.next().await.unwrap().unwrap();
+            assert!(request.is_text());
+            for n in 0..100_u32 {
+                let event = json!({"method":"Network.dataReceived",
+                    "params":{"dataLength":n}}).to_string();
+                if socket.send(Message::Text(event.into())).await.is_err() { break; }
+                sleep(Duration::from_millis(3)).await;
+            }
+        });
+        let (socket, _) = connect_async(format!("ws://{address}")).await.unwrap();
+        let mut controller = Controller::default();
+        controller.connection = Some(socket);
+        let started = Instant::now();
+        let error = controller.cdp_with_limit(
+            "Runtime.evaluate", json!({"expression":"1+1"}), None,
+            Duration::from_millis(70)
+        ).await.expect_err("a notification flood must not renew the CDP deadline");
+        assert!(error.to_string().contains("response timed out"), "{error}");
+        assert!(started.elapsed() < Duration::from_millis(250),
+            "the absolute deadline should not be extended by protocol events");
+        peer.abort();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cdp_deadline_accepts_matching_reply_after_unrelated_event() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let peer = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let request = socket.next().await.unwrap().unwrap();
+            let id: u64 = serde_json::from_str::<Value>(request.to_text().unwrap())
+                .unwrap()["id"].as_u64().unwrap();
+            socket.send(Message::Text(json!({
+                "method":"Network.loadingFinished","params":{"requestId":"ignored"}
+            }).to_string().into())).await.unwrap();
+            socket.send(Message::Text(json!({
+                "id":id,"result":{"value":"ok"}
+            }).to_string().into())).await.unwrap();
+        });
+        let (socket, _) = connect_async(format!("ws://{address}")).await.unwrap();
+        let mut controller = Controller::default();
+        controller.connection = Some(socket);
+        let value = controller.cdp_with_limit(
+            "Runtime.evaluate", json!({}), None, Duration::from_secs(1)
+        ).await.expect("matching response should not be lost");
+        assert_eq!(value["value"], "ok");
+        peer.await.unwrap();
+    }
 
     #[test]
     fn unsupported_confirmation_is_visible_only_in_the_active_session() {
