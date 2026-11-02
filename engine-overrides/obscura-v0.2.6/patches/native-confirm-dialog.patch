@@ -1,0 +1,111 @@
+diff --git a/crates/obscura-js/Cargo.toml b/crates/obscura-js/Cargo.toml
+--- a/crates/obscura-js/Cargo.toml
++++ b/crates/obscura-js/Cargo.toml
+@@ -6,7 +6,8 @@
+ repository.workspace = true
+ 
+ [features]
+-default = []
++default = []
++native-dialog = ["dep:rfd"]
+ # Builds obscura-net with its stealth (wreq) HTTP client and lets scripted
+ # fetch()/XHR be routed through it so JS-level requests carry the same Chrome
+ # TLS fingerprint and client hints as stealth navigation.
+@@ -52,5 +53,6 @@
+ hkdf = "0.12"
+ # CSPRNG for getRandomValues / randomUUID (replaces Math.random).
+ getrandom = "0.2"
+-obscura-render = { workspace = true, optional = true }
++obscura-render = { workspace = true, optional = true }
++rfd = { version = "0.17.2", default-features = false, features = ["gtk3"], optional = true }
+ 
+diff --git a/crates/obscura-cli/Cargo.toml b/crates/obscura-cli/Cargo.toml
+--- a/crates/obscura-cli/Cargo.toml
++++ b/crates/obscura-cli/Cargo.toml
+@@ -16,7 +16,8 @@
+ [features]
+ default = []
+ stealth = ["obscura-browser/stealth", "obscura-net/stealth", "obscura-mcp/stealth"]
+-render = ["obscura-browser/render", "obscura-cdp/render", "obscura-mcp/render"]
++render = ["obscura-browser/render", "obscura-cdp/render", "obscura-mcp/render"]
++native-dialog = ["obscura-js/native-dialog"]
+ 
+ [dependencies]
+ obscura-browser = { workspace = true }
+diff --git a/crates/obscura-js/src/ops.rs b/crates/obscura-js/src/ops.rs
+--- a/crates/obscura-js/src/ops.rs
++++ b/crates/obscura-js/src/ops.rs
+@@ -3374,8 +3374,32 @@
+     };
+ }
+ 
+-#[op2(fast)]
+-fn op_console_msg(
++// Site text is untrusted. Only the owned native UI returns a real Yes.
++#[op2(fast)]
++fn op_iwxa_confirm(#[string] prompt: &str) -> i32 {
++    // 1=Yes; 0=No or close; -1=no dialog available.
++    if prompt.len() > 4096 || prompt.contains('\0') { return -1; }
++    #[cfg(all(feature = "native-dialog", any(target_os = "linux", target_os = "windows")))]
++    {
++        if std::env::var("IWXA_OBSCURA_NATIVE_CONFIRM_UI").as_deref() != Ok("1") {
++            return -1;
++        }
++        return std::panic::catch_unwind(|| {
++            let answer = rfd::MessageDialog::new()
++                .set_title("IWXA Browser - Site confirmation")
++                .set_description(format!("This website requests confirmation:\n\n{prompt}"))
++                .set_buttons(rfd::MessageButtons::YesNo)
++                .set_level(rfd::MessageLevel::Info)
++                .show();
++            if answer == rfd::MessageDialogResult::Yes { 1 } else { 0 }
++        }).unwrap_or(-1);
++    }
++    #[cfg(not(all(feature = "native-dialog", any(target_os = "linux", target_os = "windows"))))]
++    { -1 }
++}
++
++#[op2(fast)]
++fn op_console_msg(
+     state: &OpState,
+     #[string] level: &str,
+     #[string] msg: &str,
+@@ -7825,7 +7849,8 @@
+         op_cssom_stylesheet_update(),
+         op_cssom_stylesheet_clear(),
+         op_runtime_events_enabled(),
+-        op_console_msg(),
++        op_console_msg(),
++        op_iwxa_confirm(),
+         op_report_browser_exception(),
+         op_fetch_url(),
+         op_fetch_cancel_handle(),
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -16935,12 +16935,19 @@
+ globalThis.blur = function() {}; _markNative(globalThis.blur);
+ globalThis.print = function() {}; _markNative(globalThis.print);
+ globalThis.alert = function() {}; _markNative(globalThis.alert);
+-// The headless engine cannot show a synchronous user confirmation yet.
+-// Never silently authorize a save, transfer, deletion or other site action.
+-globalThis.confirm = function() {
+-  console.warn('Obscura window.confirm: native dialog unavailable; action declined');
+-  return false;
+-}; _markNative(globalThis.confirm);
++// Only the owner-enabled native OS dialog may grant the requested action.
++globalThis.confirm = function(message) {
++  try {
++    const op = __obscuraCore.ops.op_iwxa_confirm;
++    if (typeof op === 'function') {
++      const decision = op(String(message ?? ''));
++      if (decision === 1) return true;
++      if (decision === 0) return false;
++    }
++  } catch (_) {}
++  console.warn('Obscura window.confirm: native dialog unavailable; action declined');
++  return false;
++}; _markNative(globalThis.confirm);
+ globalThis.prompt = function() { return null; }; _markNative(globalThis.prompt);
+ globalThis.open = function() { return null; }; _markNative(globalThis.open);
+ globalThis.close = function() {}; _markNative(globalThis.close);

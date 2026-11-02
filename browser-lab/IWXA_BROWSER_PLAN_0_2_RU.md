@@ -196,3 +196,31 @@ posted-task, наличие ожидающего пробуждения, при�
 До нового Linux GUI-прогона причина застревания динамического импорта
 остаётся неизвестной; нельзя автоматически перезагружать страницу или
 расширять бюджеты ожидания.
+
+## 0.2 — Native JavaScript window.confirm (Windows/Linux, 2026-11-02)
+
+The real Linux ArtBazi GUI run at HEAD 39302263 mounted the T2 Overview,
+created a Workspace through native clicks, and persisted its DB8 key.
+Both Launch Navigator answers were selected. It then stopped at the
+unimplemented synchronous window.confirm() before staging the Result.
+This was a deliberate safe refusal, not a failure of HTTP/module fetching.
+
+The packaged, owner-controlled Obscura now has the native-dialog feature:
+Windows uses the OS dialog; Linux uses the GTK3 backend (no Zenity child).
+The trusted engine window shows a native Yes/No request. Only OS Yes returns
+true to the site. No, close, a backend failure, a missing feature, and all
+unowned/headless/fixture runs fail closed. The site's untrusted message is
+limited to 4096 bytes; the fixed native title cannot be chosen by a site.
+
+Only the Tauri-owned child serving approved real-site tabs receives the
+isolated IWXA_OBSCURA_NATIVE_CONFIRM_UI=1 opt-in. Real Linux acceptance
+must first observe the OS dialog, then use an actual X11 click on Yes.
+An automation click proves UI wiring but does NOT constitute human consent.
+T2 Kernel storage continues to require its own distinct confirmation,
+receipt and readback; neither may be synthesized.
+
+Remaining UX limitation: while a synchronous native modal is open,
+a CDP Input.dispatchMouseEvent reply can exceed the normal 20-second
+command deadline. Prolonged human deliberation needs a separate,
+well-scoped modal lifecycle mechanism. Do not extend ordinary JS or
+navigation timeouts to disguise the issue.

@@ -15,6 +15,7 @@ on:
       - "engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch"
       - "engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch"
       - "engine-overrides/obscura-v0.2.6/patches/confirm-fail-closed.patch"
+      - "engine-overrides/obscura-v0.2.6/patches/native-confirm-dialog.patch"
       - "engine-overrides/obscura-v0.2.6/tests/confirm_requires_native_ui.rs"
   workflow_dispatch:
 permissions:
@@ -72,13 +73,14 @@ jobs:
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/confirm-fail-closed.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/confirm-fail-closed.patch")
+          (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/native-confirm-dialog.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/native-confirm-dialog.patch")
           cp engine-overrides/obscura-v0.2.6/tests/confirm_requires_native_ui.rs upstream/crates/obscura-js/tests/confirm_requires_native_ui.rs
       - name: Build native Obscura and verify module and scroll-frame regressions
         run: |
           cargo test --manifest-path upstream/Cargo.toml -p obscura-js synchronous_module_request_does_not_borrow_page_transport
-          cargo test --manifest-path upstream/Cargo.toml -p obscura-js native_confirm_requires_user_action
+          cargo test --manifest-path upstream/Cargo.toml -p obscura-js --features native-dialog native_confirm_requires_user_action
           cargo test --manifest-path upstream/Cargo.toml -p obscura-cdp --features render screencast_detects_scroll_damage_without_dom_activity
-          cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
+          cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render,native-dialog --bin obscura
       - name: Stage patched executable and its identity as Tauri resource
         shell: bash
         run: |

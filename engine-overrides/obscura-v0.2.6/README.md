@@ -103,3 +103,17 @@ Any site workflow that requires `window.confirm` remains unqualified until
 the browser implements a real synchronous user-decision handshake with its UI.
 Never treat an accepted origin or a T2 receipt as equivalent to a user's
 consent.
+
+## Native JavaScript confirm experiment — 0.2
+
+Apply \`native-confirm-dialog.patch\` **after** \`confirm-fail-closed.patch\`.
+Build the owned Obscura CLI with features \`render,native-dialog\`; GTK3
+is used on Linux, with the Windows OS backend on Windows. An owned
+real-site child receives \`IWXA_OBSCURA_NATIVE_CONFIRM_UI=1\` via
+the Tauri controller after its environment has been cleared.
+
+Native Yes is the only action which makes website confirm() return true.
+No, window close or native backend failure returns false. All unowned,
+headless and fixture modes also return false. The automated GUI test
+can click an OS button but must not describe its action as human consent.
+The T2 Host's own authorization/Kernel receipt/readback remain distinct.

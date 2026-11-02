@@ -490,6 +490,46 @@ def wait_artbazi_t2_result_state(predicate, label, seconds=65):
     raise AssertionError(f"ArtBazi {label} unavailable via visible UI, last={last}")
 
 
+def approve_native_site_dialog(report, seconds=20):
+    """Accept through a real OS Yes/No window, never by replacing JavaScript.
+
+    An automated Yes click qualifies GUI mechanics, NOT human consent.
+    """
+    if gui.WINDOWS:
+        raise AssertionError("Windows native consent driver is not implemented")
+    title = "IWXA Browser - Site confirmation"
+    deadline = time.monotonic() + seconds
+    window_id = None
+    while time.monotonic() < deadline:
+        lookup = subprocess.run(
+            ["xdotool", "search", "--onlyvisible", "--name", title],
+            text=True, capture_output=True, timeout=5)
+        candidates = [line.strip() for line in lookup.stdout.splitlines()
+                      if line.strip().isdigit()]
+        if lookup.returncode == 0 and candidates:
+            window_id = candidates[-1]
+            break
+        time.sleep(.2)
+    if not window_id:
+        screenshot("artbazi-native-dialog-missing")
+        raise AssertionError("Real OS confirmation window was not displayed")
+    screenshot("artbazi-native-site-confirmation-visible")
+    output = gui.command("xdotool", "getwindowgeometry", "--shell", window_id)
+    geom = dict(line.split("=", 1) for line in output.stdout.splitlines()
+                if "=" in line)
+    width, height = int(geom["WIDTH"]), int(geom["HEIGHT"])
+    if not (190 <= width <= 1600 and 110 <= height <= 1300):
+        raise AssertionError("Unexpected native confirmation geometry")
+    # On the GTK Yes/No dialog, Yes occupies the rightmost bottom button.
+    # Actual transfer and Kernel readback remain independent assertions.
+    gui.command("xdotool", "windowactivate", window_id)
+    gui.command("xdotool", "mousemove", "--window", window_id,
+                str(width - 70), str(height - 40))
+    gui.command("xdotool", "click", "1")
+    report["checks"]["native_site_confirmation_dialog"] = \
+        "VISIBLE_AND_YES_CLICKED_BY_GUI_TEST"
+
+
 def attempt_artbazi_result(report, session):
     """All writes are native clicks in real ArtBazi -> domain T2 Kernel UI."""
     destination="https://artbazi.ru/services/launch-navigator/"
@@ -513,9 +553,9 @@ def attempt_artbazi_result(report, session):
         raise AssertionError("Browser crypto.randomUUID is unavailable to the real T2 bridge")
     report["checks"]["artbazi_secure_context_on_https"]="PASS"
     click_probe_control("artbazi-launch-navigator","transfer")
-    # The pinned upstream window.confirm() currently auto-accepts. This is
-    # recorded as an independent browser UX HOLD, not a user confirmation.
-    report["checks"]["obscura_javascript_confirm_dialog"]="HOLD_UPSTREAM_AUTO_ACCEPT"
+    approve_native_site_dialog(report)
+    # This automated OS click is a mechanical GUI test, not a person's consent.
+    report["checks"]["obscura_javascript_confirm_dialog"]="NATIVE_GUI_MECHANICS_OBSERVED"
     try:
         wait_session(session,lambda state:
             state.get("active")==0 and
@@ -613,7 +653,7 @@ def main():
         "not_qualified": [
             "T2 receipts", "T2 Result readback",
             "Exchange", "arbitrary-Internet process isolation",
-            "Native JavaScript confirmation dialog (fail-closed fallback only)"
+            "Human confirmation of native JavaScript dialog (GUI test uses automated click)"
         ],
     }
     manager = None

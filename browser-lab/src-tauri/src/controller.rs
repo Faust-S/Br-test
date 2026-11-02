@@ -989,7 +989,14 @@ impl Controller {
             child.stderr(std::process::Stdio::inherit());
             eprintln!("IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000 module_ms=180000 nav_ms=200000 cdp_ms=200000 bridge_s=200");
         }
-        if fixture_mode { child.arg("--allow-private-network"); }
+        // Allow a native Yes/No dialog only in the owned child running
+        // user-approved real sites. Never inherit this switch from the
+        // environment, page JavaScript, profile or CDP.
+        if fixture_mode {
+            child.arg("--allow-private-network");
+        } else {
+            child.env("IWXA_OBSCURA_NATIVE_CONFIRM_UI", "1");
+        }
         // Upstream Obscura v0.2.6 already enforces this bearer token and
         // refuses WebSocket handshakes carrying a browser Origin header.
         // Never put the token on the command line, in JS, or in disk storage.
