@@ -48,3 +48,21 @@ module incurs no extra work. No new process, renderer or storage is added.
 This is a bounded compatibility candidate, not T2 acceptance. Source is
 the same pinned upstream Obscura Apache-2.0; patch is distributed in the
 public repository and is applied with `git apply --check` before compilation.
+
+## Root-document posted-task generation (0.2 development candidate)
+
+`posted-task-root-generation.patch` keeps the current main document generation
+in a runtime-owned `Rc<Cell<u64>>`, separately from the page `RefCell`.
+The epoch advances on `set_dom`, is installed into the existing deno_core
+`OpState`, and is checked at both task enqueue and V8 posted-task delivery.
+A transient busy page owner therefore cannot cause a **root** task to be
+created with generation `-1`, and callbacks from a replaced document remain
+stale. The existing upstream frame-realm cancellation checks are unchanged.
+There is no new task executor, store, process, timer or retry budget.
+
+The patch includes a regression test asserting that a held mutable page borrow
+does not make the epoch inaccessible and that replacing the DOM advances it.
+It is an unqualified compatibility candidate until the existing packaged
+Windows/Linux Obscura build and real ArtBazi GUI pass. The earlier
+`posted-task-busy-retry.patch` remains applied for delivery contention.
+Both patches target the same pinned Apache-2.0 upstream revision.

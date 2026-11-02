@@ -1,0 +1,178 @@
+diff --git a/crates/obscura-js/src/runtime.rs b/crates/obscura-js/src/runtime.rs
+--- a/crates/obscura-js/src/runtime.rs
++++ b/crates/obscura-js/src/runtime.rs
+@@ -1,4 +1,4 @@
+-use std::cell::RefCell;
++use std::cell::{Cell, RefCell};
+ use std::collections::HashMap;
+ use std::future::Future;
+ use std::marker::PhantomData;
+@@ -255,8 +255,10 @@
+     evaluation_recipes: HashMap<String, String>,
+ }
+ 
+-pub struct ObscuraJsRuntime {
+-    state: Rc<RefCell<ObscuraState>>,
++pub struct ObscuraJsRuntime {
++    state: Rc<RefCell<ObscuraState>>,
++    // Epoch for the active main document, readable without borrowing page state.
++    root_posted_task_generation: Rc<Cell<u64>>,
+     object_store: HashMap<String, String>,
+     evaluation_recipes: HashMap<String, String>,
+     object_counter: u64,
+@@ -646,8 +648,9 @@
+         // A runtime is about to initialize the V8 platform; from here on a
+         // set_v8_flags call must be refused rather than aborting the process.
+         crate::v8_flags::mark_platform_started();
+-        let state = Rc::new(RefCell::new(ObscuraState::new()));
+-        let state_clone = state.clone();
++        let state = Rc::new(RefCell::new(ObscuraState::new()));
++        let state_clone = state.clone();
++        let root_posted_task_generation = Rc::new(Cell::new(0_u64));
+         let import_map = state.borrow().import_map.clone();
+ 
+         let module_loader =
+@@ -698,8 +701,9 @@
+             {
+                 let op_state = runtime.op_state();
+                 let mut op_state = op_state.borrow_mut();
+-                op_state.put(state_clone);
+-                // Empty until a frame realm exists, which is what keeps the
++                op_state.put(state_clone);
++                op_state.put(root_posted_task_generation.clone());
++                // Empty until a frame realm exists, which is what keeps the
+                 // lookup free for pages that have no frames.
+                 op_state.put(Rc::new(RefCell::new(crate::ops::RealmStates::default())));
+             }
+@@ -723,9 +727,10 @@
+             (runtime, isolate_handle, heap_limit_state)
+         };
+ 
+-        let mut instance = ObscuraJsRuntime {
+-            state,
+-            object_store: HashMap::new(),
++        let mut instance = ObscuraJsRuntime {
++            state,
++            root_posted_task_generation,
++            object_store: HashMap::new(),
+             evaluation_recipes: HashMap::new(),
+             object_counter: 0,
+             import_map,
+@@ -1320,8 +1325,10 @@
+     pub fn set_dom(&self, dom: DomTree) {
+         let mut gs = self.state.borrow_mut();
+         gs.dom = Some(dom);
+-        gs.document_generation = gs.document_generation.wrapping_add(1);
+-        gs.activity_generation = 0;
++        gs.document_generation = gs.document_generation.wrapping_add(1);
++        // Invalidate old callbacks before new-document script execution.
++        self.root_posted_task_generation.set(gs.document_generation);
++        gs.activity_generation = 0;
+         gs.page_in_flight = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(0));
+         gs.already_started_scripts.borrow_mut().clear();
+         // A new document owns a fresh retained scene and resource cache.
+@@ -26667,10 +26674,26 @@
+                 })()"#,
+             )
+             .unwrap();
+-        assert_eq!(
+-            result,
+-            serde_json::json!("true,true,1,true,1,true,0,0,true"),
+-            "label association must follow the HTML labelable-element rules"
+-        );
+-    }
+-}
++        assert_eq!(
++            result,
++            serde_json::json!("true,true,1,true,1,true,0,0,true"),
++            "label association must follow the HTML labelable-element rules"
++        );
++    }
++
++    #[test]
++    fn root_posted_task_epoch_remains_readable_during_page_borrow_and_changes_on_navigation() {
++        let rt = ObscuraJsRuntime::new();
++        rt.set_dom(parse_html("<html><body data-epoch='first'></body></html>"));
++        let old = rt.root_posted_task_generation.get();
++        assert!(old > 0);
++        {
++            let page_borrow = rt.state.borrow_mut();
++            assert_eq!(page_borrow.document_generation, old);
++            assert_eq!(rt.root_posted_task_generation.get(), old);
++        }
++        rt.set_dom(parse_html("<html><body data-epoch='second'></body></html>"));
++        assert_ne!(rt.root_posted_task_generation.get(), old);
++        assert_eq!(rt.root_posted_task_generation.get(), rt.state.borrow().document_generation);
++    }
++}
+diff --git a/crates/obscura-js/src/ops.rs b/crates/obscura-js/src/ops.rs
+--- a/crates/obscura-js/src/ops.rs
++++ b/crates/obscura-js/src/ops.rs
+@@ -6855,20 +6855,34 @@
+     let Some(owner) = posted_task_owner(state, frame_id) else {
+         return INVALID_POSTED_TASK_GENERATION;
+     };
+-    let Ok(owner_state) = owner.try_borrow() else {
+-        return INVALID_POSTED_TASK_GENERATION;
+-    };
+-    let document_generation = owner_state.document_generation;
+-    drop(owner_state);
+-    let owner = Rc::downgrade(&owner);
+-    let spawner = state.borrow::<deno_core::V8TaskSpawner>().clone();
+-    spawner.spawn(move |scope| {
+-        let current_generation = match posted_task_owner_status(&owner) {
+-            PostedTaskOwnerStatus::Gone | PostedTaskOwnerStatus::Busy => {
+-                INVALID_POSTED_TASK_GENERATION
+-            }
+-            PostedTaskOwnerStatus::Generation(generation) => generation as f64,
+-        };
++    // A temporary page-state borrow is not a destroyed document. For the
++    // main realm, use a separate stable epoch throughout scheduling/delivery.
++    // This does not change frame-realm lifecycle checks.
++    let root_epoch = if frame_id == 0 {
++        Some(state.borrow::<Rc<Cell<u64>>>().clone())
++    } else { None };
++    let document_generation = if let Some(epoch) = &root_epoch {
++        epoch.get()
++    } else {
++        let Ok(owner_state) = owner.try_borrow() else {
++            return INVALID_POSTED_TASK_GENERATION;
++        };
++        owner_state.document_generation
++    };
++    let owner = Rc::downgrade(&owner);
++    let spawner = state.borrow::<deno_core::V8TaskSpawner>().clone();
++    spawner.spawn(move |scope| {
++        let current_generation = if let Some(epoch) = &root_epoch {
++            if owner.upgrade().is_some() { epoch.get() as f64 }
++            else { INVALID_POSTED_TASK_GENERATION }
++        } else {
++            match posted_task_owner_status(&owner) {
++                PostedTaskOwnerStatus::Gone | PostedTaskOwnerStatus::Busy => {
++                    INVALID_POSTED_TASK_GENERATION
++                }
++                PostedTaskOwnerStatus::Generation(generation) => generation as f64,
++            }
++        };
+         v8::tc_scope!(let scope, scope);
+         let callback = v8::Local::new(scope, callback);
+         let receiver = v8::undefined(scope).into();
+@@ -6907,10 +6921,14 @@
+ }
+ 
+ #[op2(fast)]
+-fn op_posted_task_generation(state: &OpState, frame_id: u32) -> f64 {
+-    let Some(owner) = posted_task_owner(state, frame_id) else {
+-        return INVALID_POSTED_TASK_GENERATION;
+-    };
++fn op_posted_task_generation(state: &OpState, frame_id: u32) -> f64 {
++    if frame_id == 0 {
++        // Same stable document epoch at enqueue and eventual delivery.
++        return state.borrow::<Rc<Cell<u64>>>().get() as f64;
++    }
++    let Some(owner) = posted_task_owner(state, frame_id) else {
++        return INVALID_POSTED_TASK_GENERATION;
++    };
+     let generation = owner
+         .try_borrow()
+         .map(|owner| owner.document_generation as f64)
