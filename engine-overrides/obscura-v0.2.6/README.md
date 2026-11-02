@@ -85,3 +85,21 @@ metadata `scrollOffsetY`, painted green pixels after scrolling, and no idle
 frame when the scroll stops. It must compile and pass with the pinned upstream
 before qualifying the patch. A genuine ArtBazi GUI Result and T2 Kernel receipt
 remain separate required acceptance gates.
+
+## JavaScript confirm safety gate (0.2 development candidate)
+
+Obscura v0.2.6 previously returned **true** from `window.confirm()`
+without presenting a dialog. This is not user consent and is unsafe for
+Result transfer, deletion or any other confirmation-gated action.
+`confirm-fail-closed.patch` changes the existing bootstrap fallback to
+`false` and logs a generic warning (never the prompt text). A native
+runtime integration regression in `tests/confirm_requires_native_ui.rs`
+verifies that two independent site actions cannot be approved and that
+`prompt()` continues to return `null`. The patch does not add a new
+renderer, network client, storage or timeout.
+
+This is a **temporary safety barrier**, not support for JavaScript dialogs.
+Any site workflow that requires `window.confirm` remains unqualified until
+the browser implements a real synchronous user-decision handshake with its UI.
+Never treat an accepted origin or a T2 receipt as equivalent to a user's
+consent.

@@ -711,6 +711,7 @@ def main():
             "module_evaluation_errors": "ES module evaluation error",
             "module_loaded": "ES module loaded:",
             "module_fetch_started": "Loading ES module:",
+            "module_transport_complete": "ES module transport complete",
             "module_graph_started": "Preparing ES module graph:",
             "parser_script_deadline": "deadline reached",
             "module_budget_exhausted": "ES module exhausted",

@@ -1,0 +1,19 @@
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -16933,9 +16933,14 @@
+ globalThis.focus = function() {}; _markNative(globalThis.focus);
+ globalThis.blur = function() {}; _markNative(globalThis.blur);
+ globalThis.print = function() {}; _markNative(globalThis.print);
+ globalThis.alert = function() {}; _markNative(globalThis.alert);
+-globalThis.confirm = function() { return true; }; _markNative(globalThis.confirm);
++// The headless engine cannot show a synchronous user confirmation yet.
++// Never silently authorize a save, transfer, deletion or other site action.
++globalThis.confirm = function() {
++  console.warn('Obscura window.confirm: native dialog unavailable; action declined');
++  return false;
++}; _markNative(globalThis.confirm);
+ globalThis.prompt = function() { return null; }; _markNative(globalThis.prompt);
+ globalThis.open = function() { return null; }; _markNative(globalThis.open);
+ globalThis.close = function() {}; _markNative(globalThis.close);
+ globalThis.stop = function() {}; _markNative(globalThis.stop);
