@@ -1,5 +1,8 @@
 # Open Browser Lab — public Obscura desktop experiment
 
+> **Версия 0.1.0 (ограниченная Preview, 2026-11-02):** исходники зафиксированы в [release/iwxa-browser-v0.1.0](https://github.com/Faust-S/Br-test/tree/release/iwxa-browser-v0.1.0). [Фактическая приёмка и ограничения](./IWXA_BROWSER_RELEASE_0_1_RU.md) · [программа 0.2 с критериями](./IWXA_BROWSER_PLAN_0_2_RU.md). Не предназначено для произвольных недоверенных сайтов; T2 Result/receipt ещё HOLD.
+
+
 This is an independently authored **public**, vendor-neutral browser-prototype project.
 It uses Tauri 2 (privileged chrome only), React 19, TypeScript, Rust and **Obscura v0.2.6**.
 The websites run in native Obscura; Tauri's Windows WebView2 is used for the chrome,
