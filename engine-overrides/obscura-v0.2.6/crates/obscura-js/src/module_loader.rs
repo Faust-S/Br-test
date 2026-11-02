@@ -259,43 +259,7 @@ impl ModuleLoader for ObscuraModuleLoader {
         let is_dyn_import = options.is_dynamic_import;
         let activity_guard = is_dyn_import.then(|| activity.begin());
         let page_state = self.page_state.clone();
-        let page_network = match self.page_state.as_ref() {
-            Some(weak) => (|| {
-                let state = weak
-                    .upgrade()
-                    .ok_or_else(|| "Module loader page state was dropped".to_string())?;
-                let state = state
-                    .try_borrow()
-                    .map_err(|_| "Module loader page state is already borrowed".to_string())?;
-                let client = state
-                    .http_client
-                    .clone()
-                    .ok_or_else(|| "No http_client wired to module loader".to_string())?;
-                // Fork: in stealth mode an ES module must be fetched over the
-                // same transport as the document. Upstream sends it through the
-                // plain reqwest client, so a `type="module"` script arrives with
-                // a different TLS fingerprint and none of the browser identity
-                // headers, while the HTML that referenced it came over wreq.
-                // That cross-transport mismatch is trivially detectable.
-                #[cfg(feature = "stealth")]
-                let stealth = state.stealth_client.clone();
-                #[cfg(not(feature = "stealth"))]
-                let stealth: Option<std::sync::Arc<()>> = None;
-                Ok((client, stealth, state.callbacks.clone()))
-            })(),
-            None => self
-                .standalone_client
-                .clone()
-                .map(|client| {
-                    #[cfg(feature = "stealth")]
-                    let stealth = None;
-                    #[cfg(not(feature = "stealth"))]
-                    let stealth: Option<std::sync::Arc<()>> = None;
-                    (client, stealth, None)
-                })
-                .ok_or_else(|| "No network context wired to module loader".to_string()),
-        };
-
+        let standalone_client = self.standalone_client.clone();
         ModuleLoadResponse::Async(Pin::from(Box::new(async move {
             // deno_core propagates `is_dynamic_import` to every dependency edge in
             // the recursive graph, so this excludes parser-discovered/static
@@ -307,6 +271,45 @@ impl ModuleLoader for ObscuraModuleLoader {
                 proxy_url.as_deref().unwrap_or("direct")
             );
 
+            // ModuleLoader::load is called synchronously from V8. A temporary
+            // borrow held by that caller is not a network failure. Capture
+            // the existing page transport only after this JS turn has yielded;
+            // never use a second client, retry timer or alternate fetch path.
+            tokio::task::yield_now().await;
+            let page_network = match page_state.as_ref() {
+                Some(weak) => (|| {
+                    let state = weak
+                        .upgrade()
+                        .ok_or_else(|| "Module loader page state was dropped".to_string())?;
+                    let state = state
+                        .try_borrow()
+                        .map_err(|_| "Module loader page state is already borrowed".to_string())?;
+                    let client = state
+                        .http_client
+                        .clone()
+                        .ok_or_else(|| "No http_client wired to module loader".to_string())?;
+                    // Fork: in stealth mode an ES module must be fetched over the
+                    // same transport as the document. Upstream sends it through the
+                    // plain reqwest client, so a `type="module"` script arrives with
+                    // a different TLS fingerprint and none of the browser identity
+                    // headers, while the HTML that referenced it came over wreq.
+                    // That cross-transport mismatch is trivially detectable.
+                    #[cfg(feature = "stealth")]
+                    let stealth = state.stealth_client.clone();
+                    #[cfg(not(feature = "stealth"))]
+                    let stealth: Option<std::sync::Arc<()>> = None;
+                    Ok((client, stealth, state.callbacks.clone()))
+                })(),
+                None => standalone_client
+                    .map(|client| {
+                        #[cfg(feature = "stealth")]
+                        let stealth = None;
+                        #[cfg(not(feature = "stealth"))]
+                        let stealth: Option<std::sync::Arc<()>> = None;
+                        (client, stealth, None)
+                    })
+                    .ok_or_else(|| "No network context wired to module loader".to_string()),
+            };
             match page_network {
                 Ok((client, stealth, callbacks)) => {
                     let requested = ModuleSpecifier::parse(&url)
@@ -416,7 +419,11 @@ impl ModuleLoader for ObscuraModuleLoader {
                         None,
                     ))
                 }
-                Err(error) => Err(io_err(error)),
+                Err(error) => {
+                    tracing::warn!(module = %url, reason = %error,
+                        "ES module transport context unavailable");
+                    Err(io_err(error))
+                },
             }
         })))
     }
@@ -436,5 +443,33 @@ mod iwxa_module_network_borrow_tests {
         drop(occupied);
         assert!(with_uncontended_state(&page, |events| events.push(3)));
         assert_eq!(*page.borrow(), vec![1, 3]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn synchronous_module_request_does_not_borrow_page_transport() {
+        use super::*;
+        let state = Rc::new(RefCell::new(ObscuraState::new()));
+        let import_map = Rc::new(RefCell::new(ImportMap::default()));
+        let loader = ObscuraModuleLoader::with_page_state(
+            "https://example.org/", None, &state, import_map);
+        let module = ModuleSpecifier::parse("https://example.org/main.js").unwrap();
+        let occupied = state.borrow_mut();
+        // The old implementation captured page_network inside load() and
+        // turned this legitimate temporary borrow into a permanent error.
+        let response = loader.load(&module, None, ModuleLoadOptions {
+            is_dynamic_import: false,
+            is_synchronous: false,
+            requested_module_type: deno_core::RequestedModuleType::None,
+        });
+        drop(occupied);
+        let failure = match response {
+            ModuleLoadResponse::Async(future) => match future.await {
+                Ok(_) => panic!("Test page has no configured transport"),
+                Err(error) => error.to_string(),
+            },
+            _ => panic!("Network module load must be asynchronous"),
+        };
+        assert!(failure.contains("No http_client wired to module loader"),
+            "Transport setup ran while page was busy: {failure}");
     }
 }
