@@ -12,6 +12,7 @@ on:
       - "engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch"
       - "engine-overrides/obscura-v0.2.6/patches/posted-task-root-generation.patch"
       - "engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch"
+      - "engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch"
   workflow_dispatch:
 permissions:
   contents: read
@@ -64,9 +65,11 @@ jobs:
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/posted-task-root-generation.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/posted-task-root-generation.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch")
-      - name: Build native Obscura and check module transport borrow regression
+          (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch")
+      - name: Build native Obscura and verify module and scroll-frame regressions
         run: |
           cargo test --manifest-path upstream/Cargo.toml -p obscura-js synchronous_module_request_does_not_borrow_page_transport
+          cargo test --manifest-path upstream/Cargo.toml -p obscura-cdp --features render screencast_detects_scroll_damage_without_dom_activity
           cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
       - name: Stage patched executable and its identity as Tauri resource
         shell: bash

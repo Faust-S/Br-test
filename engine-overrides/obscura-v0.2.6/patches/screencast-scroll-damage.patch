@@ -1,0 +1,150 @@
+diff --git a/crates/obscura-cdp/src/dispatch.rs b/crates/obscura-cdp/src/dispatch.rs
+--- a/crates/obscura-cdp/src/dispatch.rs
++++ b/crates/obscura-cdp/src/dispatch.rs
+@@ -30,8 +30,11 @@
+     /// Last connected-document generation observed by the frame producer.
+     /// The autonomous pump uses this as a cheap compositor-damage signal, so
+     /// an idle screencast does not continuously rasterize identical frames.
+-    pub observed_activity_generation: u64,
+-    /// A changed generation remains pending across sampling skips and
++    pub observed_activity_generation: u64,
++    /// Last painted root scroll offset. Scroll-only changes must invalidate
++    /// the viewport even when no DOM task increments activity_generation.
++    pub observed_scroll_offset: (f32, f32),
++    /// A changed generation remains pending across sampling skips and
+     /// acknowledgement backpressure. Once capacity returns, the newest page
+     /// state is captured instead of losing the change.
+     pub autonomous_frame_pending: bool,
+diff --git a/crates/obscura-cdp/src/domains/page.rs b/crates/obscura-cdp/src/domains/page.rs
+--- a/crates/obscura-cdp/src/domains/page.rs
++++ b/crates/obscura-cdp/src/domains/page.rs
+@@ -614,8 +614,9 @@
+         command_frame_counter: 0,
+         session_id,
+         frames_in_flight: 0,
+-        observed_activity_generation: 0,
+-        autonomous_frame_pending: false,
++        observed_activity_generation: 0,
++        observed_scroll_offset: (0.0, 0.0),
++        autonomous_frame_pending: false,
+     })
+ }
+ 
+@@ -765,8 +766,9 @@
+         return Ok(false);
+     }
+     live.frames_in_flight = live.frames_in_flight.saturating_add(1);
+-    live.observed_activity_generation = activity_generation;
+-    live.autonomous_frame_pending = false;
++    live.observed_activity_generation = activity_generation;
++    live.observed_scroll_offset = scroll;
++    live.autonomous_frame_pending = false;
+     ctx.pending_events.push(CdpEvent {
+         method: "Page.screencastFrame".into(),
+         params: json!({
+@@ -800,15 +802,16 @@
+             continue;
+         }
+         let attached_session = Some(cdp_session_id.clone());
+-        let (activity_generation, css_animation_active) = {
+-            let Some(page) = ctx.get_session_page_mut(&attached_session) else {
+-                continue;
+-            };
+-            let Some(js) = page.js.as_ref() else {
+-                continue;
+-            };
+-            let generation = js.activity_generation();
+-            let css_animation_active = page.prepared_has_active_css_animations();
+-            (generation, css_animation_active)
+-        };
++        let (activity_generation, scroll_offset, css_animation_active) = {
++            let Some(page) = ctx.get_session_page_mut(&attached_session) else {
++                continue;
++            };
++            let Some(js) = page.js.as_ref() else {
++                continue;
++            };
++            let generation = js.activity_generation();
++            let scroll_offset = page.screenshot_scroll_offset();
++            let css_animation_active = page.prepared_has_active_css_animations();
++            (generation, scroll_offset, css_animation_active)
++        };
+ 
+@@ -816,10 +819,15 @@
+             let Some(state) = ctx.screencasts.get_mut(&cdp_session_id) else {
+                 continue;
+             };
+-            if state.observed_activity_generation != activity_generation || css_animation_active {
+-                state.observed_activity_generation = activity_generation;
+-                state.autonomous_frame_pending = true;
+-            }
++            if state.observed_activity_generation != activity_generation
++                || state.observed_scroll_offset != scroll_offset
++                || css_animation_active
++            {
++                // Keep damage pending across sampling and acknowledgement
++                // backpressure. Do not mark the offset as painted until the
++                // raster was actually queued by queue_screencast_frame.
++                state.autonomous_frame_pending = true;
++            }
+             state.autonomous_frame_pending
+         };
+         if !should_attempt {
+@@ -3318,9 +3326,54 @@
+         );
+     }
+ 
+-    #[cfg(feature = "render")]
+-    #[tokio::test]
+-    async fn screencast_sampling_backpressure_and_stale_acks_are_bounded() {
++    #[cfg(feature = "render")]
++    #[tokio::test]
++    async fn screencast_detects_scroll_damage_without_dom_activity() {
++        let (mut ctx, session) = screenshot_fixture().await;
++        ctx.pending_events.clear();
++        handle("startScreencast", &json!({}), &mut ctx, &session)
++            .await
++            .expect("start");
++        let initial = ctx.pending_events.iter()
++            .find(|event| event.method == "Page.screencastFrame")
++            .expect("initial frame");
++        let stream_id = initial.params["sessionId"].as_i64().expect("stream");
++        let initial_png = initial.params["data"].as_str().expect("initial png").to_owned();
++        handle("screencastFrameAck", &json!({"sessionId": stream_id}), &mut ctx, &session)
++            .await
++            .expect("ack initial");
++        ctx.pending_events.clear();
++
++        let page = ctx.get_session_page_mut(&session).expect("page");
++        page.evaluate("window.scrollTo(0, 80)");
++        assert_eq!(page.screenshot_scroll_offset(), (0.0, 80.0));
++        // Simulate a scroll-only frame: no mutation in the DOM activity
++        // counter is required to trigger a screencast repaint.
++        let generation = page.js.as_ref().unwrap().activity_generation();
++        ctx.screencasts.get_mut(session.as_ref().unwrap())
++            .expect("stream state").observed_activity_generation = generation;
++
++        pump_screencast_frames(&mut ctx).await;
++        let scrolled = ctx.pending_events.iter()
++            .find(|event| event.method == "Page.screencastFrame")
++            .expect("scroll-only change must emit a frame");
++        assert_eq!(scrolled.params["metadata"]["scrollOffsetY"], json!(80.0));
++        assert_ne!(scrolled.params["data"].as_str().unwrap(), initial_png);
++        let (_, image) = decode_capture(&scrolled.params);
++        assert_eq!(image.get_pixel(25, 40).0, [0, 128, 0, 255]);
++
++        handle("screencastFrameAck", &json!({"sessionId": stream_id}), &mut ctx, &session)
++            .await
++            .expect("ack scrolled");
++        ctx.pending_events.clear();
++        pump_screencast_frames(&mut ctx).await;
++        assert!(ctx.pending_events.is_empty(),
++            "unchanged scroll must not burn CPU on repeated raster work");
++    }
++
++    #[cfg(feature = "render")]
++    #[tokio::test]
++    async fn screencast_sampling_backpressure_and_stale_acks_are_bounded() {
+         let (mut ctx, session) = screenshot_fixture().await;
+         ctx.pending_events.clear();
+         handle(

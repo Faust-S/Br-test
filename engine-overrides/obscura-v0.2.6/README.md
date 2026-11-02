@@ -66,3 +66,22 @@ It is an unqualified compatibility candidate until the existing packaged
 Windows/Linux Obscura build and real ArtBazi GUI pass. The earlier
 `posted-task-busy-retry.patch` remains applied for delivery contention.
 Both patches target the same pinned Apache-2.0 upstream revision.
+
+## Scroll-only compositor damage (0.2 development candidate)
+
+`screencast-scroll-damage.patch` extends the existing bounded CDP screencast
+state, not the browser shell or an additional renderer. Previously only script
+activity-generation or CSS animation could mark a frame dirty. A wheel scroll
+could move the document in Obscura while Tauri continued to display an old
+raster, causing a native mouse click to target a different element than shown.
+The existing compositor pump now compares the last **painted** scroll offset
+against the current renderer-owned offset, and retains the pending damage until
+an actual frame is queued (even with screencast ACK backpressure). Identical
+scroll offsets do not cause new frames. This does not increase timeouts or
+enable arbitrary websites.
+
+The included `obscura-cdp` render regression verifies a scroll-only frame,
+metadata `scrollOffsetY`, painted green pixels after scrolling, and no idle
+frame when the scroll stops. It must compile and pass with the pinned upstream
+before qualifying the patch. A genuine ArtBazi GUI Result and T2 Kernel receipt
+remain separate required acceptance gates.
