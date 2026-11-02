@@ -97,6 +97,7 @@ export default function App() {
   const lastObservedVisit = useRef("");
   const queue = useRef<Promise<unknown>>(Promise.resolve());
   const pending = useRef(0);
+  const lastUserCommand = useRef(0);
   const lastPointerMove = useRef(0);
   const surface = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
@@ -106,6 +107,7 @@ export default function App() {
   activeView.current = view;
 
   const issue = useCallback((action: Action) => {
+    if (action.type !== "capture") lastUserCommand.current = performance.now();
     pending.current++;
     const work = queue.current.then(async () => {
       const next = await invoke<View>("command", { action });
@@ -193,10 +195,21 @@ export default function App() {
 
   useEffect(() => { void issue({ type: "boot" }); }, [issue]);
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      if (pending.current === 0 && !document.hidden && activeView.current.active) void issue({ type: "capture" });
-    }, 125);
-    return () => window.clearInterval(timer);
+    // One adaptive screencast consumer: active input stays responsive, idle
+    // tabs stop sending 8 IPC capture requests a second. Obscura already
+    // produces frames on demand; there is no second compositor or process.
+    let stopped = false;
+    let timer = 0;
+    const tick = () => {
+      if (stopped) return;
+      if (pending.current === 0 && !document.hidden && activeView.current.active) {
+        void issue({ type: "capture" });
+      }
+      const active = performance.now() - lastUserCommand.current < 1600;
+      timer = window.setTimeout(tick, active ? 125 : 650);
+    };
+    timer = window.setTimeout(tick, 125);
+    return () => { stopped = true; window.clearTimeout(timer); };
   }, [issue]);
 
   useEffect(() => {

@@ -1069,7 +1069,7 @@ impl Controller {
             } else if value["t2Mounted"] == true {
                 "Workspace Host mounted · loading view".into()
             } else {
-                "Workspace initializing · waiting for UI".into()
+                "Workspace initializing · reload if it stays blank".into()
             }
         } else if value["ready"] == "complete" {
             "Page ready · approved origin".into()

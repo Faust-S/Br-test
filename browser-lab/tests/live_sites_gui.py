@@ -234,21 +234,39 @@ def wait_artbazi_overview(initial, report, seconds=70):
     # Remote React hydration was non-deterministic in the earlier run.
     # Never click a blank document, and never treat HTML ready as UI ready.
     state=initial
-    deadline=time.monotonic()+seconds
+    started=time.monotonic()
+    deadline=started+seconds
     attempts=0
+    reloaded=False
     while time.monotonic()<deadline:
         view=state.get("result") or {}
         if view.get("overviewRendered") and (view.get("buttons") or {}).get("new-workspace-toggle"):
             report["checks"]["artbazi_overview_rendered"]="PASS"
             report["checks"]["artbazi_overview_probe_count"]=attempts+1
+            report["checks"]["artbazi_overview_reload_required"]=reloaded
             return state
         attempts+=1
+        # If the actual root is still empty, exercise the browser's existing
+        # user-visible Reload ONCE. No engine restart, no increased timeout,
+        # no script injection or changes to T2 data. Never retry a mounted
+        # screen that might contain an unsaved edit.
+        if not reloaded and time.monotonic()-started>=22 and (
+            view.get("scope")=="public-workspace" and
+            view.get("rootChildren")==0 and
+            not view.get("createDialog") and
+            not view.get("workspaceViewMounted")
+        ):
+            screenshot("artbazi-empty-overview-before-user-reload")
+            reliable_click(105,86)
+            reloaded=True
+            report["checks"]["artbazi_blank_root_user_reload"]="USER_ACTION_PERFORMED"
         time.sleep(5)
         state=request_probe("artbazi")
     report["checks"]["artbazi_overview_rendered"]="HOLD"
     report["checks"]["artbazi_overview_probe_count"]=attempts
+    report["checks"]["artbazi_overview_reload_required"]=reloaded
     screenshot("artbazi-overview-unavailable")
-    raise AssertionError("ArtBazi T2 overview not hydrated within bounded user wait")
+    raise AssertionError("ArtBazi T2 overview not hydrated after bounded normal or single-reload route")
 
 
 def inspect_closed_engine_workspace(profile, created_url):
