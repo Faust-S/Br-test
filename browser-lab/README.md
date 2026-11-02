@@ -480,3 +480,31 @@ than loss of the recorded workspace. `record=ABSENT` requires inspecting
 the browser's IndexedDB transaction / persistence bridge and its T2 write
 receipt; a generic fixture PASS does not qualify domain storage. This is
 test-only and does not add a product diagnostic, alternate Host or Kernel.
+
+## Native posted-task retry at the owner-contention boundary
+
+Investigation of the pinned upstream Obscura JavaScript scheduler found a
+specific silent-failure path. `op_posted_task` can return generation `-1`
+when the page's native `RefCell` owner is temporarily borrowed. Its V8
+callback can also receive `-1` when the same owner is temporarily busy.
+Previously the bootstrap discarded **all** queued MessageChannel, scheduler
+and IndexedDB tasks in either case, including pending user interface
+hydration and IndexedDB completion callbacks. No module-load exception
+was necessarily raised.
+
+The pinned public engine overlay now retries only the **task-delivery
+boundary** with capped short scheduling delays (24 attempts, at most 32ms
+per delay). It never repeats a user callback or a committed transaction;
+the same per-document generation guard still drops stale work after
+navigation. An owner that remains unavailable exhausts the bounded
+retries and discards the old queue rather than looping indefinitely.
+
+Previous DEBUG-only Workspace probes used three fresh asynchronous HTTP
+fetches on **every** React-readiness poll. Those endpoints already returned
+200 and valid JSON on both public sites. The live probe now reads the DOM
+synchronously without any network request, removing diagnostic interference
+with the event loop under investigation. The one-off 180-second experiment
+has ended: the existing bundled CI now runs with normal script/SPA limits.
+None of this adds a Host, Kernel, storage engine, workflow or background
+browser process. Correctness remains conditional on a real ArtBazi
+create -> restart -> same-record readback.

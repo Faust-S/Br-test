@@ -155,7 +155,7 @@ impl Drop for Controller {
 }
 
 #[cfg(debug_assertions)]
-const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
+const WORKSPACE_CONFIG_PROBE: &str = r#"(function() {
     var origin = location.origin;
     if (!['https://learn.iwxa.ru','https://artbazi.ru'].includes(origin) ||
         !location.pathname.startsWith('/workspace')) {
@@ -190,21 +190,9 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
         }
     }
     var root = document.querySelector('#root');
-    var paths = ['/_iwxa/domain.json','/_iwxa/domain-shell.json',
-                 '/workspace/workspace.config.json'];
-    var responses = await Promise.all(paths.map(async function(path) {
-        var ctrl = new AbortController();
-        var timer = setTimeout(function(){ctrl.abort()}, 6500);
-        try {
-            var response = await fetch(path,{cache:'no-cache',signal:ctrl.signal});
-            var data = await response.text();
-            var isJson = false;
-            try { JSON.parse(data); isJson = true; } catch (_) {}
-            return {path:path,http:response.status,json:isJson,bytes:data.length};
-        } catch (error) {
-            return {path:path,error:String(error && error.name || 'network-error').slice(0,48)};
-        } finally { clearTimeout(timer); }
-    }));
+    // Config endpoints were already verified with real HTTP 200 responses.
+    // Repeating async fetches during every T2 hydration poll perturbs the
+    // same task queue being diagnosed and can hide a scheduling bug.
     var mains = Array.from(document.querySelectorAll('main'));
     return {scope:'public-workspace',stage:stage,hostMounted:hostMounted,
         overviewRendered:overviewRendered,createDialog:createDialog,
@@ -212,7 +200,7 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(async function() {
         buttons:buttons,rootChildren:root ? root.children.length : 0,
         mainTextLength:mains.reduce(function(n,element) {
             return n+(element.textContent||'').trim().length;
-        },0), responses:responses};
+        },0)};
 })()"#;
 
 
@@ -1077,7 +1065,6 @@ impl Controller {
                         }
                         let result = self.page("Runtime.evaluate", json!({
                             "expression":WORKSPACE_CONFIG_PROBE,
-                            "awaitPromise":true,
                             "returnByValue":true
                         })).await?;
                         // Fixed allowlisted endpoints only: no credentials, URLs

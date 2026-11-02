@@ -9,6 +9,7 @@ on:
       - "browser-lab/src-tauri/src/controller.rs"
       - "engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs"
       - "engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch"
+      - "engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch"
   workflow_dispatch:
 permissions:
   contents: read
@@ -58,6 +59,7 @@ jobs:
           cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs upstream/crates/obscura-js/src/module_loader.rs
           cp engine-overrides/obscura-v0.2.6/crates/obscura-browser/src/context.rs upstream/crates/obscura-browser/src/context.rs
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch")
+          (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch")
       - name: Compile modified native Obscura with renderer
         run: cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
       - name: Stage patched executable and its identity as Tauri resource
@@ -110,9 +112,8 @@ jobs:
       - name: Real public Learn and ArtBazi routes (reuses the bundled Linux build)
         if: runner.os == 'Linux' && !cancelled()
         continue-on-error: true
-        # One bounded experiment; normal browsing and production are untouched.
-        env:
-          IWXA_SPA_DIAGNOSTIC_180S: "1"
+        # Previous 180s experiment has finished. Test the repaired product
+        # under normal execution limits, without diagnostics keeping pages busy.
         shell: bash
         run: |
           export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"

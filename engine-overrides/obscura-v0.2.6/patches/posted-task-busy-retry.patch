@@ -1,0 +1,106 @@
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -1266,72 +1266,97 @@
+ const _browserPostedTaskQueues = Array.from({ length: 6 }, () => []);
+ let _browserPostedTaskWakePending = false;
++// A temporary native RefCell borrow conflict must not silently drop all
++// React MessageChannel and IndexedDB callbacks. Retry only the scheduling
++// boundary, never the user callback, and retain document-generation checks.
++let _browserPostedTaskRetryTimer = null;
++let _browserPostedTaskRetryCount = 0;
++const _browserPostedTaskMaxRetries = 24;
+ const _invalidPostedTaskGeneration = -1;
+ 
+ function _browserPostedTaskGeneration() {
+   return __obscuraCore.ops.op_posted_task_generation(_realmFrameId);
+ }
+ 
+ function _browserPostedTaskDiscardQueue(queue) {
+   const entries = queue.splice(0, queue.length);
+   for (const entry of entries) {
+     if (entry.discard) {
+       try { entry.discard(); } catch (_) {}
+     }
+   }
+ }
+ 
++function _browserPostedTaskRetryOrDiscard() {
++  if (!_browserPostedTaskQueues.some(queue => queue.length)) return;
++  if (_browserPostedTaskRetryCount >= _browserPostedTaskMaxRetries) {
++    // A torn-down document is not allowed to keep an orphaned task queue.
++    for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
++    _browserPostedTaskRetryCount = 0;
++    return;
++  }
++  if (_browserPostedTaskRetryTimer !== null) return;
++  const delay = Math.min(32, 2 * (++_browserPostedTaskRetryCount));
++  _browserPostedTaskRetryTimer = setTimeout(() => {
++    _browserPostedTaskRetryTimer = null;
++    _browserPostedTaskScheduleWake();
++  }, delay);
++}
++
+ function _browserPostedTaskScheduleWake() {
++  if (_browserPostedTaskWakePending || _browserPostedTaskRetryTimer !== null) return;
+-  if (_browserPostedTaskWakePending) return;
+   if (!__obscuraCore.ops.op_async_runtime_available()) return;
+   const generation = __obscuraCore.ops.op_posted_task(
+     _realmFrameId, _browserPostedTaskRunOne);
+   _browserPostedTaskWakePending = generation !== _invalidPostedTaskGeneration;
++  if (!_browserPostedTaskWakePending) _browserPostedTaskRetryOrDiscard();
+-  if (!_browserPostedTaskWakePending) {
+-    for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
+-  }
+ }
+ 
+ function _browserPostedTaskEnqueue(
+   callback, priority, generation = _browserPostedTaskGeneration(), discard = null) {
+   _browserPostedTaskQueues[priority].push({ callback, generation, discard });
+   _browserPostedTaskScheduleWake();
+ }
+ 
+ function _browserPostedTaskRunOne(currentGeneration = _invalidPostedTaskGeneration) {
+   // Document replacement and frame teardown are cancellation boundaries.
+   // Borrow contention is cancelled too: a browser task must not unwind through
+   // V8 or enter a realm whose native owner is unavailable.
+   _browserPostedTaskWakePending = false;
+   if (currentGeneration === _invalidPostedTaskGeneration) {
++    // Native delivery may see the same temporary owner borrow conflict.
++    // Defer the whole queue rather than losing an IndexedDB transaction or
++    // React scheduler continuation without an exception. Generation checks
++    // remain enforced at the eventual successful delivery.
++    _browserPostedTaskRetryOrDiscard();
+-    for (const queue of _browserPostedTaskQueues) _browserPostedTaskDiscardQueue(queue);
+     return;
+   }
++  _browserPostedTaskRetryCount = 0;
+   let callback = null;
+   for (let priority = _browserPostedTaskQueues.length - 1; priority >= 0; priority--) {
+     const queue = _browserPostedTaskQueues[priority];
+     let staleCount = 0;
+     while (staleCount < queue.length &&
+            queue[staleCount].generation !== currentGeneration) staleCount++;
+     const staleEntries = staleCount ? queue.splice(0, staleCount) : [];
+     for (const stale of staleEntries) {
+       if (stale.discard) {
+         try { stale.discard(); } catch (_) {}
+       }
+     }
+     if (queue.length) {
+       callback = queue.shift().callback;
+       break;
+     }
+   }
+   if (!callback) return;
+ 
+   __obscuraCore.ops.op_begin_render_task?.();
+   try { callback(); }
+   catch (error) { console.error("Posted task error:", error); }
+   finally {
+     if (_browserPostedTaskQueues.some(queue => queue.length)) {
+       _browserPostedTaskScheduleWake();
+     }
+   }
+ }
+ 
