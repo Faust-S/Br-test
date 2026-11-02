@@ -13,9 +13,12 @@ class ObscuraAgentToolPort:
     contract_version = "1.0.0"
 
     def __init__(self, controller: ObscuraController, *, provider_id: str,
-                 binding_digest: str, delegate: Any = None):
+                 binding_digest: str, descriptor_digest: str, delegate: Any = None):
         if not provider_id or len(binding_digest) != 64 or any(c not in "0123456789abcdef" for c in binding_digest):
             raise ValueError("provider identity and authoritative binding required")
+        if len(descriptor_digest) != 64 or any(c not in "0123456789abcdef" for c in descriptor_digest):
+            raise ValueError("tool descriptor digest required")
+        self.descriptor_digest = descriptor_digest
         self.controller = controller
         self.provider_id = provider_id
         self.binding_digest = binding_digest
@@ -35,6 +38,7 @@ class ObscuraAgentToolPort:
         ref = request.tool_descriptor_ref
         if (ref.get("provider_slot") != "web_acquisition" or
             ref.get("provider_binding_digest") != self.binding_digest or
+            ref.get("descriptor_digest") != self.descriptor_digest or
             ref.get("tool_id") != "web.fetch" or request.operation != "web.fetch" or
             request.idempotency_key_or_none is not None or
             request.tool_plan_digest_or_none is not None or

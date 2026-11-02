@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 import hashlib
 import ipaddress
+import signal
 import os
 from pathlib import Path
 import re
@@ -29,36 +30,61 @@ class ObscuraControllerError(RuntimeError):
 
 _ALLOWED_FORMATS = frozenset({"markdown", "text", "html", "links"})
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
+_LABEL = re.compile(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\Z")
+_RESERVED_SUFFIXES = (".localhost", ".local", ".internal", ".test", ".invalid", ".example")
+
+
+def _public_host(host: str | None) -> str:
+    if not host or not host.isascii() or len(host) > 253:
+        raise ValueError("missing or non-ASCII hostname")
+    host = host.lower()
+    if host.endswith(_RESERVED_SUFFIXES) or host in {"localhost", "local"}:
+        raise ValueError("reserved hostname")
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    else:
+        raise ValueError("IP literals are not permitted")
+    labels = host.split(".")
+    if len(labels) < 2 or any(_LABEL.fullmatch(x) is None for x in labels):
+        raise ValueError("invalid DNS hostname")
+    if len(labels[-1]) < 2 or labels[-1].isdigit():
+        raise ValueError("invalid top-level label")
+    return host
+
+
+def _url_parts(raw: str):
+    if not isinstance(raw, str) or not raw or len(raw) > 4096:
+        raise ValueError("invalid URL length")
+    if any(ord(c) < 33 or ord(c) == 127 or c == "\\" for c in raw):
+        raise ValueError("unsafe URL character")
+    p = urlsplit(raw)
+    if p.scheme.lower() != "https" or p.username is not None or p.password is not None:
+        raise ValueError("HTTPS without credentials required")
+    host = _public_host(p.hostname)
+    if p.port not in (None, 443):
+        raise ValueError("nonstandard port")
+    return p, host
+
+
+def _canonical_origin(raw: str) -> str:
+    p, host = _url_parts(raw)
+    if p.path or p.query or p.fragment or p.netloc.count("@"):
+        raise ValueError("origin cannot have path or credentials")
+    origin = "https://" + host
+    if raw != origin:
+        raise ValueError("origin must use canonical spelling")
+    return origin
 
 
 def approved_url(raw: str, origins: frozenset[str]) -> str:
-    if not isinstance(raw, str) or not raw or len(raw) > 4096:
-        raise ObscuraControllerError("INVALID_URL")
-    if any(ord(c) < 33 or ord(c) == 127 or c == "\\" for c in raw):
-        raise ObscuraControllerError("INVALID_URL")
+    """Canonicalize requested URL and check its origin (not the redirect chain)."""
     try:
-        p = urlsplit(raw)
-        host = p.hostname
-        port = p.port
-        if p.scheme.lower() != "https" or not host or p.username is not None or p.password is not None:
-            raise ValueError("not a public https URL")
-        if host.endswith((".localhost", ".local", ".internal", ".test")) or host in {"localhost", "local"}:
-            raise ValueError("local host")
-        ip = None
-        try:
-            ip = ipaddress.ip_address(host)
-        except ValueError:
-            pass
-        if ip is not None and not ip.is_global:
-            raise ValueError("nonpublic address")
-        # Explicit origins are exact, no subdomain wildcards. Ports must match.
-        authority = host.lower() if ":" not in host else f"[{host.lower()}]"
-        if port is not None:
-            authority += f":{port}"
-        origin = "https://" + authority
-        if origin not in origins:
+        p, host = _url_parts(raw)
+        if "https://" + host not in origins:
             raise ValueError("unapproved origin")
-        return urlunsplit(("https", p.netloc, p.path or "/", p.query, ""))
+        return urlunsplit(("https", host, p.path or "/", p.query, ""))
     except (ValueError, TypeError):
         raise ObscuraControllerError("ORIGIN_DENIED") from None
 
@@ -71,6 +97,7 @@ class Observation:
     content_sha256: str
     content_bytes: int
     retrieved_at: str
+    elapsed_ms: int
 
     def as_data(self) -> dict:
         return {
@@ -82,6 +109,7 @@ class Observation:
             "content_sha256": self.content_sha256,
             "content_bytes": self.content_bytes,
             "retrieved_at": self.retrieved_at,
+            "elapsed_ms": self.elapsed_ms,
             "evidence_status": "SOURCE_CONTENT_CAPTURED_NOT_U1_VERIFIED",
             "origin_check": "REQUESTED_ORIGIN_ONLY",
         }
@@ -109,11 +137,13 @@ class ObscuraController:
                  max_output_bytes: int = 512_000):
         if not isinstance(binary_sha256, str) or not _SHA256.fullmatch(binary_sha256):
             raise ValueError("pinned SHA-256 required")
-        if not isinstance(allowed_origins, frozenset) or not allowed_origins or any(
-            not isinstance(o, str) or not o.startswith("https://") or o != o.lower() or
-            "/" in o[len("https://"):] for o in allowed_origins
-        ):
-            raise ValueError("exact lowercase HTTPS origins required")
+        if not isinstance(allowed_origins, frozenset) or not allowed_origins:
+            raise ValueError("non-empty exact HTTPS origins required")
+        try:
+            if any(_canonical_origin(o) != o for o in allowed_origins):
+                raise ValueError("non-canonical origin")
+        except (ValueError, TypeError) as exc:
+            raise ValueError("exact canonical public HTTPS origins required") from exc
         if not 1 <= timeout_seconds <= 60 or not 1024 <= max_output_bytes <= 2_000_000:
             raise ValueError("unsafe controller limits")
         self.binary = Path(binary).resolve()
@@ -136,9 +166,10 @@ class ObscuraController:
             raise ObscuraControllerError("ENGINE_UNREADABLE") from None
 
     def observe(self, url: str, *, format: str = "markdown") -> Observation:
-        if format not in _ALLOWED_FORMATS:
+        if not isinstance(format, str) or format not in _ALLOWED_FORMATS:
             raise ObscuraControllerError("FORMAT_DENIED")
         safe_url = approved_url(url, self.allowed_origins)
+        started = time.monotonic()
         self._verify_binary()
         # Non-privileged environment: never inherit OBSCURA_* settings,
         # credentials, proxy configuration, CDP token or user browser profile.
@@ -154,9 +185,14 @@ class ObscuraController:
                     "--timeout", str(max(1, int(self.timeout_seconds))),
                     "--obey-robots", "--quiet"]
             try:
+                launch = {}
+                if os.name == "nt":
+                    launch["creationflags"] = subprocess.CREATE_NO_WINDOW
+                else:
+                    launch["start_new_session"] = True
                 p = subprocess.Popen(args, stdout=subprocess.PIPE,
                                      stderr=subprocess.PIPE, stdin=subprocess.DEVNULL,
-                                     cwd=workdir, env=env)
+                                     cwd=workdir, env=env, close_fds=True, **launch)
             except OSError:
                 raise ObscuraControllerError("ENGINE_LAUNCH_FAILED") from None
             out, err = bytearray(), bytearray()
@@ -179,7 +215,13 @@ class ObscuraController:
                     time.sleep(0.015)
             finally:
                 if p.poll() is None and (timed_out or overflow.is_set()):
-                    p.kill()
+                    if os.name == "posix":
+                        try:
+                            os.killpg(p.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    else:
+                        p.kill()
                 p.wait()
                 for t in threads:
                     t.join(timeout=2)
@@ -192,10 +234,15 @@ class ObscuraController:
         if not out:
             raise ObscuraControllerError("ENGINE_EMPTY_OUTPUT")
         data = bytes(out)
+        try:
+            text = data.decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            raise ObscuraControllerError("ENGINE_NON_UTF8_OUTPUT") from None
         return Observation(
             requested_url=safe_url, format=format,
-            content=data.decode("utf-8", errors="replace"),
+            content=text,
             content_sha256=hashlib.sha256(data).hexdigest(),
             content_bytes=len(data),
             retrieved_at=datetime.now(timezone.utc).isoformat(),
+            elapsed_ms=max(0, round((time.monotonic() - started) * 1000)),
         )

@@ -23,6 +23,7 @@ if path=='/fail':sys.exit(1)
 if path=='/empty':sys.exit(0)
 if path=='/large':sys.stdout.write('X'*30000);sys.exit(0)
 if path=='/stderr':sys.stderr.write('X'*30000);sys.exit(1)
+if path=='/invalid':sys.stdout.buffer.write(bytes([0xff]));sys.exit(0)
 sys.stdout.write('observed:'+a[1])
 """
 
@@ -37,7 +38,7 @@ class ControllerTest(unittest.TestCase):
         self.digest=hashlib.sha256(self.exe.read_bytes()).hexdigest()
         self.c=ObscuraController(binary=self.exe,binary_sha256=self.digest,
             allowed_origins=frozenset({'https://example.org'}),
-            timeout_seconds=1,max_output_bytes=16384)
+            timeout_seconds=3,max_output_bytes=16384)
 
     def test_capture(self):
         x=self.c.observe('https://example.org/a?q=1#fragment')
@@ -77,6 +78,7 @@ class ControllerTest(unittest.TestCase):
             self.c.observe('https://example.org/stderr')
 
     def test_timeout(self):
+        self.c.timeout_seconds = 1
         with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_TIMEOUT'):
             self.c.observe('https://example.org/slow')
 
@@ -88,14 +90,34 @@ class ControllerTest(unittest.TestCase):
         with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_EMPTY_OUTPUT'):
             self.c.observe('https://example.org/empty')
 
+    def test_origin_configuration_and_canonicalization(self):
+        from iwxa_obscura import approved_url
+        self.assertEqual(approved_url('HTTPS://EXAMPLE.ORG:443/a#fragment',frozenset({'https://example.org'})),
+                         'https://example.org/a')
+        for raw in ('https://example.org:443','https://example.org?x=1',
+                    'https://example.org/path','https://EXAMPLE.ORG',
+                    'https://127.0.0.1','https://example.org.','https://user@example.org'):
+            with self.subTest(raw=raw),self.assertRaises(ValueError):
+                ObscuraController(binary=self.exe,binary_sha256=self.digest,
+                    allowed_origins=frozenset({raw}))
+
+    def test_non_utf8_rejected(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_NON_UTF8_OUTPUT'):
+            self.c.observe('https://example.org/invalid')
+
+    def test_elapsed_ms_metadata(self):
+        observation=self.c.observe('https://example.org/')
+        self.assertGreaterEqual(observation.elapsed_ms,0)
+        self.assertEqual(observation.as_data()['elapsed_ms'],observation.elapsed_ms)
+
     def test_environment_isolation(self):
         with mock.patch.dict(os.environ,{'OBSCURA_CDP_TOKEN':'secret','HTTPS_PROXY':'proxy'}):
             self.assertTrue(self.c.observe('https://example.org').content.startswith('observed:'))
 
 
-class BridgeTest(ControllerTest):
+class BridgeTest(unittest.TestCase):
     def setUp(self):
-        super().setUp()
+        ControllerTest.setUp(self)
         class PortError(Exception):
             def __init__(self,code,detail):
                 super().__init__(code+':'+detail)
@@ -115,12 +137,13 @@ class BridgeTest(ControllerTest):
                 else:sys.modules[k]=v
         self.addCleanup(restore)
         self.error=PortError
-        self.bridge=ObscuraAgentToolPort(self.c,provider_id='engine',binding_digest='f'*64)
+        self.bridge=ObscuraAgentToolPort(self.c,provider_id='engine',binding_digest='f'*64,descriptor_digest='e'*64)
 
     def request(self,**changes):
         values={'logical_provider_id':'engine',
             'tool_descriptor_ref':{'tool_id':'web.fetch',
-                'provider_slot':'web_acquisition','provider_binding_digest':'f'*64},
+                'provider_slot':'web_acquisition','provider_binding_digest':'f'*64,
+                'descriptor_digest':'e'*64},
             'operation':'web.fetch','target':None,
             'arguments':{'url':'https://example.org'},
             'request_id':'R1','idempotency_key_or_none':None,
@@ -142,6 +165,12 @@ class BridgeTest(ControllerTest):
             with self.subTest(args=args),self.assertRaises(self.error):
                 self.bridge.invoke(self.request(**args))
 
+    def test_descriptor_binding_denied(self):
+        request=self.request()
+        request.tool_descriptor_ref['descriptor_digest']='0'*64
+        with self.assertRaises(self.error):
+            self.bridge.invoke(request)
+
     def test_other_provider_denied(self):
         with self.assertRaises(self.error):
             self.bridge.invoke(self.request(logical_provider_id='other'))
@@ -151,7 +180,7 @@ class BridgeTest(ControllerTest):
         expected=object()
         delegate.invoke.return_value=expected
         bridge=ObscuraAgentToolPort(self.c,provider_id='engine',
-            binding_digest='f'*64,delegate=delegate)
+            binding_digest='f'*64,descriptor_digest='e'*64,delegate=delegate)
         self.assertIs(bridge.invoke(self.request(logical_provider_id='other')),expected)
         delegate.invoke.assert_called_once()
 
