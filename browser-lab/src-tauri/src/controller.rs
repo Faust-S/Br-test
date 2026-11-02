@@ -2,6 +2,7 @@
 //! Strict local-fixture policy. No hostile-site isolation, no T2 authority.
 //! No browser-generated receipts or parallel workspace database.
 use futures_util::{SinkExt, StreamExt};
+use base64::Engine as _;
 use crate::session::{self, BrowserSession};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -84,7 +85,6 @@ pub struct Tab {
 pub struct View {
     active: Option<String>,
     tabs: Vec<Tab>,
-    frame: Option<String>,
     width: u32,
     height: u32,
     status: String,
@@ -720,11 +720,10 @@ impl Controller {
         controller.bundle_resource_dir = resource_dir;
         controller
     }
-    fn view(&self, frame: Option<String>) -> View {
+    fn view(&self) -> View {
         View {
             active: self.active.clone(),
             tabs: self.pages.iter().map(|p| p.tab.clone()).collect(),
-            frame,
             width: self.width,
             height: self.height,
             status: if self.confirmation_unavailable {
@@ -931,6 +930,17 @@ impl Controller {
         }
         Ok(image)
     }
+    /// Transfer a frame as binary Tauri IPC rather than a JSON/base64 View.
+    /// This still decodes an upstream PNG screencast: it is an interim bridge
+    /// until Obscura exposes a direct local raster/shared-surface channel.
+    pub(crate) async fn capture_png(&mut self) -> io::Result<Vec<u8>> {
+        self.check_owned_process()?;
+        if self.connection.is_none() { return Err(denied("Obscura is not connected")); }
+        if self.active.is_none() { return Ok(Vec::new()); }
+        let data = self.poll_screencast().await?;
+        data.map_or_else(|| Ok(Vec::new()), |base64| decode_png_frame(&base64))
+    }
+
     async fn page(&mut self, method: &str, params: Value) -> io::Result<Value> {
         let session = self.selected()?.session.clone();
         self.cdp(method, params, Some(session)).await
@@ -1349,11 +1359,9 @@ impl Controller {
                 self.check_owned_process()?;
                 if self.connection.is_none() { return Err(denied("Obscura must be started first")); }
                 match other {
-                    Action::Capture => {
-                        if self.active.is_none() { return Ok(self.view(None)); }
-                        let frame = self.poll_screencast().await?;
-                        return Ok(self.view(frame));
-                    }
+                    // Status refresh only; image bytes take the dedicated
+                    // binary command, never JSON View serialization.
+                    Action::Capture => return Ok(self.view()),
                     #[cfg(debug_assertions)]
                     Action::ProbeWorkspace => {
                         if self.fixture_mode { return Err(denied("No probe in fixture mode")); }
@@ -1514,8 +1522,19 @@ impl Controller {
         if persist && !self.recovering_tabs {
             self.save_tab_session()?;
         }
-        Ok(self.view(None))
+        Ok(self.view())
     }
+}
+fn decode_png_frame(encoded: &str) -> io::Result<Vec<u8>> {
+    if encoded.len() > 16 * 1024 * 1024 {
+        return Err(denied("Oversized native frame"));
+    }
+    let png = base64::engine::general_purpose::STANDARD
+        .decode(encoded).map_err(|_| denied("Invalid native frame encoding"))?;
+    if png.len() > 12 * 1024 * 1024 || !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err(denied("Invalid PNG frame"));
+    }
+    Ok(png)
 }
 const UNSUPPORTED_CONFIRM_NOTICE: &str =
     "Obscura window.confirm: native dialog unavailable; action declined";
@@ -1535,6 +1554,16 @@ fn is_unavailable_confirmation_notice(message: &Value, active_session: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn binary_frame_preserves_png_and_rejects_invalid_payloads() {
+        let png = b"\x89PNG\r\n\x1a\nshort-fixture";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(png);
+        assert_eq!(decode_png_frame(&encoded).unwrap(), png.to_vec());
+        assert!(decode_png_frame("not-base64").is_err());
+        assert!(decode_png_frame("aGVsbG8=").is_err());
+        assert!(decode_png_frame(&"A".repeat(16 * 1024 * 1024 + 1)).is_err());
+    }
 
     #[cfg(target_os = "linux")]
     #[test]

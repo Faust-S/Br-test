@@ -17,7 +17,6 @@ type Tab = {
 type View = {
   active: string | null;
   tabs: Tab[];
-  frame: string | null;
   width: number;
   height: number;
   status: string;
@@ -49,7 +48,7 @@ type Action = { type: "boot" | "restart" | "capture" | "back" | "forward" | "rel
   | { type: "text"; text: string };
 
 const blank: View = {
-  active: null, tabs: [], frame: null, width: 960, height: 620, status: "Engine not started",
+  active: null, tabs: [], width: 960, height: 620, status: "Engine not started",
   granted_sites: [], site_picker_available: false, debug_probe_available: false
 };
 const bookmarksKey = "obscura-browser-lab.bookmarks";
@@ -99,6 +98,11 @@ export default function App() {
   const pending = useRef(0);
   const lastUserCommand = useRef(0);
   const lastPointerMove = useRef(0);
+  // Each frame request returns an ArrayBuffer. Old Blob URLs must be revoked.
+  const frameInFlight = useRef(false);
+  const frameGeneration = useRef(0);
+  const lastFrameMetadata = useRef(0);
+  const lastFrameNotice = useRef(0);
   const surface = useRef<HTMLDivElement>(null);
   const address = useRef<HTMLInputElement>(null);
   const activeTabButton = useRef<HTMLButtonElement>(null);
@@ -108,6 +112,11 @@ export default function App() {
 
   const issue = useCallback((action: Action) => {
     if (action.type !== "capture") lastUserCommand.current = performance.now();
+    if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload", "restart", "open_site", "reset_sites"].includes(action.type)) {
+      // Invalidate all in-flight binary frame replies before navigation.
+      frameGeneration.current++;
+      setImage("");
+    }
     pending.current++;
     const work = queue.current.then(async () => {
       const next = await invoke<View>("command", { action });
@@ -126,8 +135,7 @@ export default function App() {
             ...items.filter(item=>item.url!==tab.url)].slice(0,100));
         }
       }
-      if (next.frame && action.type === "capture") setImage("data:image/png;base64," + next.frame);
-      if (["select_tab", "new_tab", "close_tab", "navigate", "back", "forward", "reload", "restart", "open_site", "reset_sites"].includes(action.type)) setImage("");
+      // Frame bytes never enter the View/React JSON state.
       if (action.type !== "capture" && action.type !== "resize") setError(null);
       if (document.activeElement !== address.current) {
         const tab = next.tabs.find(t => t.id === next.active);
@@ -195,22 +203,51 @@ export default function App() {
 
   useEffect(() => { void issue({ type: "boot" }); }, [issue]);
   useEffect(() => {
-    // One adaptive screencast consumer: active input stays responsive, idle
-    // tabs stop sending 8 IPC capture requests a second. Obscura already
-    // produces frames on demand; there is no second compositor or process.
+    // Frames are binary, status is JSON. Both remain backpressured behind
+    // the same owned Rust controller, never a parallel CDP connection.
     let stopped = false;
     let timer = 0;
+    const pollFrame = async () => {
+      if (frameInFlight.current || pending.current !== 0 || document.hidden || !activeView.current.active) return;
+      frameInFlight.current = true;
+      const generation = frameGeneration.current;
+      const tab = activeView.current.active;
+      try {
+        const payload = await invoke<ArrayBuffer>("capture_frame");
+        if (payload.byteLength && generation === frameGeneration.current &&
+          tab === activeView.current.active && !stopped) {
+          setImage(URL.createObjectURL(new Blob([payload], { type: "image/png" })));
+        }
+        const now = performance.now();
+        if (now - lastFrameMetadata.current >= 1000 && pending.current === 0) {
+          lastFrameMetadata.current = now;
+          void issue({ type: "capture" });
+        }
+      } catch (reason: unknown) {
+        const now = performance.now();
+        if (now - lastFrameNotice.current > 3000) {
+          lastFrameNotice.current = now;
+          setError("Native frame delivery: " + String(reason));
+        }
+      } finally {
+        frameInFlight.current = false;
+      }
+    };
     const tick = () => {
       if (stopped) return;
-      if (pending.current === 0 && !document.hidden && activeView.current.active) {
-        void issue({ type: "capture" });
-      }
+      void pollFrame();
       const active = performance.now() - lastUserCommand.current < 1600;
-      timer = window.setTimeout(tick, active ? 125 : 650);
+      timer = window.setTimeout(tick, active ? 80 : 450);
     };
-    timer = window.setTimeout(tick, 125);
+    timer = window.setTimeout(tick, 80);
     return () => { stopped = true; window.clearTimeout(timer); };
   }, [issue]);
+
+  useEffect(() => {
+    if (!image) return;
+    // Release the previous PNG Blob after React swaps the img source.
+    return () => URL.revokeObjectURL(image);
+  }, [image]);
 
   useEffect(() => {
     const node = surface.current;
