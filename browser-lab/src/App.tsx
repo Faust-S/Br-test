@@ -157,8 +157,11 @@ export default function App() {
   const askBeforeLeaving = useCallback((action: LeaveAction) => {
     setToolsOpen(false);
     const current = activeView.current;
-    const affected = action.kind === "close_tab"
-      ? current.tabs.some(tab => tab.id === action.id && tab.url !== "about:blank")
+    // Keep the discriminated-union value narrowed outside the callback:
+    // TypeScript does not preserve it inside Array.some's closure.
+    const closingTabId = action.kind === "close_tab" ? action.id : null;
+    const affected = closingTabId !== null
+      ? current.tabs.some(tab => tab.id === closingTabId && tab.url !== "about:blank")
       : current.tabs.some(tab => tab.url !== "about:blank");
     // A fixture never claims product persistence and must keep its existing
     // developer shortcuts. Real sites are asked to save before losing state.
