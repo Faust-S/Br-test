@@ -1,0 +1,160 @@
+"""Public no-network Obscura adapter regression checks."""
+import hashlib
+import os
+from pathlib import Path
+import sys
+import tempfile
+import types
+import unittest
+from unittest import mock
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from iwxa_obscura import ObscuraController, ObscuraControllerError, ObscuraAgentToolPort
+
+FAKE = """#!/usr/bin/env python3
+import os,sys,time
+from urllib.parse import urlsplit
+a=sys.argv[1:]
+assert a[0]=='fetch' and '--obey-robots' in a
+assert '--eval' not in a and '--storage-dir' not in a
+assert not os.getenv('OBSCURA_CDP_TOKEN') and not os.getenv('HTTPS_PROXY')
+path=urlsplit(a[1]).path
+if path=='/slow':time.sleep(2)
+if path=='/fail':sys.exit(1)
+if path=='/empty':sys.exit(0)
+if path=='/large':sys.stdout.write('X'*30000);sys.exit(0)
+if path=='/stderr':sys.stderr.write('X'*30000);sys.exit(1)
+sys.stdout.write('observed:'+a[1])
+"""
+
+
+class ControllerTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp=tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.exe=Path(self.tmp.name)/'fake-obscura'
+        self.exe.write_text(FAKE)
+        self.exe.chmod(0o700)
+        self.digest=hashlib.sha256(self.exe.read_bytes()).hexdigest()
+        self.c=ObscuraController(binary=self.exe,binary_sha256=self.digest,
+            allowed_origins=frozenset({'https://example.org'}),
+            timeout_seconds=1,max_output_bytes=16384)
+
+    def test_capture(self):
+        x=self.c.observe('https://example.org/a?q=1#fragment')
+        self.assertEqual(x.requested_url,'https://example.org/a?q=1')
+        self.assertEqual(x.content,'observed:https://example.org/a?q=1')
+        self.assertEqual(x.content_sha256,hashlib.sha256(x.content.encode()).hexdigest())
+        self.assertIsNone(x.as_data()['http_status'])
+
+    def test_denied_urls(self):
+        for url in ('http://example.org','https://example.org.evil.com',
+                'https://localhost/','https://127.0.0.1/',
+                'https://user:pass@example.org/','https://example.org:8080/',
+                'https://example.org/\n--eval','file:///etc/passwd'):
+            with self.subTest(url=url),self.assertRaises(ObscuraControllerError):
+                self.c.observe(url)
+
+    def test_denied_formats(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'FORMAT_DENIED'):
+            self.c.observe('https://example.org',format='cookies')
+
+    def test_missing_binary(self):
+        self.exe.unlink()
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_MISSING'):
+            self.c.observe('https://example.org')
+
+    def test_tampered_binary(self):
+        self.exe.write_text(FAKE+'#tampered')
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_DIGEST_MISMATCH'):
+            self.c.observe('https://example.org')
+
+    def test_stdout_limit(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_OUTPUT_LIMIT'):
+            self.c.observe('https://example.org/large')
+
+    def test_stderr_limit(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_OUTPUT_LIMIT'):
+            self.c.observe('https://example.org/stderr')
+
+    def test_timeout(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_TIMEOUT'):
+            self.c.observe('https://example.org/slow')
+
+    def test_nonzero_exit(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_FETCH_FAILED'):
+            self.c.observe('https://example.org/fail')
+
+    def test_empty_result(self):
+        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_EMPTY_OUTPUT'):
+            self.c.observe('https://example.org/empty')
+
+    def test_environment_isolation(self):
+        with mock.patch.dict(os.environ,{'OBSCURA_CDP_TOKEN':'secret','HTTPS_PROXY':'proxy'}):
+            self.assertTrue(self.c.observe('https://example.org').content.startswith('observed:'))
+
+
+class BridgeTest(ControllerTest):
+    def setUp(self):
+        super().setUp()
+        class PortError(Exception):
+            def __init__(self,code,detail):
+                super().__init__(code+':'+detail)
+        class Result:
+            @classmethod
+            def from_adapter_result(cls,raw,*,request):
+                return raw
+        module=types.ModuleType('providers.tool_provider_port')
+        module.ToolProviderPortError=PortError
+        module.ToolProviderResult=Result
+        provider=types.ModuleType('providers')
+        originals={k:sys.modules.get(k) for k in ('providers','providers.tool_provider_port')}
+        sys.modules.update({'providers':provider,'providers.tool_provider_port':module})
+        def restore():
+            for k,v in originals.items():
+                if v is None:sys.modules.pop(k,None)
+                else:sys.modules[k]=v
+        self.addCleanup(restore)
+        self.error=PortError
+        self.bridge=ObscuraAgentToolPort(self.c,provider_id='engine',binding_digest='f'*64)
+
+    def request(self,**changes):
+        values={'logical_provider_id':'engine',
+            'tool_descriptor_ref':{'tool_id':'web.fetch',
+                'provider_slot':'web_acquisition','provider_binding_digest':'f'*64},
+            'operation':'web.fetch','target':None,
+            'arguments':{'url':'https://example.org'},
+            'request_id':'R1','idempotency_key_or_none':None,
+            'tool_plan_digest_or_none':None,'validate':lambda:True}
+        values.update(changes)
+        return types.SimpleNamespace(**values)
+
+    def test_read_contract(self):
+        result=self.bridge.invoke(self.request())
+        self.assertEqual(result['external_effect_state'],'NONE')
+        self.assertEqual(result['status'],200)
+        self.assertTrue(result['data']['content_sha256'])
+
+    def test_no_consequential_request(self):
+        for args in ({'idempotency_key_or_none':'abc'},
+                     {'target':'anything'},
+                     {'arguments':{'url':'https://example.org','eval':'1+1'}},
+                     {'tool_plan_digest_or_none':'f'*64}):
+            with self.subTest(args=args),self.assertRaises(self.error):
+                self.bridge.invoke(self.request(**args))
+
+    def test_other_provider_denied(self):
+        with self.assertRaises(self.error):
+            self.bridge.invoke(self.request(logical_provider_id='other'))
+
+    def test_delegate_preserves_other_provider(self):
+        delegate=mock.Mock()
+        expected=object()
+        delegate.invoke.return_value=expected
+        bridge=ObscuraAgentToolPort(self.c,provider_id='engine',
+            binding_digest='f'*64,delegate=delegate)
+        self.assertIs(bridge.invoke(self.request(logical_provider_id='other')),expected)
+        delegate.invoke.assert_called_once()
+
+
+if __name__=='__main__':
+    unittest.main()
