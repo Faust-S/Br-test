@@ -237,36 +237,27 @@ def wait_artbazi_overview(initial, report, seconds=70):
     started=time.monotonic()
     deadline=started+seconds
     attempts=0
-    reloaded=False
     while time.monotonic()<deadline:
         view=state.get("result") or {}
         if view.get("overviewRendered") and (view.get("buttons") or {}).get("new-workspace-toggle"):
             report["checks"]["artbazi_overview_rendered"]="PASS"
             report["checks"]["artbazi_overview_probe_count"]=attempts+1
-            report["checks"]["artbazi_overview_reload_required"]=reloaded
+            report["checks"]["artbazi_module_boot_on_success"]=view.get("moduleBoot")
             return state
         attempts+=1
-        # If the actual root is still empty, exercise the browser's existing
-        # user-visible Reload ONCE. No engine restart, no increased timeout,
-        # no script injection or changes to T2 data. Never retry a mounted
-        # screen that might contain an unsaved edit.
-        if not reloaded and time.monotonic()-started>=22 and (
-            view.get("scope")=="public-workspace" and
-            view.get("rootChildren")==0 and
-            not view.get("createDialog") and
-            not view.get("workspaceViewMounted")
-        ):
-            screenshot("artbazi-empty-overview-before-user-reload")
-            reliable_click(105,86)
-            reloaded=True
-            report["checks"]["artbazi_blank_root_user_reload"]="USER_ACTION_PERFORMED"
+        # The earlier automatic reload did not repair a stalled import().
+        # Do not keep replacing a page or risk unsaved work just to make the
+        # test appear active: observe the bounded, original user navigation.
         time.sleep(5)
         state=request_probe("artbazi")
     report["checks"]["artbazi_overview_rendered"]="HOLD"
     report["checks"]["artbazi_overview_probe_count"]=attempts
-    report["checks"]["artbazi_overview_reload_required"]=reloaded
+    report["checks"]["artbazi_module_boot_at_hold"]=view.get("moduleBoot")
+    report["checks"]["artbazi_root_children_at_hold"]=view.get("rootChildren")
     screenshot("artbazi-overview-unavailable")
-    raise AssertionError("ArtBazi T2 overview not hydrated after bounded normal or single-reload route")
+    raise AssertionError(
+        "ArtBazi T2 Overview absent after normal navigation; "
+        f"moduleBoot={view.get('moduleBoot')} rootChildren={view.get('rootChildren')}")
 
 
 def inspect_closed_engine_workspace(profile, created_url):
@@ -582,7 +573,7 @@ def main():
         env["OBSCURA_LAB_PROFILE_DIR"] = str(profile)
         # Only this fresh public-page CI profile: expose upstream module
         # preparation/evaluation warnings in the existing GUI artifact.
-        env["RUST_LOG"] = "obscura_browser::page=warn,obscura_js=warn"
+        env["RUST_LOG"] = "obscura_browser::page=info,obscura_js::module_loader=debug,obscura_js=warn"
         if not gui.WINDOWS:
             env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
             manager = subprocess.Popen(["openbox"], stdout=log, stderr=subprocess.STDOUT)
@@ -670,10 +661,14 @@ def main():
         report["checks"]["engine_logging_180s_active"] = (
             "PASS" if "IWXA_SPA_DIAGNOSTIC_ACTIVE script_ms=180000 module_ms=180000 nav_ms=200000 cdp_ms=200000" in engine_log
             else "HOLD") if THREE_MINUTE_SPA_EXPERIMENT else "NOT_REQUESTED"
+        # Summarize the existing native engine events without adding new
+        # reports or emitting private Result bodies to the public artifact.
         event_signatures = {
             "module_prepare_errors": "ES module error (",
             "module_evaluation_errors": "ES module evaluation error",
             "module_loaded": "ES module loaded:",
+            "module_fetch_started": "Loading ES module:",
+            "module_graph_started": "Preparing ES module graph:",
             "parser_script_deadline": "deadline reached",
             "module_budget_exhausted": "ES module exhausted",
             "classic_script_errors": "Script error (",

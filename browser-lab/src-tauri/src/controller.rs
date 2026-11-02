@@ -257,6 +257,32 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(function() {
         }
     }
     var root = document.querySelector('#root');
+    // ArtBazi starts the domain Host via import() from its onload handler.
+    // Record *read-only* lifecycle facts to distinguish missing bootstrap,
+    // stalled module work and a mounted Host without inspecting user data.
+    var hostShell = origin==='https://artbazi.ru' ?
+        document.getElementById('artbazi-t2-host-container') : null;
+    var hostBootstrap = origin==='https://artbazi.ru' ?
+        !!document.querySelector('script[data-artbazi-t2-host]') : false;
+    var hostFailure = !!(hostShell &&
+        hostShell.querySelector('[role="alert"]'));
+    var hostAssets = document.querySelectorAll(
+        'script[src*="/workspace/assets/"],link[href*="/workspace/assets/"]').length;
+    var moduleResources = null;
+    try {
+        moduleResources = performance.getEntriesByType('resource').filter(
+            function(entry){return entry && typeof entry.name==='string' &&
+                entry.name.includes('/workspace/assets/')}).length;
+    } catch (_) {}
+    var moduleBoot = {
+        bootstrapPresent:hostBootstrap,
+        shellPresent:!!hostShell,
+        shellVisible:!!(hostShell && hostShell.style.display!=='none'),
+        failureVisible:hostFailure,
+        readyState:document.readyState,
+        hostAssetElements:hostAssets,
+        loadedModuleResourceEntries:moduleResources
+    };
     // Config endpoints were already verified with real HTTP 200 responses.
     // Repeating async fetches during every T2 hydration poll perturbs the
     // same task queue being diagnosed and can hide a scheduling bug.
@@ -310,6 +336,7 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(function() {
     };
     return {scope:'public-workspace',stage:stage,hostMounted:hostMounted,
         t2Result:t2Result,resultControls:resultControls,
+        moduleBoot:moduleBoot,
         overviewRendered:overviewRendered,createDialog:createDialog,
         workspaceViewMounted:workspaceViewMounted,workspaceViewError:workspaceViewError,
         buttons:buttons,rootChildren:root ? root.children.length : 0,
