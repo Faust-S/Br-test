@@ -265,6 +265,7 @@ impl ModuleLoader for ObscuraModuleLoader {
             // the recursive graph, so this excludes parser-discovered/static
             // graphs without losing descendant fetches of a lazy graph.
             let _activity_guard = activity_guard;
+            let started_at = std::time::Instant::now();
             tracing::debug!(
                 "Loading ES module: {} (proxy: {})",
                 url,
@@ -361,6 +362,17 @@ impl ModuleLoader for ObscuraModuleLoader {
                         }).await
                         .map_err(|e| io_err(format!("Failed to fetch module {}: {}", url, e)))?
                     };
+                    // Log module completion separately from graph evaluation. A
+                    // "Loading ES module" line alone cannot distinguish a
+                    // stalled fetch from a stalled V8 graph continuation.
+                    // Never log response bodies, cookies, or authorization.
+                    tracing::debug!(
+                        module = %url,
+                        status = resp.status,
+                        bytes = resp.body.len(),
+                        elapsed_ms = started_at.elapsed().as_millis(),
+                        "ES module transport complete",
+                    );
                     // A response (including the blocked-tracker sentinel) is
                     // not a transport failure, even if evaluation later fails.
                     if let Some(guard) = &mut network_guard { guard.event = None; }
