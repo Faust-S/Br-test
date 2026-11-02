@@ -160,15 +160,34 @@ const ARTBAZI_LAUNCH_PROBE: &str = r#"(function() {
     if (location.origin !== 'https://artbazi.ru' ||
         !/^\/services\/launch-navigator\/?$/.test(location.pathname))
         return {scope:'outside-artbazi-launch'};
-    function position(el) {
+    function position(el, control) {
         if (!el || !el.getBoundingClientRect) return null;
         var rect=el.getBoundingClientRect();
-        return {x:Math.round(rect.left+rect.width/2),
-            y:Math.round(rect.top+rect.height/2),
+        var x=Math.round(rect.left+rect.width/2);
+        var y=Math.round(rect.top+rect.height/2);
+        // Read-only hit-test at the precise intended native mouse location.
+        // A visible DOM rect does not prove the renderer will click that node.
+        var hit=document.elementFromPoint(x,y);
+        var label=control && control.closest ? control.closest('label') : null;
+        var anotherControl=hit && hit.closest ?
+            hit.closest('button,a[href],select,textarea,[contenteditable]') : null;
+        return {x:x,y:y,
             visible:rect.width>0 && rect.height>0 && rect.top>=4 &&
                 rect.bottom<=Math.min(innerHeight-10,700) &&
                 rect.left>=0 && rect.right<=innerWidth,
-            enabled:!el.disabled};
+            enabled:control ? !control.disabled : !el.disabled,
+            hitTag:hit && hit.tagName ? hit.tagName.toLowerCase() : 'none',
+            hitMatches:control ? !!(hit && (hit===control ||
+                (label && label.contains(hit) && !anotherControl))) : null};
+    }
+    function radioPosition(input) {
+        if (!input) return null;
+        var direct=position(input,input);
+        if (direct && direct.visible && direct.hitMatches) return direct;
+        var label=input.closest('label');
+        var broad=label ? position(label,input) : null;
+        if (broad && broad.visible && broad.hitMatches) return broad;
+        return direct || broad;
     }
     function button(label) {
         return Array.from(document.querySelectorAll('button'))
@@ -182,9 +201,12 @@ const ARTBAZI_LAUNCH_PROBE: &str = r#"(function() {
         controls:{
             // Click the actual native radio control. In Obscura a click on the
             // wrapping label's center does not reliably change the input.
-            situation:position(situation),resources:position(resources),
+            situation:radioPosition(situation),resources:radioPosition(resources),
             calculate:position(button('Получить результат')),
             save:position(save),transfer:position(transfer)},
+        scrollY:Math.round(globalThis.scrollY||0),
+        situationFocused:!!(situation&&document.activeElement===situation),
+        resourcesFocused:!!(resources&&document.activeElement===resources),
         situationSelected:!!(situation&&situation.checked),
         resourcesSelected:!!(resources&&resources.checked),
         answersSelected:!!(situation&&situation.checked&&resources&&resources.checked),

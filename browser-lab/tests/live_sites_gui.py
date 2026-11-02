@@ -400,6 +400,16 @@ def click_probe_control(scope, field, seconds=55):
         controls=state.get("controls" if scope=="artbazi-launch-navigator" else "resultControls") or {}
         last=controls.get(field) or {}
         if last.get("visible") and last.get("enabled"):
+            # A DOM rect alone may disagree with Obscura's actual hit-test
+            # after a wheel scroll. Never claim a click on the wrong element.
+            if last.get("hitMatches") is False:
+                screenshot("artbazi-radio-"+field+"-hit-mismatch")
+                raise AssertionError(
+                    f"Native hit-test cannot reach {field}: "
+                    f"target={last.get('hitTag')}, coords={last.get('x')},{last.get('y')}, "
+                    f"scroll={state.get('scrollY')}")
+            if field in ("situation","resources"):
+                screenshot("artbazi-radio-"+field+"-before-native-click")
             native_workspace_click(last)
             return
         # Scroll only when the actual target is outside the native viewport.
@@ -426,7 +436,11 @@ def verify_launch_answer(field, report, seconds=8):
             return
         time.sleep(.5)
     screenshot("artbazi-radio-"+field+"-not-selected")
-    raise AssertionError(f"Actual ArtBazi radio {field} was not selected by native click")
+    target=(last.get("controls") or {}).get(field)
+    raise AssertionError(
+        f"ArtBazi radio {field} did not select after native click; "
+        f"scrollY={last.get('scrollY')} focused={last.get(field+'Focused')} "
+        f"target={target}")
 
 
 def wait_artbazi_t2_result_state(predicate, label, seconds=65):
