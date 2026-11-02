@@ -6,6 +6,7 @@ on:
       - ".github/workflows/public-browser-patched-bundle.yml"
       - "browser-lab/tests/packaged_idb_gui.py"
       - "browser-lab/tests/live_sites_gui.py"
+      - "browser-lab/tests/native_confirm_gui.py"
       - "browser-lab/tests/workspace_task_probe.test.mjs"
       - "browser-lab/src-tauri/src/controller.rs"
       - "engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs"
@@ -91,6 +92,11 @@ jobs:
           fi
           python browser-lab/scripts/stage_patched_engine.py
           printf 'OBSCURA_PATCHED_BINARY=%s\n' "$OBSCURA_PATCHED_BINARY" >> "$GITHUB_ENV"
+      - name: Real native Yes/No and disabled confirmation regression (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install websocket-client==1.8.0
+          xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/native_confirm_gui.py
       - name: Verify staged public engine identity before bundling
         shell: bash
         run: |
@@ -146,4 +152,5 @@ jobs:
           path: |
             artifacts/browser-lab/patched-gui/
             artifacts/browser-lab/live-sites/
+            artifacts/browser-lab/native-confirm/
           retention-days: 7

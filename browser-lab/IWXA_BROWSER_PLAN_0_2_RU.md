@@ -224,3 +224,22 @@ a CDP Input.dispatchMouseEvent reply can exceed the normal 20-second
 command deadline. Prolonged human deliberation needs a separate,
 well-scoped modal lifecycle mechanism. Do not extend ordinary JS or
 navigation timeouts to disguise the issue.
+
+## 0.2 — независимая GUI-приёмка системного confirm (2026-11-02)
+
+После коммита 5fa4e8c компиляция, Windows и Linux IndexedDB PASS,
+но ArtBazi снова не смонтировал Overview (51/51 HTTP-модулей доставлены).
+Это **не** доказывает неисправность native-dialog: ArtBazi в данном прогоне
+вообще не вызывал confirm().
+
+Для отделения причин создан независимый Linux GUI regression
+`native_confirm_gui.py`: запускает **тот же собранный** Obscura CLI,
+проверяет отказ без process opt-in, затем отдельно запускает двигатель
+с тестовым opt-in, нажимает настоящую кнопку внутри страницы через CDP
+и проверяет видимое GTK окно, No/Escape и Yes реальными OS-событиями X11.
+После закрытия окна браузерная страница сообщает решение через Runtime.readback.
+Никакой Result, T2, приватный сайт и поддельное JS-согласие не используются.
+Автоматическое нажатие кнопки является тестом механики, не согласием человека.
+
+До успешного GUI-прогона оба исхода остаются **не квалифицированы**.
+Полный ArtBazi Result -> Kernel receipt -> readback проверяется отдельно.
