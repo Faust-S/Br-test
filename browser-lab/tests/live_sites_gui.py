@@ -489,14 +489,31 @@ def attempt_artbazi_result(report, session):
     verify_launch_answer("resources",report)
     click_probe_control("artbazi-launch-navigator","calculate")
     click_probe_control("artbazi-launch-navigator","save")
+    before_transfer=request_probe("artbazi")["result"]
+    if before_transfer.get("secureContext") is not True:
+        screenshot("artbazi-https-context-invalid")
+        raise AssertionError("Browser did not expose a secure context for committed ArtBazi HTTPS")
+    if before_transfer.get("randomUUIDAvailable") is not True:
+        raise AssertionError("Browser crypto.randomUUID is unavailable to the real T2 bridge")
+    report["checks"]["artbazi_secure_context_on_https"]="PASS"
     click_probe_control("artbazi-launch-navigator","transfer")
     # The pinned upstream window.confirm() currently auto-accepts. This is
     # recorded as an independent browser UX HOLD, not a user confirmation.
     report["checks"]["obscura_javascript_confirm_dialog"]="HOLD_UPSTREAM_AUTO_ACCEPT"
-    wait_session(session,lambda state:
-        state.get("active")==0 and
-        state.get("tabs",[""])[0].startswith("https://artbazi.ru/workspace/#/domain"),
-        "ArtBazi staged transfer reached real T2 domain",seconds=55)
+    try:
+        wait_session(session,lambda state:
+            state.get("active")==0 and
+            state.get("tabs",[""])[0].startswith("https://artbazi.ru/workspace/#/domain"),
+            "ArtBazi staged transfer reached real T2 domain",seconds=55)
+    except AssertionError as error:
+        state=request_probe("artbazi")["result"]
+        screenshot("artbazi-t2-transfer-not-navigated")
+        raise AssertionError(
+            f"ArtBazi transfer did not navigate: "
+            f"secureContext={state.get('secureContext')} "
+            f"pendingCandidate={state.get('pendingCandidatePresent')} "
+            f"statusCode={state.get('transferStatusCode')} "
+            f"scope={state.get('scope')}") from error
     pending=wait_artbazi_t2_result_state(
         lambda value:value.get("pending") and value.get("pendingSourceMatched"),
         "T2 pending result")

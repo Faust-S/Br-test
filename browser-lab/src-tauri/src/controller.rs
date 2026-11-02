@@ -197,6 +197,18 @@ const ARTBAZI_LAUNCH_PROBE: &str = r#"(function() {
     var resources=document.querySelector('input[type="radio"][name="resources"][value="time"]');
     var save=button('Сохранить в рабочей области');
     var transfer=document.querySelector('[data-testid="t2-public-transfer"]');
+    var pending=false, statusCode='NONE';
+    try {
+        // Existence only: never expose Result contents or source storage keys.
+        pending=sessionStorage.getItem('artbazi.t2.pending-public-result.v1')!==null;
+    } catch (_) {statusCode='STORAGE_UNAVAILABLE';}
+    var section=transfer&&transfer.closest('section');
+    var visibleStatus=section&&section.querySelector('[role="status"]');
+    var message=(visibleStatus&&visibleStatus.textContent||'');
+    if (message.includes('защищённого HTTPS')) statusCode='INSECURE_CONTEXT';
+    else if (message.includes('Результат сервиса не готов')) statusCode='INVALID_SOURCE';
+    else if (message.includes('Изменилась')) statusCode='REVISION_CHANGED';
+    else if (message && statusCode==='NONE') statusCode='OTHER_STATUS';
     return {scope:'artbazi-launch-navigator',
         controls:{
             // Click the actual native radio control. In Obscura a click on the
@@ -211,7 +223,11 @@ const ARTBAZI_LAUNCH_PROBE: &str = r#"(function() {
         resourcesSelected:!!(resources&&resources.checked),
         answersSelected:!!(situation&&situation.checked&&resources&&resources.checked),
         calculationVisible:!!save,
-        publicEditionAvailable:!!transfer};
+        publicEditionAvailable:!!transfer,
+        secureContext:!!globalThis.isSecureContext,
+        randomUUIDAvailable:!!(globalThis.crypto&&typeof crypto.randomUUID==='function'),
+        pendingCandidatePresent:pending,
+        transferStatusCode:statusCode};
 })()"#;
 
 #[cfg(debug_assertions)]

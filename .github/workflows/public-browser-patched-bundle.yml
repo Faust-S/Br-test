@@ -11,6 +11,7 @@ on:
       - "engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch"
       - "engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch"
       - "engine-overrides/obscura-v0.2.6/patches/posted-task-root-generation.patch"
+      - "engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch"
   workflow_dispatch:
 permissions:
   contents: read
@@ -62,8 +63,11 @@ jobs:
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/posted-task-busy-retry.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/posted-task-root-generation.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/posted-task-root-generation.patch")
-      - name: Compile modified native Obscura with renderer
-        run: cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
+          (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/secure-context-origin.patch")
+      - name: Build native Obscura and check module transport borrow regression
+        run: |
+          cargo test --manifest-path upstream/Cargo.toml -p obscura-js synchronous_module_request_does_not_borrow_page_transport
+          cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render --bin obscura
       - name: Stage patched executable and its identity as Tauri resource
         shell: bash
         run: |

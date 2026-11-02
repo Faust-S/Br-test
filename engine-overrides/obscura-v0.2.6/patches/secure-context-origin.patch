@@ -1,0 +1,34 @@
+diff --git a/crates/obscura-js/js/bootstrap.js b/crates/obscura-js/js/bootstrap.js
+--- a/crates/obscura-js/js/bootstrap.js
++++ b/crates/obscura-js/js/bootstrap.js
+@@ -16931,7 +16931,30 @@
+     get() { const root = _scrollRoot(); return root ? (root[offset] || 0) : 0; },
+   });
+ }
++// Secure-context API: only a committed, trustworthy top-level origin gets
++// secure-only web APIs. Never trust history's pending/virtual URL here. Opaque
++// sandbox documents and frame contexts fail closed until ancestor security is
++// independently established; about:blank/data/file stay unqualified.
++Object.defineProperty(globalThis, 'isSecureContext', {
++  configurable: false,
++  enumerable: true,
++  get() {
++    if ((globalThis.__obscura_frameId >>> 0) !== 0) return false;
++    if (_domParse('sandbox_opaque_origin') === true) return false;
++    try {
++      const origin = _domParse('document_origin');
++      if (!origin || origin === 'null') return false;
++      const committed = new URL(_domParse('document_url') || 'about:blank');
++      if (committed.protocol === 'https:') return true;
++      if (committed.protocol !== 'http:') return false;
++      const host = committed.hostname.toLowerCase();
++      return host === 'localhost' || host.endsWith('.localhost') ||
++        /^127(?:\.[0-9]{1,3}){3}$/.test(host) ||
++        host === '[::1]' || host === '::1';
++    } catch (_) { return false; }
++  },
++});
+ globalThis.focus = function() {}; _markNative(globalThis.focus);
+ globalThis.blur = function() {}; _markNative(globalThis.blur);
+ globalThis.print = function() {}; _markNative(globalThis.print);
+ globalThis.alert = function() {}; _markNative(globalThis.alert);
