@@ -884,6 +884,16 @@ impl Controller {
         // Obscura and both engine stdio handles were discarded. This is an
         // isolated, DEBUG-only experiment in the public real-site test.
         // No user-controlled timeout or log setting reaches release builds.
+        // Narrow, opt-in trace for the real-site GUI. Unlike the retired
+        // 180-second diagnostic this changes neither page budgets nor timeouts.
+        // The child environment is cleared above, so RUST_LOG must be added
+        // explicitly to the owned child and its stderr must be forwarded.
+        if cfg!(debug_assertions) && !fixture_mode &&
+            std::env::var("IWXA_BROWSER_ENGINE_TRACE").as_deref() == Ok("1") {
+            child.env("RUST_LOG", "warn,obscura_browser::page=info,obscura_js::module_loader=debug");
+            child.stdout(std::process::Stdio::inherit());
+            child.stderr(std::process::Stdio::inherit());
+        }
         if cfg!(debug_assertions) && !fixture_mode &&
             std::env::var("IWXA_SPA_DIAGNOSTIC_180S").as_deref() == Ok("1") {
             child.env("OBSCURA_SCRIPT_DEADLINE_MS", "180000");

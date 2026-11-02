@@ -154,6 +154,15 @@ fn io_err(msg: String) -> ModuleLoaderError {
     JsErrorBox::from_err(std::io::Error::new(std::io::ErrorKind::Other, msg))
 }
 
+// The response body is authoritative for module execution. Its CDP Network
+// event is diagnostic and may be temporarily blocked by an unrelated page
+// borrow. Such contention must never invalidate successfully fetched code.
+fn with_uncontended_state<T>(state: &RefCell<T>, on_available: impl FnOnce(&mut T)) -> bool {
+    let Ok(mut state) = state.try_borrow_mut() else { return false; };
+    on_available(&mut state);
+    true
+}
+
 // IWXA Browser public overlay: see Obscura #1222 and unmerged PR #1226.
 // Do not retry HTTP status responses or security-policy failures; only
 // transient connection-level module fetch errors. No new client or cache.
@@ -357,10 +366,8 @@ impl ModuleLoader for ObscuraModuleLoader {
                     // Status 0 is the transport's blocked-tracker sentinel.
                     if resp.status != 0 {
                         if let Some(state) = page_state.as_ref().and_then(Weak::upgrade) {
-                            let mut state = state.try_borrow_mut().map_err(|_| {
-                                io_err("Module loader page state is already borrowed".to_string())
-                            })?;
-                            record_network_completion(&mut state, JsNetworkEvent {
+                            let recorded = with_uncontended_state(&state, |state| {
+                                record_network_completion(state, JsNetworkEvent {
                                 request_id, intercepted: false,
                                 url: resp.url.to_string(), method: "GET".to_string(),
                                 resource_type: "Script".to_string(), status: resp.status,
@@ -377,6 +384,13 @@ impl ModuleLoader for ObscuraModuleLoader {
                                     body: BASE64.encode(&resp.body), base64_encoded: true,
                                 },
                             });
+                            });
+                            if !recorded {
+                                tracing::warn!(
+                                    module = %url,
+                                    "ES module network event skipped: page state borrowed; downloaded source remains usable"
+                                );
+                            }
                         }
                     }
                     if !(200..=299).contains(&resp.status) {
@@ -405,5 +419,22 @@ impl ModuleLoader for ObscuraModuleLoader {
                 Err(error) => Err(io_err(error)),
             }
         })))
+    }
+}
+
+#[cfg(test)]
+mod iwxa_module_network_borrow_tests {
+    use super::with_uncontended_state;
+    use std::cell::RefCell;
+
+    #[test]
+    fn temporary_borrow_contention_does_not_turn_diagnostics_into_a_failure() {
+        let page = RefCell::new(vec![1_u8]);
+        let occupied = page.borrow();
+        assert!(!with_uncontended_state(&page, |events| events.push(2)));
+        assert_eq!(occupied.as_slice(), &[1]);
+        drop(occupied);
+        assert!(with_uncontended_state(&page, |events| events.push(3)));
+        assert_eq!(*page.borrow(), vec![1, 3]);
     }
 }

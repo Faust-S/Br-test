@@ -573,7 +573,7 @@ def main():
         env["OBSCURA_LAB_PROFILE_DIR"] = str(profile)
         # Only this fresh public-page CI profile: expose upstream module
         # preparation/evaluation warnings in the existing GUI artifact.
-        env["RUST_LOG"] = "obscura_browser::page=info,obscura_js::module_loader=debug,obscura_js=warn"
+        env["IWXA_BROWSER_ENGINE_TRACE"] = "1"
         if not gui.WINDOWS:
             env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
             manager = subprocess.Popen(["openbox"], stdout=log, stderr=subprocess.STDOUT)
