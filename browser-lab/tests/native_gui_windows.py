@@ -204,19 +204,25 @@ def main():
             report["checks"]["native_window"]="PASS"
             report["checks"]["chrome_ready"]="PASS"
             report["startup_window_ms"]=round((time.monotonic()-start)*1000)
+            navigation_start=time.monotonic()
             type_url(origin+"/browser-lab/fixtures/gui-smoke.html")
             red=wait_color((238,53,78),"first-tab",seconds=55)
+            report["timings_ms"]={"first_visible_page":round((time.monotonic()-navigation_start)*1000)}
             report["checks"]["navigation_render"]="PASS"
             report["checks"]["unauthenticated_cdp_refused"]=assert_unauthorized_cdp_rejected(process.pid)
             count=len(EVENTS)
+            click_start=time.monotonic()
             pyautogui.click(*red)
             wait_event("click","one","1",count)
+            report["timings_ms"]["first_click_to_page_event"]=round((time.monotonic()-click_start)*1000)
             report["checks"]["pointer_readback"]="PASS"
             green=wait_color((40,184,93),"typed-field")
             count=len(EVENTS)
+            typing_start=time.monotonic()
             pyautogui.click(*green)
             pyautogui.write("PUBLIC-WINDOWS",interval=.06)
             wait_event("typed","one","PUBLIC-WINDOWS",count)
+            report["timings_ms"]["text_entry_to_page_event"]=round((time.monotonic()-typing_start)*1000)
             report["checks"]["text_readback"]="PASS"
             count=len(EVENTS)
             pyautogui.hotkey("ctrl","a")

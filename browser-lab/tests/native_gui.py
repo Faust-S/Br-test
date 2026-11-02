@@ -111,6 +111,7 @@ def main():
             shot("initial")
             report["checks"]["native_window"]="PASS"
             red=None
+            navigation_start=time.monotonic()
             for attempt in range(3):
                 if procs[-1].poll() is not None:
                     raise RuntimeError("Tauri exited before navigation")
@@ -125,13 +126,21 @@ def main():
                     shot("navigation-attempt-"+str(attempt+1))
             if red is None:
                 raise AssertionError("Address navigation never rendered Obscura fixture")
+            report["timings_ms"]={"first_visible_page":round((time.monotonic()-navigation_start)*1000),
+                "first_visible_page_attempts":attempt+1}
             report["checks"]["real_obscura_page_render"]="PASS"
             report["checks"]["unauthenticated_cdp_refused"]=assert_unauthorized_cdp_rejected(procs[-1].pid)
-            n=len(EVENTS);click(red);await_event("click","one","1",n)
+            n=len(EVENTS)
+            click_start=time.monotonic()
+            click(red);await_event("click","one","1",n)
+            report["timings_ms"]["first_click_to_page_event"]=round((time.monotonic()-click_start)*1000)
             report["checks"]["real_mouse_click"]="PASS"
             green=find_color((40,184,93),"text-input")
-            n=len(EVENTS);click(green);type_text("PUBLIC-GUI")
+            n=len(EVENTS)
+            typing_start=time.monotonic()
+            click(green);type_text("PUBLIC-GUI")
             await_event("typed","one","PUBLIC-GUI",n)
+            report["timings_ms"]["text_entry_to_page_event"]=round((time.monotonic()-typing_start)*1000)
             report["checks"]["real_keyboard_input"]="PASS"
             n=len(EVENTS);key("ctrl+a");type_text("PUBLIC-EDIT")
             await_event("typed","one","PUBLIC-EDIT",n)
