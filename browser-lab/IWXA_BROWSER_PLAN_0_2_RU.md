@@ -287,3 +287,35 @@ release-сборки код исключён `#[cfg(debug_assertions)]`. Вре�
 и работа scheduler не меняются; это средство установить факт
 lost wake / stale generation / отсутствие задач, а не workaround.
 Следующий шаг — исправить точный механизм по логам, не увеличивая тайм-ауты.
+
+## 0.2 — X11 authorization for owned Obscura native confirm (2026-11-02)
+
+Сборка `#41489046070` на `adb39bbb`: Windows комплектный PASS,
+Linux standalone native Yes/No PASS, IndexedDB DB8 PASS, ArtBazi
+Overview, создание Workspace и выбор параметров PASS. POSTED-TASK
+сэмплы: 25 постановок и 25 доставок; потеря callback на этих данных
+не установлена. Передача Result HOLD: после клика не открылся OS-dialog.
+
+По реальному Linux `native.log` найдено сообщение X11:
+`Authorization required, but no authorization protocol specified`.
+При запуске engine-only теста было унаследовано `XAUTHORITY`;
+при запуске из Tauri `Controller::start()` выполняет `env_clear()` и
+ранее восстанавливал `DISPLAY`, но не `XAUTHORITY`. Таким образом,
+GTK3 не мог аутентифицироваться в Xvfb/X11-сессии. Это подтверждённая
+ошибка интеграции ОС, не T2, Kernel или модульного загрузчика.
+
+Исправление: передать **только в owned real-site child** существующий
+`XAUTHORITY` путь, если определён `DISPLAY`, без вывода пути/ключа в логи
+и без расширения CDP или site JS. Для fixture/headless и отсутствующего
+сеансового доступа остаётся fail-closed; Windows использует собственный
+native backend. Добавлен Rust unit regression на отсутствие привилегий у
+fixture/без DISPLAY и на доступность у разрешённого child.
+Передача X11-capability — известный риск модели X11: процесс, имеющий cookie,
+обладает более широким доступом к desktop session. Полная изоляция
+произвольных сайтов остаётся неподтверждённой и требует отдельного
+Tauri-owned-dialog IPC без X11-cookie в engine, до открытия arbitrary Internet.
+
+Linux acceptance должна после этого увидеть **настоящее** системное
+окно при клике ArtBazi и доказать отдельные состояния Candidate →
+T2 Kernel receipt → Result readback. Обход confirm и увеличение таймаутов
+запрещены; PASS до завершения этого маршрута не объявлять.

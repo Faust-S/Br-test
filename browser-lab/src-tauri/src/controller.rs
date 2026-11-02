@@ -550,6 +550,19 @@ fn is_blocked_ipv6(ip: Ipv6Addr) -> bool {
     ip.is_loopback() || ip.is_unspecified() || ip.is_unique_local() ||
     ip.is_unicast_link_local() || ip.is_multicast()
 }
+#[cfg(target_os = "linux")]
+fn owned_native_confirmation_xauthority<'a>(
+    display: Option<&std::ffi::OsStr>,
+    authority: Option<&'a std::ffi::OsStr>,
+    fixture_mode: bool,
+) -> Option<&'a std::ffi::OsStr> {
+    // The X11 cookie file is a desktop-session capability, not site data.
+    // Pass it only to the owned engine which can legitimately display a
+    // synchronous dialog. A fixture/headless engine remains fail-closed.
+    if fixture_mode || display.is_none() { return None; }
+    authority.filter(|value| !value.is_empty())
+}
+
 fn is_fixture_endpoint(url: &Url) -> bool {
     // The test-only private-network flag must never accompany a public site.
     // This is a controller guard, NOT a network sandbox for subresources.
@@ -996,6 +1009,22 @@ impl Controller {
             child.arg("--allow-private-network");
         } else {
             child.env("IWXA_OBSCURA_NATIVE_CONFIRM_UI", "1");
+        }
+        // Xvfb and many Linux desktops authenticate GTK clients with an
+        // XAUTHORITY cookie file. env_clear() above preserved DISPLAY but
+        // discarded that credential, so the OS dialog silently failed inside
+        // the Tauri-owned child (independent engine-only tests passed).
+        // Only the owned real-site child receives this session capability;
+        // the file path/cookie are never exposed to JS, CDP, logs or a fixture.
+        #[cfg(target_os = "linux")]
+        {
+            let display = std::env::var_os("DISPLAY");
+            let authority = std::env::var_os("XAUTHORITY");
+            if let Some(path) = owned_native_confirmation_xauthority(
+                display.as_deref(), authority.as_deref(), fixture_mode,
+            ) {
+                child.env("XAUTHORITY", path);
+            }
         }
         // Upstream Obscura v0.2.6 already enforces this bearer token and
         // refuses WebSocket handshakes carrying a browser Origin header.
@@ -1483,6 +1512,24 @@ fn is_unavailable_confirmation_notice(message: &Value, active_session: &str) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn owned_native_confirm_inherits_x11_authorization_only_for_real_sites() {
+        use std::ffi::OsStr;
+        let display = OsStr::new(":99");
+        let auth = OsStr::new("/tmp/obscura-confirm-fixture.Xauthority");
+        assert_eq!(
+            owned_native_confirmation_xauthority(Some(display), Some(auth), false),
+            Some(auth),
+        );
+        assert!(owned_native_confirmation_xauthority(Some(display), Some(auth), true).is_none());
+        assert!(owned_native_confirmation_xauthority(None, Some(auth), false).is_none());
+        assert!(owned_native_confirmation_xauthority(Some(display), None, false).is_none());
+        assert!(owned_native_confirmation_xauthority(
+            Some(display), Some(OsStr::new("")), false,
+        ).is_none());
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn cdp_deadline_cannot_be_extended_by_unrelated_events() {

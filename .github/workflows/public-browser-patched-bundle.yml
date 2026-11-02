@@ -114,6 +114,11 @@ jobs:
           cd browser-lab
           npm install --no-audit --no-fund
           npx tauri build --debug --no-bundle --config src-tauri/tauri.patched.conf.json
+      - name: Native confirmation X11 authorization scope regression (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          cargo test --manifest-path browser-lab/src-tauri/Cargo.toml owned_native_confirm_inherits_x11_authorization_only_for_real_sites
       - name: Install real GUI interaction dependencies
         shell: bash
         run: |
