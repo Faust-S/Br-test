@@ -111,7 +111,8 @@ jobs:
           fi
       - name: Real public Learn and ArtBazi routes (reuses the bundled Linux build)
         if: runner.os == 'Linux' && !cancelled()
-        continue-on-error: true
+        # The live-site route is a product gate. Do not mask its HOLD behind
+        # a successful patched-engine compilation.
         # Previous 180s experiment has finished. Test the repaired product
         # under normal execution limits, without diagnostics keeping pages busy.
         shell: bash

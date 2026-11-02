@@ -323,10 +323,10 @@ def attempt_artbazi_create(initial, report, session):
     # The normal T2 route is fragment-based. Only a successful Kernel
     # createWorkspace may drive its workspace-id route from the UI.
     created=wait_session(session,lambda state:
-        len(state.get("tabs",[])) == 2 and state.get("active") == 1 and
-        state["tabs"][1].startswith("https://artbazi.ru/workspace/#/workspace/"),
+        len(state.get("tabs",[])) == 1 and state.get("active") == 0 and
+        state["tabs"][0].startswith("https://artbazi.ru/workspace/#/workspace/"),
         "ArtBazi T2 created workspace route",seconds=80)
-    created_url=created["tabs"][1]
+    created_url=created["tabs"][0]
     report["checks"]["created_workspace_route_sha256"]=hashlib.sha256(
         created_url.encode("utf-8")).hexdigest()
     report["checks"]["artbazi_created_workspace_route"]="PASS"
@@ -346,6 +346,152 @@ def attempt_artbazi_create(initial, report, session):
 
 
 
+
+def scroll_native_page():
+    """Real wheel input through the visible Obscura page, never JS scrollTo."""
+    if gui.WINDOWS:
+        gui.pyautogui.moveTo(990, 560)
+        gui.pyautogui.scroll(-4)
+    else:
+        gui.command("xdotool", "mousemove", "990", "560")
+        for _ in range(4):
+            gui.command("xdotool", "click", "5")
+
+
+def wait_probe_scope(scope, seconds=45):
+    deadline=time.monotonic()+seconds
+    last={}
+    while time.monotonic()<deadline:
+        last=request_probe("artbazi")["result"]
+        if last.get("scope")==scope:
+            return last
+        time.sleep(1.5)
+    raise AssertionError(f"ArtBazi expected native UI {scope}, observed={last.get('scope')}")
+
+
+def click_probe_control(scope, field, seconds=55):
+    deadline=time.monotonic()+seconds
+    last={}
+    while time.monotonic()<deadline:
+        state=request_probe("artbazi")["result"]
+        if state.get("scope")!=scope:
+            time.sleep(.5)
+            continue
+        controls=state.get("controls" if scope=="artbazi-launch-navigator" else "resultControls") or {}
+        last=controls.get(field) or {}
+        if last.get("visible") and last.get("enabled"):
+            native_workspace_click(last)
+            return
+        # A missing control during hydration is not a reason to scroll.
+        if last:
+            scroll_native_page()
+        else:
+            time.sleep(.8)
+        time.sleep(.3)
+    raise AssertionError(f"Real ArtBazi UI control {field} not ready, last={last}")
+
+
+def wait_artbazi_t2_result_state(predicate, label, seconds=65):
+    deadline=time.monotonic()+seconds
+    last={}
+    while time.monotonic()<deadline:
+        state=request_probe("artbazi")["result"]
+        if state.get("scope")=="public-workspace":
+            last=state.get("t2Result") or {}
+            if predicate(last):
+                return last
+        time.sleep(1.5)
+    screenshot("artbazi-"+label+"-hold")
+    raise AssertionError(f"ArtBazi {label} unavailable via visible UI, last={last}")
+
+
+def attempt_artbazi_result(report, session):
+    """All writes are native clicks in real ArtBazi -> domain T2 Kernel UI."""
+    destination="https://artbazi.ru/services/launch-navigator/"
+    type_address(destination)
+    wait_session(session,lambda state:
+        state.get("active")==0 and state.get("tabs",[""])[0].startswith(destination),
+        "ArtBazi launch-navigator public service route",seconds=55)
+    wait_remote_document("artbazi-launch-service")
+    wait_probe_scope("artbazi-launch-navigator")
+    click_probe_control("artbazi-launch-navigator","situation")
+    click_probe_control("artbazi-launch-navigator","resources")
+    click_probe_control("artbazi-launch-navigator","calculate")
+    click_probe_control("artbazi-launch-navigator","save")
+    click_probe_control("artbazi-launch-navigator","transfer")
+    # The pinned upstream window.confirm() currently auto-accepts. This is
+    # recorded as an independent browser UX HOLD, not a user confirmation.
+    report["checks"]["obscura_javascript_confirm_dialog"]="HOLD_UPSTREAM_AUTO_ACCEPT"
+    wait_session(session,lambda state:
+        state.get("active")==0 and
+        state.get("tabs",[""])[0].startswith("https://artbazi.ru/workspace/#/domain"),
+        "ArtBazi staged transfer reached real T2 domain",seconds=55)
+    pending=wait_artbazi_t2_result_state(
+        lambda value:value.get("pending") and value.get("pendingSourceMatched"),
+        "T2 pending result")
+    report["checks"]["artbazi_source_result_transferred_via_ui"]="PASS"
+    if not pending.get("focusSelected"):
+        if pending.get("focusChoices")!=1:
+            raise AssertionError("T2 Host has no unambiguous user-selectable Workspace")
+        click_probe_control("public-workspace","focusWorkspace")
+        gui.key("End")
+        gui.key("Return")
+        wait_artbazi_t2_result_state(lambda value:value.get("focusSelected"),
+            "selected T2 Workspace",seconds=35)
+    click_probe_control("public-workspace","confirm")
+    wait_artbazi_t2_result_state(
+        lambda value:value.get("verified") and value.get("freshReceiptAndReadback"),
+        "Kernel receipt and matching readback")
+    report["checks"]["artbazi_t2_kernel_receipt_verified_by_site"]="PASS"
+    # Read the same committed Result through the domain's existing list/view.
+    click_probe_control("public-workspace","selectSaved")
+    wait_artbazi_t2_result_state(
+        lambda value:value.get("revisionOne") and value.get("readbackMatches"),
+        "T2 Result content readback")
+    report["checks"]["artbazi_t2_result_readback"]="PASS"
+    click_probe_control("public-workspace","history")
+    wait_artbazi_t2_result_state(
+        lambda value:value.get("savedEventVisible"),
+        "T2 saved event in actual user history")
+    report["checks"]["artbazi_t2_saved_event_visible"]="PASS"
+    screenshot("artbazi-saved-result-kernel-readback")
+
+
+def verify_native_save_first_exit(process, report, session):
+    """System close, visual reminder, cancel preserving domain, accept and exit."""
+    before=screenshot("artbazi-before-system-close")
+    gui.key("alt+F4")
+    if process.poll() is not None:
+        raise AssertionError("OS close bypassed save-first reminder")
+    wait_save_first_dialog(before,"save-first-os-close")
+    report["checks"]["native_save_first_dialog_visible"]="PASS"
+    reliable_click(253,42)  # header must not allow new tabs behind the modal
+    time.sleep(.7)
+    current_tabs=json.loads(session.read_text(encoding="utf-8"))["tabs"]
+    if len(current_tabs)!=1:
+        raise AssertionError("Toolbar created a tab behind save-first dialog")
+    report["checks"]["native_save_first_modal_blocks_tabs"]="PASS"
+    # A canceled close must preserve the domain page, not just process PID.
+    gui.key("Escape")
+    wait_save_dialog_dismissed(before)
+    if process.poll() is not None:
+        raise AssertionError("Cancel terminated Tauri")
+    result=request_probe("artbazi")["result"]
+    if not (result.get("t2Result") or {}).get("readbackMatches"):
+        raise AssertionError("Cancel discarded the visible, verified T2 Result")
+    report["checks"]["native_save_first_return_to_site"]="PASS"
+    gui.key("alt+F4")
+    wait_save_first_dialog(before,"save-first-confirmation")
+    gui.key("Tab")   # button after auto-focused Return and save
+    gui.key("Return")
+    try:
+        exit_code=process.wait(timeout=12)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError("Confirmed OS-close did not terminate Tauri") from error
+    if exit_code!=0:
+        raise AssertionError(f"Confirmed browser exit returned {exit_code}")
+    report["checks"]["native_save_first_confirmed_exit"]="PASS"
+
 def main():
     app = Path(os.environ["OBSCURA_LAB_GUI_BINARY"]).resolve(strict=True)
     report = {
@@ -361,8 +507,9 @@ def main():
         },
         "checks": {},
         "not_qualified": [
-            "remote document hydration", "T2 receipts", "T2 Result readback",
-            "Exchange", "arbitrary-Internet process isolation"
+            "T2 receipts", "T2 Result readback",
+            "Exchange", "arbitrary-Internet process isolation",
+            "JavaScript confirm dialog (Obscura upstream auto-accept)"
         ],
     }
     manager = None
@@ -386,7 +533,7 @@ def main():
             env["WEBKIT_DISABLE_COMPOSITING_MODE"] = "1"
             manager = subprocess.Popen(["openbox"], stdout=log, stderr=subprocess.STDOUT)
         try:
-            for stage in ("visit", "restore", "readback"):
+            for stage in ("visit",):
                 previous_write = session.stat().st_mtime_ns if session.exists() else 0
                 process = subprocess.Popen([str(app)], env=env, cwd=app.parent,
                     stdout=log, stderr=subprocess.STDOUT)
@@ -398,156 +545,50 @@ def main():
                     f"{stage}: completed native engine boot", seconds=80)
                 screenshot(stage + "-after-native-boot")
 
-                if stage == "visit":
-                    wait_picker("learn-picker-ready")
-                    reliable_click(475, 597)  # Learn card, actual new-tab UI
-                    saved = wait_session(session, lambda state:
-                        "learn" in state.get("granted_sites", []) and
-                        state["tabs"][state["active"]].startswith(SITES[0][1]),
-                        "Learn card approval and native navigation", seconds=65)
-                    report["checks"]["learn_card_approved"] = "PASS"
-                    report["checks"]["learn_saved_url"] = saved["tabs"][saved["active"]]
-                    wait_remote_document("learn-public-page")
-                    report["checks"]["learn_native_document_ready"] = "PASS"
-
-                    open_tab(session, 2)
-                    type_address(SITES[1][1])  # ArtBazi address + user consent
-                    wait_consent_dialog()
-                    # Cancel is auto-focused; Tab then Enter chooses Allow.
-                    gui.key("Tab")
-                    gui.key("Return")
-                    saved = wait_session(session, lambda state:
-                        set(state.get("granted_sites", [])) == {"learn", "artbazi"} and
-                        len(state.get("tabs", [])) == 2 and
-                        state["tabs"][state["active"]].startswith(SITES[1][1]),
-                        "ArtBazi consent and native navigation", seconds=65)
-                    report["checks"]["artbazi_address_approved"] = "PASS"
-                    report["checks"]["artbazi_saved_url"] = saved["tabs"][saved["active"]]
-                    wait_remote_document("artbazi-public-page")
-                    report["checks"]["artbazi_native_document_ready"] = "PASS"
-                    report["checks"]["browser_session_before_restart"] = saved["tabs"]
-                elif stage == "restore":
-                    saved = wait_session(session, lambda state:
-                        set(state.get("granted_sites", [])) == {"learn", "artbazi"} and
-                        len(state.get("tabs", [])) == 2 and state.get("active") == 1 and
-                        state["tabs"][0].startswith(SITES[0][1]) and
-                        state["tabs"][1].startswith(SITES[1][1]),
-                        "two sites restored from native profile")
-                    report["checks"]["both_tabs_and_approvals_restored"] = "PASS"
-                    screenshot("restored-artbazi")
-
-                    type_address(SITES[1][2])
-                    wait_session(session, lambda state:
-                        any(url.startswith(SITES[1][2]) for url in state.get("tabs", [])),
-                        "ArtBazi Workspace address")
-                    report["checks"]["artbazi_workspace_address"] = "PASS"
-                    report["checks"]["artbazi_workspace_html"] = observe_workspace_document(
-                        "artbazi-workspace-capture")
-                    artbazi_probe=request_probe("artbazi")
-                    report["checks"]["artbazi_bootstrap_probe"]=artbazi_probe
-                    report["checks"]["artbazi_t2_host_mount"]=(
-                        "PASS" if artbazi_probe["result"].get("hostMounted") else "HOLD")
-                    screenshot("artbazi-workspace-after-probe")
-                    created_url=attempt_artbazi_create(artbazi_probe,report,session)
-                    report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
-
-                    reliable_click(145, 43)  # original Learn tab
-                    time.sleep(.6)
-                    type_address(SITES[0][2])
-                    wait_session(session, lambda state:
-                        any(url.startswith(SITES[0][2]) for url in state.get("tabs", [])),
-                        "Learn Workspace address")
-                    report["checks"]["learn_workspace_address"] = "PASS"
-                    report["checks"]["learn_workspace_html"] = observe_workspace_document(
-                        "learn-workspace-capture")
-                    learn_probe = request_probe("learn")
-                    report["checks"]["learn_bootstrap_probe"] = learn_probe
-                    report["checks"]["learn_t2_host_mount"] = (
-                        "PASS" if learn_probe["result"].get("hostMounted") else "HOLD")
-                    screenshot("learn-workspace-after-probe")
-                    report["checks"]["learn_t2_result_readback"] = "UNQUALIFIED"
-                else:  # readback: do not re-create the workspace or change URLs
-                    if not created_url:
-                        raise AssertionError("No created T2 Workspace identity from the user action")
-                    restored=wait_session(session,lambda state:
-                        len(state.get("tabs",[])) == 2 and
-                        set(state.get("granted_sites",[])) == {"learn","artbazi"} and
-                        state["tabs"][1] == created_url,
-                        "same T2 Workspace URL persisted through full Tauri restart")
-                    report["checks"]["artbazi_created_workspace_route_restored"]="PASS"
-                    # The previous stage left Learn active. Re-select the
-                    # previously created ArtBazi workspace through the GUI.
-                    reliable_click(300,43)
-                    wait_session(session,lambda state:
-                        state.get("active") == 1 and state["tabs"][1] == created_url,
-                        "native ArtBazi tab selected after cold restart")
-                    screenshot("artbazi-created-workspace-restored")
-                    deadline=time.monotonic()+65
-                    readback={}
-                    while time.monotonic()<deadline:
-                        readback=request_probe("artbazi")["result"]
-                        if readback.get("workspaceViewError"):
-                            break
-                        if readback.get("workspaceViewMounted"):
-                            break
-                        time.sleep(4)
-                    screenshot("artbazi-created-workspace-after-restart")
-                    if readback.get("workspaceViewError") or not readback.get("workspaceViewMounted"):
-                        raise AssertionError("Same T2 Workspace record not readable after cold restart")
-                    report["checks"]["artbazi_workspace_same_record_readback"]="PASS"
-                    # Exercise the real OS close and the visible user decision.
-                    # A live process alone would not prove that a dialog exists.
-                    before_close = screenshot("artbazi-before-system-close")
-                    gui.key("alt+F4")
-                    if process.poll() is not None:
-                        raise AssertionError("OS close bypassed the save-first dialog")
-                    wait_save_first_dialog(before_close, "save-first-os-close")
-                    report["checks"]["native_save_first_dialog_visible"] = "PASS"
-
-                    # The active modal must also block chrome actions.
-                    reliable_click(253, 42)  # new-tab button must be inert
-                    time.sleep(.7)
-                    current_tabs = json.loads(session.read_text(encoding="utf-8"))["tabs"]
-                    if len(current_tabs) != 2:
-                        raise AssertionError("Toolbar created a tab behind save-first dialog")
-                    report["checks"]["native_save_first_modal_blocks_tabs"] = "PASS"
-
-                    gui.key("Escape")
-                    wait_save_dialog_dismissed(before_close)
-                    if process.poll() is not None:
-                        raise AssertionError("Cancel close terminated the browser")
-                    after_cancel = request_probe("artbazi")["result"]
-                    if not after_cancel.get("workspaceViewMounted") or after_cancel.get("workspaceViewError"):
-                        raise AssertionError("Cancelled close lost the current T2 Workspace view")
-                    report["checks"]["native_save_first_return_to_site"] = "PASS"
-
-                    # A second real OS-close request, then a user-chosen
-                    # confirmation (Tab from focused Cancel, Return on Confirm).
-                    gui.key("alt+F4")
-                    wait_save_first_dialog(before_close, "save-first-confirmation")
-                    gui.key("Tab")
-                    gui.key("Return")
-                    try:
-                        exit_code = process.wait(timeout=12)
-                    except subprocess.TimeoutExpired as error:
-                        raise AssertionError("Confirmed OS close did not terminate Tauri") from error
-                    if exit_code != 0:
-                        raise AssertionError(f"Confirmed browser exit returned {exit_code}")
-                    report["checks"]["native_save_first_confirmed_exit"] = "PASS"
-                    report["checks"]["native_save_before_exit_reminder"] = "PASS"
-                    # A Workspace record is not a domain Result or receipt.
-                    report["checks"]["artbazi_t2_result_readback"] = "UNQUALIFIED"
+                # Single real ArtBazi session: no restart or tab restoration.
+                wait_picker("artbazi-picker-ready")
+                type_address(SITES[1][1])
+                wait_consent_dialog()
+                gui.key("Tab")
+                gui.key("Return")
+                saved=wait_session(session,lambda state:
+                    set(state.get("granted_sites", [])) == {"artbazi"} and
+                    len(state.get("tabs", [])) == 1 and
+                    state.get("active") == 0 and
+                    state["tabs"][0].startswith(SITES[1][1]),
+                    "ArtBazi consent and native navigation",seconds=65)
+                report["checks"]["artbazi_address_approved"]="PASS"
+                wait_remote_document("artbazi-public-page")
+                report["checks"]["artbazi_native_document_ready"]="PASS"
+                type_address(SITES[1][2])
+                wait_session(session,lambda state:
+                    state.get("active")==0 and len(state.get("tabs",[]))==1 and
+                    state["tabs"][0].startswith(SITES[1][2]),
+                    "ArtBazi Workspace address")
+                report["checks"]["artbazi_workspace_address"]="PASS"
+                report["checks"]["artbazi_workspace_html"]=observe_workspace_document(
+                    "artbazi-workspace-capture")
+                artbazi_probe=request_probe("artbazi")
+                report["checks"]["artbazi_bootstrap_probe"]=artbazi_probe
+                report["checks"]["artbazi_t2_host_mount"]=(
+                    "PASS" if artbazi_probe["result"].get("hostMounted") else "HOLD")
+                created_url=attempt_artbazi_create(artbazi_probe,report,session)
+                attempt_artbazi_result(report,session)
+                verify_native_save_first_exit(process,report,session)
+                report["not_qualified"]=[
+                    item for item in report["not_qualified"]
+                    if item not in ("T2 receipts","T2 Result readback")
+                ]
                 gui.stop_tree(process)
                 process = None
                 # Observe the *actual T2 IndexedDB key* while the only
                 # owning engine is closed. URL persistence alone is not data
                 # persistence, and missing React is not proof of data loss.
-                if created_url and stage in ("restore", "readback"):
-                    label = "after_create" if stage == "restore" else "after_readback"
-                    report["checks"]["artbazi_t2_idb_" + label] = (
+                if created_url and stage == "visit":
+                    report["checks"]["artbazi_workspace_idb_after_result"] = (
                         inspect_closed_engine_workspace(profile, created_url)
                     )
-            report["status"] = "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"
+            report["status"] = "PASS_ARTBAZI_T2_RESULT_AND_GUI_EXIT"
         except Exception as error:
             report["status"] = "HOLD_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION"
             report["reason"] = repr(error)

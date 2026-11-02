@@ -154,6 +154,48 @@ impl Drop for Controller {
     }
 }
 
+
+#[cfg(debug_assertions)]
+const ARTBAZI_LAUNCH_PROBE: &str = r#"(function() {
+    if (location.origin !== 'https://artbazi.ru' ||
+        !/^\/services\/launch-navigator\/?$/.test(location.pathname))
+        return {scope:'outside-artbazi-launch'};
+    function position(el) {
+        if (!el || !el.getBoundingClientRect) return null;
+        var rect=el.getBoundingClientRect();
+        return {x:Math.round(rect.left+rect.width/2),
+            y:Math.round(rect.top+rect.height/2),
+            visible:rect.width>0 && rect.height>0 && rect.top>=4 &&
+                rect.bottom<=Math.min(innerHeight-10,700) &&
+                rect.left>=0 && rect.right<=innerWidth,
+            enabled:!el.disabled};
+    }
+    function button(label) {
+        return Array.from(document.querySelectorAll('button'))
+            .find(function(node){return (node.textContent||'').trim()===label;});
+    }
+    var situation=document.querySelector('input[type="radio"][name="situation"][value="leads"]');
+    var resources=document.querySelector('input[type="radio"][name="resources"][value="time"]');
+    var save=button('Сохранить в рабочей области');
+    var transfer=document.querySelector('[data-testid="t2-public-transfer"]');
+    return {scope:'artbazi-launch-navigator',
+        controls:{
+            situation:position(situation ? (situation.closest('label')||situation) : null),
+            resources:position(resources ? (resources.closest('label')||resources) : null),
+            calculate:position(button('Получить результат')),
+            save:position(save),transfer:position(transfer)},
+        answersSelected:!!(situation&&situation.checked&&resources&&resources.checked),
+        calculationVisible:!!save,
+        publicEditionAvailable:!!transfer};
+})()"#;
+
+#[cfg(debug_assertions)]
+fn is_artbazi_launch_navigator(url: &str) -> bool {
+    let Ok(parsed)=Url::parse(url) else { return false };
+    parsed.origin().ascii_serialization()=="https://artbazi.ru" &&
+        matches!(parsed.path(),"/services/launch-navigator"|"/services/launch-navigator/")
+}
+
 #[cfg(debug_assertions)]
 const WORKSPACE_CONFIG_PROBE: &str = r#"(function() {
     var origin = location.origin;
@@ -194,7 +236,55 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(function() {
     // Repeating async fetches during every T2 hydration poll perturbs the
     // same task queue being diagnosed and can hide a scheduling bug.
     var mains = Array.from(document.querySelectorAll('main'));
+    var domain = origin==='https://artbazi.ru' ?
+        document.querySelector('main[aria-label="АртБази"]') : null;
+    function point(node) {
+        if (!node || !node.getBoundingClientRect) return null;
+        var rect=node.getBoundingClientRect();
+        return {x:Math.round(rect.left+rect.width/2),
+            y:Math.round(rect.top+rect.height/2),
+            visible:rect.width>0 && rect.height>0 && rect.top>=4 &&
+                rect.bottom<=Math.min(innerHeight-10,700) &&
+                rect.left>=0 && rect.right<=innerWidth,
+            enabled:!node.disabled};
+    }
+    function scoped(selector) {return domain ? domain.querySelector(selector) : null;}
+    var pending=scoped('section[aria-label="Подтверждение результата сервиса"]');
+    var candidate=pending ? pending.querySelector('pre') : null;
+    var verified=scoped('[data-testid="t2-public-verified-result"]');
+    var resultList=scoped('section[aria-label="Список результатов"] button');
+    var resultSection=scoped('section[aria-label="Просмотр результата"]');
+    var resultText=resultSection ? resultSection.querySelector('pre') : null;
+    var resultHeader=resultSection ? resultSection.querySelector('h2') : null;
+    var eventList=scoped('section[aria-label="История выбранного результата"]');
+    var focused=scoped('[data-testid="t2-public-workspace"]');
+    var historyButton=Array.from(domain ? domain.querySelectorAll('button') : [])
+        .find(function(node){return (node.textContent||'').trim()==='История изменений';});
+    var knownRaw=resultText ? (resultText.textContent||'') : '';
+    var resultControls={
+        confirm:point(scoped('[data-testid="t2-public-confirm-save"]')),
+        focusWorkspace:point(focused),
+        selectSaved:point(resultList),history:point(historyButton)
+    };
+    var t2Result={
+        focusSelected:!!(focused&&focused.value),
+        focusChoices:focused ? Math.max(0,focused.options.length-1) : 0,
+        pending:!!pending,
+        pendingSourceMatched:!!(candidate&&
+            (candidate.textContent||'').includes('service_id: launch-navigator')),
+        verified:!!(verified&&verified.getAttribute('data-t2-object-id')&&
+            verified.getAttribute('data-t2-workspace-id')),
+        freshReceiptAndReadback:!!(verified&&
+            (verified.textContent||'').includes('Результат сохранён в Kernel; квитанция и повторное чтение подтверждены.')),
+        revisionOne:!!(resultHeader&&(resultHeader.textContent||'').includes('ревизия 1')),
+        readbackMatches:knownRaw.includes('service_id: launch-navigator')&&
+            knownRaw.includes('situation: leads')&&knownRaw.includes('resources: time'),
+        savedEventVisible:!!(eventList&&
+            (eventList.textContent||'').includes('Результат сохранён')&&
+            (eventList.textContent||'').includes('Ревизия 1'))
+    };
     return {scope:'public-workspace',stage:stage,hostMounted:hostMounted,
+        t2Result:t2Result,resultControls:resultControls,
         overviewRendered:overviewRendered,createDialog:createDialog,
         workspaceViewMounted:workspaceViewMounted,workspaceViewError:workspaceViewError,
         buttons:buttons,rootChildren:root ? root.children.length : 0,
@@ -1056,15 +1146,18 @@ impl Controller {
                     #[cfg(debug_assertions)]
                     Action::ProbeWorkspace => {
                         if self.fixture_mode { return Err(denied("No probe in fixture mode")); }
-                        let page_url = Url::parse(&self.selected()?.tab.url)
+                        let selected_url=self.selected()?.tab.url.clone();
+                        let page_url=Url::parse(&selected_url)
                             .map_err(|_| denied("Invalid tab URL"))?;
                         let known = session::PREVIEW_SITES.iter()
                             .any(|(_, origin)| page_url.origin().ascii_serialization() == *origin);
-                        if !known || !page_url.path().starts_with("/workspace") {
-                            return Err(denied("Debug probe requires an approved public Workspace"));
+                        let launch_ui=is_artbazi_launch_navigator(&selected_url);
+                        if !known || (!page_url.path().starts_with("/workspace") && !launch_ui) {
+                            return Err(denied("Debug probe requires a fixed approved public page"));
                         }
+                        let expression=if launch_ui { ARTBAZI_LAUNCH_PROBE } else { WORKSPACE_CONFIG_PROBE };
                         let result = self.page("Runtime.evaluate", json!({
-                            "expression":WORKSPACE_CONFIG_PROBE,
+                            "expression":expression,
                             "returnByValue":true
                         })).await?;
                         // Fixed allowlisted endpoints only: no credentials, URLs
@@ -1246,6 +1339,19 @@ mod tests {
         assert!(!is_preview_workspace("https://unknown.example/workspace/"));
         assert!(!is_preview_workspace("https://learn.iwxa.ru/"));
         assert!(!is_preview_workspace("about:blank"));
+    }
+    #[test]
+    fn artbazi_launch_probe_rejects_unrelated_origins_and_paths() {
+        assert!(is_artbazi_launch_navigator("https://artbazi.ru/services/launch-navigator/"));
+        assert!(is_artbazi_launch_navigator("https://artbazi.ru/services/launch-navigator"));
+        for url in [
+            "https://learn.iwxa.ru/services/launch-navigator/",
+            "https://artbazi.ru.evil.example/services/launch-navigator/",
+            "http://artbazi.ru/services/launch-navigator/",
+            "https://artbazi.ru/services/launch-navigator/other",
+            "https://artbazi.ru/services/launch-navigator-malicious/",
+            "about:blank",
+        ] { assert!(!is_artbazi_launch_navigator(url), "{url}"); }
     }
     #[test]
     fn cdp_screencast_rejects_wrong_session_and_oversized_frames() {
