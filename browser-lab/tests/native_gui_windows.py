@@ -31,6 +31,7 @@ pyautogui.FAILSAFE=False
 pyautogui.PAUSE=0.09
 
 ROOT=Path(__file__).resolve().parents[2]
+WINDOW_TITLE=json.loads((ROOT/"browser-lab/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["app"]["windows"][0]["title"]
 OUT=ROOT/"artifacts"/"browser-lab"/"windows-gui"
 OUT.mkdir(parents=True,exist_ok=True)
 EVENTS=[]
@@ -60,7 +61,7 @@ def window_handle():
         length=user.GetWindowTextLengthW(hwnd)
         buf=ctypes.create_unicode_buffer(length+1)
         user.GetWindowTextW(hwnd,buf,len(buf))
-        if "IWXA Browser Preview" in buf.value and user.IsWindowVisible(hwnd):
+        if buf.value == WINDOW_TITLE and user.IsWindowVisible(hwnd):
             result.append(hwnd)
         return True
     callback_ref=callback(visit)
@@ -148,6 +149,7 @@ def main():
     engine=Path(os.environ["OBSCURA_LAB_BINARY"]).resolve(strict=True)
     report={"kind":"REAL_WINDOWS_TAURI_OBSCURA_GUI",
         "platform":platform.platform(),"head":os.getenv("GITHUB_SHA"),
+        "expected_window_title":WINDOW_TITLE,
         "checks":{},"not_t2_acceptance":True}
     server=http.server.ThreadingHTTPServer(("127.0.0.1",0),Handler)
     threading.Thread(target=server.serve_forever,daemon=True).start()

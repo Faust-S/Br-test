@@ -51,6 +51,15 @@ try {
     $report.checks.InstalledBinary = "PASS"
     $report.checks.UserOnlyInstall = "PASS"
 
+    # Real installed release, not debug binary or fixture, without site access.
+    $config = Get-Content "$root\browser-lab\src-tauri\tauri.conf.json" -Raw | ConvertFrom-Json
+    $expectedTitle = [string]$config.app.windows[0].title
+    $live = & "$root\browser-lab\tests\windows_installed_smoke.ps1" -AppExe $appExe -EngineExe $engine[0].FullName -ExpectedTitle $expectedTitle
+    foreach ($name in @("InstalledReleaseWindow", "InstalledOwnedObscuraProcess", "NormalCloseCleansOwnedEngine")) {
+        if ($live.$name -ne "PASS") { throw "Installed release verification missing $name" }
+        $report.checks[$name] = "PASS"
+    }
+
     # Preserving the profile is deliberate. Never delete user workspace data
     # without a separate informed request and backup.
     New-Item -ItemType Directory -Path (Split-Path $sentinel) -Force | Out-Null

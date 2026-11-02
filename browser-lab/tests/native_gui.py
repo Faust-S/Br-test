@@ -1,8 +1,11 @@
 """End-to-end public native Tauri -> Obscura GUI test; no proprietary code."""
-import contextlib,hashlib,http.server,json,os,platform,subprocess,sys,tempfile,threading,time
+import contextlib,hashlib,http.server,json,os,platform,re,subprocess,sys,tempfile,threading,time
 from pathlib import Path
 from PIL import Image
 ROOT=Path(__file__).resolve().parents[2]
+WINDOW_TITLE=json.loads((ROOT/"browser-lab/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["app"]["windows"][0]["title"]
+# xdotool expects a POSIX regex; escape punctuation and anchor the actual title.
+WINDOW_PATTERN="^"+re.escape(WINDOW_TITLE).replace("\\ ", " ")+"$"
 OUT=ROOT/"artifacts"/"browser-lab"/"gui"
 OUT.mkdir(parents=True,exist_ok=True)
 EVENTS=[]
@@ -77,7 +80,7 @@ def main():
     binary=Path(os.environ["OBSCURA_LAB_BINARY"]).resolve(strict=True)
     appbinary=Path(os.environ["OBSCURA_LAB_GUI_BINARY"]).resolve(strict=True)
     report={"kind":"NATIVE_TAURI_OBSCURA_UI","platform":platform.platform(),
-       "head":os.getenv("GITHUB_SHA"),"checks":{},"not_t2_acceptance":True}
+       "head":os.getenv("GITHUB_SHA"),"expected_window_title":WINDOW_TITLE,"checks":{},"not_t2_acceptance":True}
     server=http.server.ThreadingHTTPServer(("127.0.0.1",0),Handler)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     origin=f"http://127.0.0.1:{server.server_port}"
@@ -93,7 +96,7 @@ def main():
             until=time.monotonic()+80;wid=None
             while time.monotonic()<until:
                 if procs[-1].poll() is not None:raise RuntimeError("Tauri exited "+str(procs[-1].returncode))
-                result=cmd("xdotool","search","--onlyvisible","--name","IWXA Browser Preview",check=False)
+                result=cmd("xdotool","search","--onlyvisible","--name",WINDOW_PATTERN,check=False)
                 if result.returncode==0 and result.stdout.strip():wid=result.stdout.splitlines()[-1];break
                 time.sleep(.4)
             if wid is None:raise AssertionError("Tauri window never appeared")

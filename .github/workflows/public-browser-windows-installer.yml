@@ -9,6 +9,7 @@ on:
       - "browser-lab/src-tauri/Cargo.toml"
       - "browser-lab/package.json"
       - "browser-lab/tests/windows_installer_lifecycle.ps1"
+      - "browser-lab/tests/windows_installed_smoke.ps1"
   workflow_dispatch:
 permissions:
   contents: read
