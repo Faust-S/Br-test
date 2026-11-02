@@ -7,6 +7,7 @@ import tempfile
 import types
 import unittest
 from unittest import mock
+from iwxa_obscura.trust import PinnedCABundle
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from iwxa_obscura import ObscuraController, ObscuraControllerError, ObscuraAgentToolPort
 
@@ -121,6 +122,43 @@ class ControllerTest(unittest.TestCase):
     def test_environment_isolation(self):
         with mock.patch.dict(os.environ,{'OBSCURA_CDP_TOKEN':'secret','HTTPS_PROXY':'proxy'}):
             self.assertTrue(self.c.observe('https://example.org').content.startswith('observed:'))
+
+
+    def test_opt_in_pinned_ca_is_present_only_for_selected_origin(self):
+        pem=(Path(__file__).parent/"dummy-ca.pem")
+        ca= PinnedCABundle(path=pem.resolve(),sha256=hashlib.sha256(pem.read_bytes()).hexdigest(),
+                           approval_ref="AGENT-CA-TEST-001")
+        secured=ObscuraController(binary=self.exe,binary_sha256=self.digest,
+            allowed_origins=frozenset({"https://example.org","https://other.org"}),
+            ca_bundles={"https://example.org":ca}, timeout_seconds=3,max_output_bytes=16384)
+        result=secured.observe("https://example.org/with-ca").as_data()
+        self.assertEqual(result["tls_trust"]["mode"],"PINNED_ADDITIONAL_CA")
+        self.assertEqual(result["tls_trust"]["additional_ca_bundle_sha256"],ca.sha256)
+        untrusted=secured.observe("https://other.org/no-ca").as_data()
+        self.assertEqual(untrusted["tls_trust"]["mode"],"ENGINE_DEFAULT")
+        self.assertIsNone(untrusted["tls_trust"]["additional_ca_bundle_sha256"])
+
+    def test_pinned_ca_modification_fails_closed(self):
+        pem=(Path(__file__).parent/"dummy-ca.pem")
+        copied=Path(self.tmp.name)/"my-ca.pem"
+        copied.write_bytes(pem.read_bytes())
+        ca= PinnedCABundle(path=copied.resolve(),sha256=hashlib.sha256(copied.read_bytes()).hexdigest(),
+                           approval_ref="AGENT-CA-TEST-001")
+        secured=ObscuraController(binary=self.exe,binary_sha256=self.digest,
+            allowed_origins=frozenset({"https://example.org"}),ca_bundles={"https://example.org":ca},
+            timeout_seconds=3,max_output_bytes=16384)
+        copied.write_bytes(copied.read_bytes()+b"\n")
+        with self.assertRaisesRegex(ObscuraControllerError,"CA_PIN_MISMATCH"):
+            secured.observe("https://example.org/with-ca")
+
+    def test_unauthorized_ca_origin_mapping_fails(self):
+        pem=(Path(__file__).parent/"dummy-ca.pem")
+        ca= PinnedCABundle(path=pem.resolve(),sha256=hashlib.sha256(pem.read_bytes()).hexdigest(),
+                           approval_ref="AGENT-CA-TEST-001")
+        with self.assertRaises(ValueError):
+            ObscuraController(binary=self.exe,binary_sha256=self.digest,
+                allowed_origins=frozenset({"https://example.org"}),
+                ca_bundles={"https://unapproved.org":ca})
 
 
 class BridgeTest(unittest.TestCase):
