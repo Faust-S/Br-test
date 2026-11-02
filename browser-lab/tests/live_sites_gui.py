@@ -347,15 +347,17 @@ def attempt_artbazi_create(initial, report, session):
 
 
 
-def scroll_native_page():
-    """Real wheel input through the visible Obscura page, never JS scrollTo."""
+def scroll_native_page(direction):
+    """Wheel toward the control, not endlessly down past it."""
+    if direction not in ("up", "down"):
+        raise ValueError("Unexpected scroll direction")
     if gui.WINDOWS:
         gui.pyautogui.moveTo(990, 560)
-        gui.pyautogui.scroll(-4)
+        gui.pyautogui.scroll(3 if direction == "up" else -3)
     else:
         gui.command("xdotool", "mousemove", "990", "560")
-        for _ in range(4):
-            gui.command("xdotool", "click", "5")
+        for _ in range(3):
+            gui.command("xdotool", "click", "4" if direction == "up" else "5")
 
 
 def wait_probe_scope(scope, seconds=45):
@@ -382,13 +384,31 @@ def click_probe_control(scope, field, seconds=55):
         if last.get("visible") and last.get("enabled"):
             native_workspace_click(last)
             return
-        # A missing control during hydration is not a reason to scroll.
-        if last:
-            scroll_native_page()
+        # Scroll only when the actual target is outside the native viewport.
+        # Disabled forms must not be "fixed" by repeatedly scrolling.
+        if isinstance(last.get("y"), int) and last["y"] < 55:
+            scroll_native_page("up")
+        elif isinstance(last.get("y"), int) and last["y"] > 650:
+            scroll_native_page("down")
         else:
             time.sleep(.8)
         time.sleep(.3)
     raise AssertionError(f"Real ArtBazi UI control {field} not ready, last={last}")
+
+
+def verify_launch_answer(field, report, seconds=8):
+    """A native click counts only after the real radio reports checked."""
+    marker={"situation":"situationSelected","resources":"resourcesSelected"}[field]
+    deadline=time.monotonic()+seconds
+    last={}
+    while time.monotonic()<deadline:
+        last=request_probe("artbazi")["result"]
+        if last.get("scope")=="artbazi-launch-navigator" and last.get(marker):
+            report["checks"]["artbazi_launch_"+field+"_selected"]="PASS"
+            return
+        time.sleep(.5)
+    screenshot("artbazi-radio-"+field+"-not-selected")
+    raise AssertionError(f"Actual ArtBazi radio {field} was not selected by native click")
 
 
 def wait_artbazi_t2_result_state(predicate, label, seconds=65):
@@ -415,7 +435,9 @@ def attempt_artbazi_result(report, session):
     wait_remote_document("artbazi-launch-service")
     wait_probe_scope("artbazi-launch-navigator")
     click_probe_control("artbazi-launch-navigator","situation")
+    verify_launch_answer("situation",report)
     click_probe_control("artbazi-launch-navigator","resources")
+    verify_launch_answer("resources",report)
     click_probe_control("artbazi-launch-navigator","calculate")
     click_probe_control("artbazi-launch-navigator","save")
     click_probe_control("artbazi-launch-navigator","transfer")
@@ -634,7 +656,7 @@ def main():
         report["checks"]["engine_logging_180s_active"] = "HOLD"
     (OUT / "report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
     print(json.dumps(report, indent=2, ensure_ascii=False))
-    return 0 if report["status"] == "PASS_PUBLIC_SITE_GUI_NAVIGATION_AND_SESSION" else 1
+    return 0 if report["status"] == "PASS_ARTBAZI_T2_RESULT_AND_GUI_EXIT" else 1
 
 
 if __name__ == "__main__":

@@ -180,10 +180,13 @@ const ARTBAZI_LAUNCH_PROBE: &str = r#"(function() {
     var transfer=document.querySelector('[data-testid="t2-public-transfer"]');
     return {scope:'artbazi-launch-navigator',
         controls:{
-            situation:position(situation ? (situation.closest('label')||situation) : null),
-            resources:position(resources ? (resources.closest('label')||resources) : null),
+            // Click the actual native radio control. In Obscura a click on the
+            // wrapping label's center does not reliably change the input.
+            situation:position(situation),resources:position(resources),
             calculate:position(button('Получить результат')),
             save:position(save),transfer:position(transfer)},
+        situationSelected:!!(situation&&situation.checked),
+        resourcesSelected:!!(resources&&resources.checked),
         answersSelected:!!(situation&&situation.checked&&resources&&resources.checked),
         calculationVisible:!!save,
         publicEditionAvailable:!!transfer};
