@@ -120,6 +120,8 @@ pub struct Controller {
     stream_latest: Option<String>,
     stream_ack_ids: Vec<i64>,
     last_metadata_refresh: Instant,
+    // User-facing notice only. Never infer real consent from CDP console text.
+    confirmation_unavailable: bool,
 }
 impl Default for Controller {
     fn default() -> Self {
@@ -142,6 +144,7 @@ impl Default for Controller {
             stream_latest: None,
             stream_ack_ids: Vec::new(),
             last_metadata_refresh: Instant::now(),
+            confirmation_unavailable: false,
         }
     }
 }
@@ -660,7 +663,9 @@ impl Controller {
             frame,
             width: self.width,
             height: self.height,
-            status: self.status.clone(),
+            status: if self.confirmation_unavailable {
+                "Action not confirmed · JavaScript confirmation dialog unavailable".to_owned()
+            } else { self.status.clone() },
             granted_sites: {
                 let mut ids = self.granted_sites.iter().cloned().collect::<Vec<_>>();
                 ids.sort();
@@ -677,6 +682,9 @@ impl Controller {
     fn guard(&self, url: &str) -> io::Result<String> {
         allowed_url(url, &self.allowed, self.fixture_mode)
     }
+    // A message from a website is not trusted evidence of consent. This marker
+    // only explains an engine-originated *denial* to the human in the status bar.
+    // It never triggers, authorizes, retries or replays any site operation.
     // There is one native CDP reader. Responses and asynchronous screencast
     // events MUST pass through the same decoder; otherwise a command can
     // silently consume frames that arrived before its response.
@@ -699,6 +707,12 @@ impl Controller {
             .map_err(|_| denied("Invalid Obscura CDP JSON"))?;
         if message["method"] == "Page.screencastFrame" {
             self.ingest_screencast_frame(&message)?;
+        }
+        let active_session = self.selected().ok().map(|page| page.session.clone());
+        if active_session.as_deref().is_some_and(|session| {
+            is_unavailable_confirmation_notice(&message, session)
+        }) {
+            self.confirmation_unavailable = true;
         }
         Ok(Some(message))
     }
@@ -1197,6 +1211,15 @@ impl Controller {
     }
 
     pub async fn execute(&mut self,action:Action)->io::Result<View> {
+        // Keep a declined confirmation visible until the next meaningful
+        // user operation. Capture ticks, moves and debug probes do not clear it.
+        let clear_denial = match &action {
+            Action::Capture | Action::Move { .. } | Action::Resize { .. } => false,
+            #[cfg(debug_assertions)]
+            Action::ProbeWorkspace => false,
+            _ => true,
+        };
+        if clear_denial { self.confirmation_unavailable = false; }
         let persist = matches!(&action,
             Action::Boot | Action::Restart | Action::NewTab{..} |
             Action::OpenSite{..} | Action::ResetSites | Action::SelectTab{..} | Action::CloseTab{..} | Action::Navigate{..} |
@@ -1384,8 +1407,48 @@ impl Controller {
         Ok(self.view(None))
     }
 }
+const UNSUPPORTED_CONFIRM_NOTICE: &str =
+    "Obscura window.confirm: native dialog unavailable; action declined";
+
+fn is_unavailable_confirmation_notice(message: &Value, active_session: &str) -> bool {
+    if message["method"] != "Runtime.consoleAPICalled"
+        || message["sessionId"].as_str() != Some(active_session)
+        || !matches!(message["params"]["type"].as_str(), Some("warn" | "warning")) {
+        return false;
+    }
+    message["params"]["args"].as_array().is_some_and(|args| {
+        args.len() == 1 && args[0]["type"] == "string"
+            && args[0]["value"].as_str() == Some(UNSUPPORTED_CONFIRM_NOTICE)
+    })
+}
+
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn unsupported_confirmation_is_visible_only_in_the_active_session() {
+        let message = json!({
+            "method": "Runtime.consoleAPICalled",
+            "sessionId": "session-own",
+            "params": {"type": "warn", "args": [{
+                "type": "string", "value": UNSUPPORTED_CONFIRM_NOTICE
+            }]}
+        });
+        assert!(is_unavailable_confirmation_notice(&message, "session-own"));
+        assert!(!is_unavailable_confirmation_notice(&message, "session-other"));
+        let mut forged = message.clone();
+        forged["params"]["args"][0]["value"] = json!("Approve the operation");
+        assert!(!is_unavailable_confirmation_notice(&forged, "session-own"));
+        forged = message.clone();
+        forged["method"] = json!("Page.screencastFrame");
+        assert!(!is_unavailable_confirmation_notice(&forged, "session-own"));
+        forged = message.clone();
+        forged["params"]["args"].as_array_mut().unwrap().push(json!({
+            "type": "string", "value": "second argument"
+        }));
+        assert!(!is_unavailable_confirmation_notice(&forged, "session-own"));
+    }
     use super::*;
     #[test]
     fn packaged_engine_integrity_check_reads_multiple_bounded_chunks() {
