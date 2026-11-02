@@ -4,12 +4,14 @@ One actual visible GUI; no mock CDP. Write via a click in the Obscura viewport,
 terminate the exact owned process tree, relaunch the Tauri GUI with the same
 engine profile, and read three IndexedDB stores through another real click.
 """
-import contextlib, hashlib, http.server, json, os, platform, subprocess, sys, tempfile, threading, time
+import contextlib, hashlib, http.server, json, os, platform, re, subprocess, sys, tempfile, threading, time
 from pathlib import Path
 import psutil
 from PIL import Image
 
 ROOT=Path(__file__).resolve().parents[2]
+WINDOW_TITLE=json.loads((ROOT/"browser-lab/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))["app"]["windows"][0]["title"]
+WINDOW_PATTERN="^"+re.escape(WINDOW_TITLE).replace("\\ ", " ")+"$"
 OUT=ROOT/"artifacts"/"browser-lab"/"patched-gui"
 OUT.mkdir(parents=True,exist_ok=True)
 WINDOWS=sys.platform=="win32"
@@ -110,7 +112,7 @@ def get_window(proc):
             def record(hwnd,param):
                 name=ctypes.create_unicode_buffer(300)
                 u.GetWindowTextW(hwnd,name,300)
-                if "IWXA Browser Preview" in name.value and u.IsWindowVisible(hwnd):windows.append(hwnd)
+                if name.value == WINDOW_TITLE and u.IsWindowVisible(hwnd):windows.append(hwnd)
                 return True
             u.EnumWindows(CB(record),0)
             if windows:
@@ -120,7 +122,7 @@ def get_window(proc):
                 u.SetForegroundWindow(hwnd)
                 return hwnd
         else:
-            found=subprocess.run(["xdotool","search","--onlyvisible","--name","IWXA Browser Preview"],
+            found=subprocess.run(["xdotool","search","--onlyvisible","--name",WINDOW_PATTERN],
                 capture_output=True,text=True)
             if found.returncode==0 and found.stdout.strip():
                 wid=found.stdout.splitlines()[-1]
