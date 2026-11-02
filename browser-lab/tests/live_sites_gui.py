@@ -523,9 +523,20 @@ def approve_native_site_dialog(report, seconds=20):
     # On the GTK Yes/No dialog, Yes occupies the rightmost bottom button.
     # Actual transfer and Kernel readback remain independent assertions.
     gui.command("xdotool", "windowactivate", window_id)
+    # Use the centre of the actual bottom Yes button. A prior
+    # height-40 point was ABOVE the GTK 34px action row.
     gui.command("xdotool", "mousemove", "--window", window_id,
-                str(width - 70), str(height - 40))
+                str(width * 3 // 4), str(height - 17))
     gui.command("xdotool", "click", "1")
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        remaining = subprocess.run(["xdotool", "getwindowname", window_id],
+                                   capture_output=True, text=True)
+        if remaining.returncode != 0:
+            break
+        time.sleep(.1)
+    else:
+        raise AssertionError("Real ArtBazi native confirmation was not dismissed")
     report["checks"]["native_site_confirmation_dialog"] = \
         "VISIBLE_AND_YES_CLICKED_BY_GUI_TEST"
 

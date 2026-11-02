@@ -92,11 +92,6 @@ jobs:
           fi
           python browser-lab/scripts/stage_patched_engine.py
           printf 'OBSCURA_PATCHED_BINARY=%s\n' "$OBSCURA_PATCHED_BINARY" >> "$GITHUB_ENV"
-      - name: Real native Yes/No and disabled confirmation regression (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          python -m pip install websocket-client==1.8.0
-          xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/native_confirm_gui.py
       - name: Verify staged public engine identity before bundling
         shell: bash
         run: |
@@ -134,6 +129,11 @@ jobs:
             export OBSCURA_LAB_GUI_BINARY="$GITHUB_WORKSPACE/browser-lab/src-tauri/target/debug/obscura-browser-lab"
             xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/packaged_idb_gui.py
           fi
+      - name: Real native Yes/No and disabled confirmation regression (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          python -m pip install websocket-client==1.8.0
+          xvfb-run -a -s "-screen 0 1280x900x24" python browser-lab/tests/native_confirm_gui.py
       - name: Real public Learn and ArtBazi routes (reuses the bundled Linux build)
         if: runner.os == 'Linux' && !cancelled()
         # The live-site route is a product gate. Do not mask its HOLD behind

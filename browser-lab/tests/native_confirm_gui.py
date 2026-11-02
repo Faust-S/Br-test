@@ -173,9 +173,22 @@ def decide(window_id, accept):
     width, height = int(values["WIDTH"]), int(values["HEIGHT"])
     if not (190 <= width <= 1800 and 110 <= height <= 1300):
         raise AssertionError("Unexpected native dialog size")
+    # Measured GTK window 476x166: the Yes button spans the right half
+    # of the 34px bottom action row. The old height-40 clicked ABOVE it.
+    # Click its centre, not the arbitrary space above the button.
     command("xdotool", "mousemove", "--window", window_id,
-            str(width - 70), str(height - 40))
+            str(width * 3 // 4), str(height - 17))
     command("xdotool", "click", "1")
+    # Verify the actual OS window closed before awaiting the blocked CDP
+    # mouseReleased response. A missed click must be diagnosed immediately.
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        remaining = subprocess.run(["xdotool", "getwindowname", window_id],
+                                   capture_output=True, text=True)
+        if remaining.returncode != 0:
+            return
+        time.sleep(.1)
+    raise AssertionError("Native Yes click did not dismiss the OS dialog")
 
 
 def exercise(engine, origin, temporary, native, report):
