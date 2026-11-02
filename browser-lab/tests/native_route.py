@@ -23,12 +23,19 @@ PNG = b"\x89PNG\r\n\x1a\n"
 
 
 def check(name, operation, report):
+    started = time.monotonic()
     try:
         value = operation()
-        report["checks"][name] = {"status": "PASS", "value": value}
+        report["checks"][name] = {
+            "status": "PASS", "value": value,
+            "elapsed_ms": round((time.monotonic() - started) * 1000)
+        }
         return value
     except Exception as error:
-        report["checks"][name] = {"status": "FAIL", "error": repr(error)}
+        report["checks"][name] = {
+            "status": "FAIL", "error": repr(error),
+            "elapsed_ms": round((time.monotonic() - started) * 1000)
+        }
         raise
 
 
@@ -66,6 +73,7 @@ def main():
                 sock.bind(("127.0.0.1", 0))
                 cdp_port = sock.getsockname()[1]
             log = (OUT / "native-route.log").open("wb")
+            engine_start = time.monotonic()
             process = subprocess.Popen([
                 str(engine), "serve", "--host", "127.0.0.1", "--port",
                 str(cdp_port), "--max-connections", "1",
@@ -82,6 +90,7 @@ def main():
                     time.sleep(.2)
             if not client:
                 raise TimeoutError("CDP connection unavailable")
+            report["engine_cdp_ready_ms"] = round((time.monotonic() - engine_start) * 1000)
             url = f"http://127.0.0.1:{server.server_port}/comparison/iwxa-ui-fixture.html"
 
             def navigate():
