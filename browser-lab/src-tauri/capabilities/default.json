@@ -3,5 +3,5 @@
   "identifier": "public-browser-lab",
   "description": "Only chrome UI is loaded in Tauri; sites execute in Obscura.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "core:window:allow-destroy"]
 }

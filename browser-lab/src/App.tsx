@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent as ReactKeyEvent, MouseEvent, WheelEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   ArrowLeft, ArrowRight, Bookmark, BookOpen, Clock3, Globe2, Home, Plus,
   MoreHorizontal, RefreshCw, RotateCcw, Search, ShieldAlert, X
@@ -26,6 +27,7 @@ type View = {
 };
 type SiteId = "learn" | "artbazi";
 type SiteApproval = {site: SiteId; url: string};
+type LeaveAction = { kind: "quit" | "restart" | "reset" } | { kind: "close_tab"; id: string };
 const siteNames: Record<SiteId,string> = {learn: "Learn", artbazi: "ArtBazi"};
 function previewSiteFor(url: string): SiteId | null {
   try {
@@ -85,6 +87,8 @@ export default function App() {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [siteApproval, setSiteApproval] = useState<SiteApproval | null>(null);
+  const [leaveAction, setLeaveAction] = useState<LeaveAction | null>(null);
+  const [exiting, setExiting] = useState(false);
   const [bookmarks, setBookmarks] = useState(stored);
   const [bookmarksOpen, setBookmarksOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
@@ -136,6 +140,54 @@ export default function App() {
     return work;
   }, []);
 
+  const performLeave = useCallback((action: LeaveAction) => {
+    if (action.kind === "quit") {
+      setExiting(true);
+      // Never issue a synthetic save to the website: T2 owns its own Result
+      // commits and only the site's own UI can confirm their completion.
+      void getCurrentWindow().destroy().catch((reason: unknown) => {
+        setExiting(false);
+        setError("Could not close browser: " + String(reason));
+      });
+    } else if (action.kind === "restart") void issue({ type: "restart" });
+    else if (action.kind === "reset") void issue({ type: "reset_sites" });
+    else void issue({ type: "close_tab", id: action.id });
+  }, [issue]);
+
+  const askBeforeLeaving = useCallback((action: LeaveAction) => {
+    setToolsOpen(false);
+    const current = activeView.current;
+    const affected = action.kind === "close_tab"
+      ? current.tabs.some(tab => tab.id === action.id && tab.url !== "about:blank")
+      : current.tabs.some(tab => tab.url !== "about:blank");
+    // A fixture never claims product persistence and must keep its existing
+    // developer shortcuts. Real sites are asked to save before losing state.
+    if (current.site_picker_available && affected) {
+      setLeaveAction(action);
+    } else performLeave(action);
+  }, [performLeave]);
+
+  useEffect(() => {
+    const window = getCurrentWindow();
+    let unlisten: (() => void) | undefined;
+    let disposed = false;
+    void window.onCloseRequested(event => {
+      // OS window close, not just the 'Finish work' menu. We cannot detect
+      // dirty forms inside an arbitrary Obscura page: show an honest reminder
+      // whenever a real-site tab exists, regardless of current active tab.
+      if (activeView.current.tabs.some(tab => tab.url !== "about:blank")) {
+        event.preventDefault();
+        setSiteApproval(null);
+        setToolsOpen(false);
+        setLeaveAction({ kind: "quit" });
+      }
+    }).then(remove => {
+      if (disposed) remove();
+      else unlisten = remove;
+    }).catch((reason: unknown) => setError("Close protection unavailable: " + String(reason)));
+    return () => { disposed = true; unlisten?.(); };
+  }, []);
+
   useEffect(() => { void issue({ type: "boot" }); }, [issue]);
   useEffect(() => {
     const timer = window.setInterval(() => {
@@ -162,6 +214,10 @@ export default function App() {
 
   useEffect(() => {
     const handle = (e: globalThis.KeyboardEvent) => {
+      if (leaveAction) {
+        if (e.key === "Escape") { e.preventDefault(); setLeaveAction(null); }
+        return;
+      }
       if (e.key === "Escape" && siteApproval) {
         e.preventDefault();
         setSiteApproval(null);
@@ -169,20 +225,26 @@ export default function App() {
       }
       if (siteApproval) return;
       if (e.ctrlKey || e.metaKey) {
-        if (e.altKey && e.shiftKey && e.key.toLowerCase() === "e") { e.preventDefault(); void issue({ type: "restart" }); }
+        if (e.altKey && e.shiftKey && e.key.toLowerCase() === "e") {
+          e.preventDefault(); askBeforeLeaving({ kind: "restart" }); return;
+        }
         if (e.altKey && e.shiftKey && e.key.toLowerCase() === "d" && activeView.current.debug_probe_available) {
           e.preventDefault(); void issue({type:"probe_workspace"}); return;
         }
         if (e.key.toLowerCase() === "l") { e.preventDefault(); address.current?.focus(); address.current?.select(); }
         if (e.key.toLowerCase() === "t") { e.preventDefault(); void issue({ type: "new_tab", url: "about:blank" }); }
-        if (e.key.toLowerCase() === "w") { e.preventDefault(); const id = activeView.current.active; if (id) void issue({ type: "close_tab", id }); }
+        if (e.key.toLowerCase() === "w") {
+          e.preventDefault(); const id = activeView.current.active;
+          if (id) askBeforeLeaving({ kind: "close_tab", id });
+          return;
+        }
         if (e.key.toLowerCase() === "r") { e.preventDefault(); void issue({ type: "reload" }); }
       } else if (e.altKey && e.key === "ArrowLeft") { e.preventDefault(); void issue({ type: "back" }); }
       else if (e.altKey && e.key === "ArrowRight") { e.preventDefault(); void issue({ type: "forward" }); }
     };
     window.addEventListener("keydown", handle);
     return () => window.removeEventListener("keydown", handle);
-  }, [issue, siteApproval]);
+  }, [issue, askBeforeLeaving, siteApproval, leaveAction]);
 
   useEffect(() => { activeTabButton.current?.scrollIntoView({block: "nearest", inline: "nearest"}); }, [view.active]);
   useEffect(() => { localStorage.setItem(bookmarksKey, JSON.stringify(bookmarks)); }, [bookmarks]);
@@ -264,7 +326,7 @@ export default function App() {
               onClick={() => void issue({ type: "select_tab", id: tab.id })}>
               <Globe2 size={14}/><span>{tab.url === "about:blank" ? "New tab" : tab.title || tab.url}</span>
             </button>
-            <IconButton label="Close tab" onClick={() => void issue({ type: "close_tab", id: tab.id })}><X size={13}/></IconButton>
+            <IconButton label="Close tab" onClick={() => askBeforeLeaving({ kind: "close_tab", id: tab.id })}><X size={13}/></IconButton>
           </div>)}
         </div>
         <IconButton label="New tab (Ctrl+T)" onClick={() => void issue({ type: "new_tab", url: "about:blank" })}><Plus size={17}/></IconButton>
@@ -290,14 +352,17 @@ export default function App() {
           <IconButton label="Browser options" onClick={() => {setBookmarksOpen(false);setHistoryOpen(false);setToolsOpen(x => !x);}}><MoreHorizontal size={20}/></IconButton>
           {toolsOpen && <div className="more-menu" role="menu" aria-label="Browser options">
             <div className="more-menu-title">Browser controls</div>
-            <button role="menuitem" type="button" onClick={() => {setToolsOpen(false);void issue({type:"restart"});}}>
+            <button role="menuitem" type="button" onClick={() => askBeforeLeaving({kind:"restart"})}>
               <RotateCcw size={16}/> Restart web engine
             </button>
             {view.granted_sites.length > 0 && <button role="menuitem" type="button"
-              onClick={() => {setToolsOpen(false);void issue({type:"reset_sites"});}}>
+              onClick={() => askBeforeLeaving({kind:"reset"})}>
               <ShieldAlert size={16}/> Forget site approvals and close tabs
             </button>}
-            <p>Only approved Learn and ArtBazi origins are available. General Internet access is disabled.</p>
+            <button role="menuitem" type="button" onClick={() => askBeforeLeaving({kind:"quit"})}>
+              <X size={16}/> Finish work / Close browser
+            </button>
+            <p>Save results in the website before leaving. Reopening tabs does not restore unfinished changes.</p>
           </div>}
         </div>
       </div>
@@ -355,6 +420,31 @@ export default function App() {
             <strong>{item.title}</strong><small>{item.url}</small>
           </button>)}
       </aside>}
+      {leaveAction && <div className="approval-backdrop">
+        <section className="approval-dialog finish-dialog" role="alertdialog" aria-modal="true"
+          aria-labelledby="finish-title" aria-describedby="finish-message">
+          <ShieldAlert size={23} aria-hidden="true"/>
+          <h2 id="finish-title">Save your work before leaving</h2>
+          <p id="finish-message">Save the result in Learn or ArtBazi and wait for the website's
+            confirmation. IWXA Browser cannot save unfinished forms, drafts or actions for you.</p>
+          <p className="finish-note">Restoring a tab only restores its address, not unsaved work.
+            Unexpected shutdowns may bypass this reminder.</p>
+          <div className="approval-actions">
+            <button type="button" className="approval-cancel" autoFocus disabled={exiting}
+              onClick={() => setLeaveAction(null)}>Return and save</button>
+            <button type="button" className="approval-allow" disabled={exiting}
+              onClick={() => {
+                const selected = leaveAction;
+                setLeaveAction(null);
+                performLeave(selected);
+              }}>
+              {leaveAction.kind === "quit" ? "Close browser" :
+                leaveAction.kind === "restart" ? "Restart without saving" :
+                leaveAction.kind === "reset" ? "Clear tabs and approvals" : "Close tab"}
+            </button>
+          </div>
+        </section>
+      </div>}
       {siteApproval && <div className="approval-backdrop">
         <section className="approval-dialog" role="dialog" aria-modal="true"
           aria-labelledby="approval-title" aria-describedby="approval-message">
@@ -381,7 +471,8 @@ export default function App() {
     <footer className="statusbar">
       <span className={"engine-status" + ((view.status.startsWith("Page ready") || view.status.startsWith("Workspace ready")) ? " ready" : "")}>
         <span className="dot"/>{view.status}</span><span className="spacer"/>
-      <span className="preview-note"><ShieldAlert size={13}/> Preview · two opt-in sites · no downloads</span>
+      <span className="preview-note" title="Only the site can confirm that a Result was saved. Unfinished work is not restored.">
+        <ShieldAlert size={13}/> Save results in the site before exit</span>
     </footer>
   </div>;
 }

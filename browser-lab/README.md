@@ -508,3 +508,36 @@ has ended: the existing bundled CI now runs with normal script/SPA limits.
 None of this adds a Host, Kernel, storage engine, workflow or background
 browser process. Correctness remains conditional on a real ArtBazi
 create -> restart -> same-record readback.
+
+## Explicit save before exit — product contract (2026-11-02)
+
+An open browser session is **not** a saved Result. The product deliberately
+does not promise that unfinished forms, drafts, pending operations, React
+component state or the current screen survive window closure. Restoring a
+tab means restoring its last permitted URL, not silently committing user work.
+
+The browser chrome now intercepts a **normal OS window-close request** while
+website tabs are open, displays a short save-first reminder, and keeps the
+user in the site by default. The same non-blocking reminder covers closing
+an approved site tab, restarting the engine, clearing granted site tabs, and
+the explicit `Finish work / Close browser` option. "Return and save" does not
+write anything; users save through the domain's own T2 workflow and wait for
+its actual confirmation. "Close browser" intentionally uses Tauri's scoped
+window destroy permission after explicit confirmation, not an invented T2
+write or a hidden auto-save.
+
+The browser cannot know whether a website has uncommitted changes, and OS
+crashes, forced process termination and power loss can bypass all prompts.
+Consequently, closing is not protected by an infallible save detector.
+Only `core:window:allow-destroy` is added to the **local chrome** capability;
+remote pages are rendered in Obscura and receive no new window permissions.
+
+At commit `cc72bab`, existing public Windows and Linux native fixture
+checks, bundled IndexedDB and the real ArtBazi Workspace cycle passed in
+one GitHub Actions run. The separate exact key witness found an IndexedDB DB8
+`workspaces` record before and after a full application restart, and the
+normal ArtBazi GUI read the same workspace view after restart. This confirms
+a **committed Workspace record** for that run, not a Result receipt or
+automatic restoration of unsaved editing. Future acceptance focuses on real
+in-session result creation and explicit domain save/readback, while the
+existing restart tests remain regressions rather than a promise of auto-save.

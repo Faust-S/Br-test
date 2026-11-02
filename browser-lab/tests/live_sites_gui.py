@@ -458,6 +458,19 @@ def main():
                     if readback.get("workspaceViewError") or not readback.get("workspaceViewMounted"):
                         raise AssertionError("Same T2 Workspace record not readable after cold restart")
                     report["checks"]["artbazi_workspace_same_record_readback"]="PASS"
+                    # OS-close must show a save-first reminder and leave the
+                    # browser alive. Esc returns to the site without a fake
+                    # T2 save or a second browser process.
+                    gui.key("alt+F4")
+                    time.sleep(.8)
+                    if process.poll() is not None:
+                        raise AssertionError("Close request bypassed save-first reminder")
+                    screenshot("save-before-exit-confirmation")
+                    gui.key("Escape")
+                    time.sleep(.4)
+                    if process.poll() is not None:
+                        raise AssertionError("Cancel close did not retain the browser")
+                    report["checks"]["native_save_before_exit_reminder"]="PASS"
                     # A Workspace record is not a domain Result or receipt.
                     report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
                 gui.stop_tree(process)
