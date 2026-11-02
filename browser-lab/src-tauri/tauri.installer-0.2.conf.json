@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "resources": {
+      "resources/obscura/": "obscura/"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "English",
+          "Russian"
+        ],
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

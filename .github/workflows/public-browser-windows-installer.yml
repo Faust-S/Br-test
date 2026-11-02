@@ -1,0 +1,83 @@
+name: IWXA Browser 0.2 manual Windows installer
+on:
+  push:
+    branches: [work/2026-11-01-public-browser-core]
+    paths:
+      - ".github/workflows/public-browser-windows-installer.yml"
+      - "browser-lab/src-tauri/tauri.conf.json"
+      - "browser-lab/src-tauri/tauri.installer-0.2.conf.json"
+      - "browser-lab/src-tauri/Cargo.toml"
+      - "browser-lab/package.json"
+      - "browser-lab/tests/windows_installer_lifecycle.ps1"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-installer:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: h4ckf0r0day/obscura
+          ref: 8534b401898ed17b62f69bdc3d5eb186bffb0d60
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            upstream
+            browser-lab/src-tauri
+          key: manual-nsis-windows
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Apply pinned public Obscura engine and safety patches
+        shell: bash
+        run: |
+          test "$(cd upstream && git rev-parse HEAD)" = "8534b401898ed17b62f69bdc3d5eb186bffb0d60"
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/indexed_db.rs upstream/crates/obscura-js/src/indexed_db.rs
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs upstream/crates/obscura-js/src/module_loader.rs
+          cp engine-overrides/obscura-v0.2.6/crates/obscura-browser/src/context.rs upstream/crates/obscura-browser/src/context.rs
+          for patch in             spa-parser-module-budget             posted-task-busy-retry             posted-task-root-generation             secure-context-origin             screencast-scroll-damage             confirm-fail-closed             native-confirm-dialog             posted-task-observability; do
+            (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/${patch}.patch" &&
+             git apply "../engine-overrides/obscura-v0.2.6/patches/${patch}.patch")
+          done
+          cp engine-overrides/obscura-v0.2.6/tests/confirm_requires_native_ui.rs upstream/crates/obscura-js/tests/confirm_requires_native_ui.rs
+      - name: Build pinned Obscura Windows engine and stage verified resources
+        shell: bash
+        run: |
+          cargo build --manifest-path upstream/Cargo.toml -p obscura-cli --features render,native-dialog --bin obscura
+          export OBSCURA_PATCHED_BINARY="$GITHUB_WORKSPACE/upstream/target/debug/obscura.exe"
+          python browser-lab/scripts/stage_patched_engine.py
+      - name: Build Windows NSIS setup from release Tauri application
+        shell: bash
+        run: |
+          cd browser-lab
+          npm install --no-audit --no-fund
+          npx tauri build --bundles nsis --config src-tauri/tauri.installer-0.2.conf.json
+      - name: Verify NSIS and native engine installation/uninstallation
+        shell: pwsh
+        run: |
+          ./browser-lab/tests/windows_installer_lifecycle.ps1
+      - name: Upload installer verification report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-browser-0.2-windows-installer-verification
+          path: artifacts/browser-lab/windows-installer/
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload unsigned Windows installer for manual acceptance
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-browser-0.2-windows-setup
+          path: browser-lab/src-tauri/target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

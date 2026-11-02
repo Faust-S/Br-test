@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "IWXA Browser Preview",
-  "version": "0.1.0",
-  "identifier": "org.obscura.browserlab",
+  "productName": "IWXA Browser 0.2 Preview",
+  "version": "0.2.0",
+  "identifier": "ru.iwxa.browser.preview",
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://127.0.0.1:1421",
@@ -10,8 +10,21 @@
     "frontendDist": "../dist"
   },
   "app": {
-    "windows": [{"label":"main","title":"IWXA Browser Preview","width":1200,"height":820,"minWidth":700,"minHeight":480}],
-    "security": {"csp":"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"}
+    "windows": [
+      {
+        "label": "main",
+        "title": "IWXA Browser 0.2 Preview",
+        "width": 1200,
+        "height": 820,
+        "minWidth": 700,
+        "minHeight": 480
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    }
   },
-  "bundle": {"active":false}
+  "bundle": {
+    "active": false
+  }
 }
