@@ -1,0 +1,91 @@
+diff --git a/crates/obscura-js/src/ops.rs b/crates/obscura-js/src/ops.rs
+--- a/crates/obscura-js/src/ops.rs
++++ b/crates/obscura-js/src/ops.rs
+@@ -6893,21 +6893,39 @@
+         };
+         owner_state.document_generation
+     };
+-    let owner = Rc::downgrade(&owner);
+-    let spawner = state.borrow::<deno_core::V8TaskSpawner>().clone();
+-    spawner.spawn(move |scope| {
+-        let current_generation = if let Some(epoch) = &root_epoch {
+-            if owner.upgrade().is_some() { epoch.get() as f64 }
+-            else { INVALID_POSTED_TASK_GENERATION }
+-        } else {
+-            match posted_task_owner_status(&owner) {
+-                PostedTaskOwnerStatus::Gone | PostedTaskOwnerStatus::Busy => {
+-                    INVALID_POSTED_TASK_GENERATION
+-                }
+-                PostedTaskOwnerStatus::Generation(generation) => generation as f64,
+-            }
+-        };
+-        v8::tc_scope!(let scope, scope);
++    let owner = Rc::downgrade(&owner);
++    let spawner = state.borrow::<deno_core::V8TaskSpawner>().clone();
++    // Read-only, sparse native diagnostics. No site-facing globals, callbacks,
++    // transport changes or per-task allocations in normal release builds.
++    #[cfg(debug_assertions)]
++    let telemetry = if tracing::enabled!(target: "obscura_js::module_loader", tracing::Level::DEBUG) {
++        static NEXT_TRACE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
++        let sequence = NEXT_TRACE.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
++        let sampled = sequence <= 24 || sequence % 128 == 0;
++        if sampled {
++            tracing::warn!(target: "iwxa_browser_tasks", sequence, frame_id,
++                document_generation, "IWXA_JS_TASK_SCHEDULED");
++        }
++        Some((sequence, sampled))
++    } else { None };
++    spawner.spawn(move |scope| {
++        let current_generation = if let Some(epoch) = &root_epoch {
++            if owner.upgrade().is_some() { epoch.get() as f64 }
++            else { INVALID_POSTED_TASK_GENERATION }
++        } else {
++            match posted_task_owner_status(&owner) {
++                PostedTaskOwnerStatus::Gone | PostedTaskOwnerStatus::Busy => {
++                    INVALID_POSTED_TASK_GENERATION
++                }
++                PostedTaskOwnerStatus::Generation(generation) => generation as f64,
++            }
++        };
++        #[cfg(debug_assertions)]
++        if let Some((sequence, true)) = telemetry {
++            tracing::warn!(target: "iwxa_browser_tasks", sequence, frame_id,
++                document_generation, current_generation, "IWXA_JS_TASK_DELIVERED");
++        }
++        v8::tc_scope!(let scope, scope);
+         let callback = v8::Local::new(scope, callback);
+         let receiver = v8::undefined(scope).into();
+         let current_generation = v8::Number::new(scope, current_generation);
+diff --git a/crates/obscura-cdp/src/server.rs b/crates/obscura-cdp/src/server.rs
+--- a/crates/obscura-cdp/src/server.rs
++++ b/crates/obscura-cdp/src/server.rs
+@@ -1304,10 +1304,25 @@
+                 } => None,
+                 pump_result = pump_live_page_event_loop(&mut ctx, &mut idle_pages), if runtime_pump_armed => {
+                     match pump_result {
+-                        Ok(reached_idle) => {
+-                            runtime_pump_error_streak = 0;
+-                            runtime_pump_armed = !reached_idle;
+-                        }
++                        Ok(reached_idle) => {
++                            runtime_pump_error_streak = 0;
++                            runtime_pump_armed = !reached_idle;
++                            // A browser can park its page event loop even
++                            // when framework callbacks are waiting elsewhere.
++                            // Record the idle transition, not a timer-driven
++                            // synthetic wake. Public GUI trace is opt-in.
++                            #[cfg(debug_assertions)]
++                            if reached_idle &&
++                                tracing::enabled!(target: "obscura_js::module_loader", tracing::Level::DEBUG) {
++                                static IDLE_COUNT: std::sync::atomic::AtomicU64 =
++                                    std::sync::atomic::AtomicU64::new(0);
++                                let n = IDLE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
++                                if n <= 24 || n % 128 == 0 {
++                                    tracing::warn!(target: "iwxa_browser_tasks", sequence = n,
++                                        "IWXA_JS_PUMP_REACHED_IDLE");
++                                }
++                            }
++                        }
+                         Err(error) => {
+                             runtime_pump_error_streak = runtime_pump_error_streak.saturating_add(1);
+                             runtime_pump_armed = runtime_pump_error_streak <= 3

@@ -262,3 +262,28 @@ navigation timeouts to disguise the issue.
 GUI-тест перенесён после установки зависимостей и после теста
 IndexedDB, но до маршрута ArtBazi. Оба отказа теперь наблюдаются
 независимо, не выдавая неподготовленную среду за дефект продукта.
+
+## 0.2 — Native posted-task/event-loop trace (2026-11-02)
+
+Независимый Linux GUI Yes/No PASS в #41485725612, Windows bundled PASS,
+IndexedDB after relaunch PASS. Однако ArtBazi Workspace Overview иногда
+остаётся пустым: в последнем прогоне все 52/52 ES-модуля доставлены
+HTTP 200, rootChildren=0, React не смонтировался. Никаких Kernel receipts
+и Result readback пока нет.
+
+Ранее JS probe читал `_browserPostedTaskQueues` как lexical binding
+через `Runtime.evaluate`, что возвращало `available=false`; число
+задач НЕ измерено, и `null` нельзя считать нулём.
+В этот раз добавлена настоящая Rust-side read-only диагностика:
+- первые 24 и далее каждый 128-й native posted-task с ID/generation
+  при постановке и доставке (ни текст, ни cookie, ни Result не логируются);
+- переходы автономного pump в idle, с тем же ограниченным sampling;
+- суммарное количество образцов включено в публичный CI-отчёт.
+Приёмка идёт через один действующий комплектный Obscura.
+
+Трассировка включается только если уже активен отладочный
+`obscura_js::module_loader=debug` (реальный GUI-тест), для нормальной
+release-сборки код исключён `#[cfg(debug_assertions)]`. Время ожидания
+и работа scheduler не меняются; это средство установить факт
+lost wake / stale generation / отсутствие задач, а не workaround.
+Следующий шаг — исправить точный механизм по логам, не увеличивая тайм-ауты.

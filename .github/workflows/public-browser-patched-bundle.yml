@@ -17,6 +17,7 @@ on:
       - "engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch"
       - "engine-overrides/obscura-v0.2.6/patches/confirm-fail-closed.patch"
       - "engine-overrides/obscura-v0.2.6/patches/native-confirm-dialog.patch"
+      - "engine-overrides/obscura-v0.2.6/patches/posted-task-observability.patch"
       - "engine-overrides/obscura-v0.2.6/tests/confirm_requires_native_ui.rs"
   workflow_dispatch:
 permissions:
@@ -75,6 +76,7 @@ jobs:
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/screencast-scroll-damage.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/confirm-fail-closed.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/confirm-fail-closed.patch")
           (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/native-confirm-dialog.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/native-confirm-dialog.patch")
+          (cd upstream && git apply --check "../engine-overrides/obscura-v0.2.6/patches/posted-task-observability.patch" && git apply "../engine-overrides/obscura-v0.2.6/patches/posted-task-observability.patch")
           cp engine-overrides/obscura-v0.2.6/tests/confirm_requires_native_ui.rs upstream/crates/obscura-js/tests/confirm_requires_native_ui.rs
       - name: Build native Obscura and verify module and scroll-frame regressions
         run: |

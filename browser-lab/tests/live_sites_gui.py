@@ -785,6 +785,9 @@ def main():
             "classic_script_errors": "Script error (",
             "inline_script_errors": "Inline script error:",
             "network_module_fetch_errors": "Failed to fetch module",
+            "posted_task_scheduled_samples": "IWXA_JS_TASK_SCHEDULED",
+            "posted_task_delivered_samples": "IWXA_JS_TASK_DELIVERED",
+            "autonomous_event_loop_idle_samples": "IWXA_JS_PUMP_REACHED_IDLE",
         }
         report["checks"]["engine_script_events"] = {
             key: engine_log.count(marker) for key, marker in event_signatures.items()
