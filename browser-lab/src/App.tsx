@@ -219,6 +219,8 @@ export default function App() {
     const handle = (e: globalThis.KeyboardEvent) => {
       if (leaveAction) {
         if (e.key === "Escape") { e.preventDefault(); setLeaveAction(null); }
+        // A save-first decision blocks browser shortcuts as well as mouse clicks.
+        else if ((e.ctrlKey || e.metaKey) && ["w", "t", "l", "r"].includes(e.key.toLowerCase())) e.preventDefault();
         return;
       }
       if (e.key === "Escape" && siteApproval) {
@@ -320,7 +322,7 @@ export default function App() {
     }
   }
   return <div className="browser-shell">
-    <header>
+    <header inert={Boolean(leaveAction || siteApproval)}>
       <div className="tab-strip">
         <div role="tablist" aria-label="Tabs" className="tab-list">
           {view.tabs.map(tab => <div key={tab.id} className={"tab" + (tab.id === view.active ? " active" : "")}>

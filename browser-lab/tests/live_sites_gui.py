@@ -151,6 +151,43 @@ def open_tab(session, number):
     wait_picker("new-tab-picker")
 
 
+def wait_save_first_dialog(before, label, seconds=7):
+    """Verify the visible OS-close overlay rather than mere process liveness."""
+    points = ((38, 180), (38, 390), (38, 690), (1190, 210), (1190, 690))
+    deadline = time.monotonic() + seconds
+    stable = 0
+    while time.monotonic() < deadline:
+        current = screenshot("poll-" + label)
+        dimmed = sum(
+            sum(before.getpixel(point)) - sum(current.getpixel(point)) >= 45
+            for point in points
+        )
+        stable = stable + 1 if dimmed >= 3 else 0
+        if stable >= 2:
+            current.save(OUT / (label + ".png"))
+            return
+        time.sleep(.25)
+    screenshot(label + "-missing")
+    raise AssertionError("System close did not paint the save-first dialog")
+
+
+def wait_save_dialog_dismissed(before, seconds=5):
+    points = ((38, 180), (38, 390), (38, 690), (1190, 210), (1190, 690))
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        current = screenshot("poll-return-to-work")
+        restored = sum(
+            sum(abs(before.getpixel(point)[i] - current.getpixel(point)[i])
+                for i in range(3)) <= 35
+            for point in points
+        )
+        if restored >= 3:
+            current.save(OUT / "save-first-cancelled.png")
+            return
+        time.sleep(.25)
+    raise AssertionError("Cancel did not remove the save-first overlay")
+
+
 def wait_workspace_probe(log_path, site, seconds=27, since=0):
     if THREE_MINUTE_SPA_EXPERIMENT:
         seconds=max(seconds, 215)
@@ -458,21 +495,48 @@ def main():
                     if readback.get("workspaceViewError") or not readback.get("workspaceViewMounted"):
                         raise AssertionError("Same T2 Workspace record not readable after cold restart")
                     report["checks"]["artbazi_workspace_same_record_readback"]="PASS"
-                    # OS-close must show a save-first reminder and leave the
-                    # browser alive. Esc returns to the site without a fake
-                    # T2 save or a second browser process.
+                    # Exercise the real OS close and the visible user decision.
+                    # A live process alone would not prove that a dialog exists.
+                    before_close = screenshot("artbazi-before-system-close")
                     gui.key("alt+F4")
-                    time.sleep(.8)
                     if process.poll() is not None:
-                        raise AssertionError("Close request bypassed save-first reminder")
-                    screenshot("save-before-exit-confirmation")
+                        raise AssertionError("OS close bypassed the save-first dialog")
+                    wait_save_first_dialog(before_close, "save-first-os-close")
+                    report["checks"]["native_save_first_dialog_visible"] = "PASS"
+
+                    # The active modal must also block chrome actions.
+                    reliable_click(253, 42)  # new-tab button must be inert
+                    time.sleep(.7)
+                    current_tabs = json.loads(session.read_text(encoding="utf-8"))["tabs"]
+                    if len(current_tabs) != 2:
+                        raise AssertionError("Toolbar created a tab behind save-first dialog")
+                    report["checks"]["native_save_first_modal_blocks_tabs"] = "PASS"
+
                     gui.key("Escape")
-                    time.sleep(.4)
+                    wait_save_dialog_dismissed(before_close)
                     if process.poll() is not None:
-                        raise AssertionError("Cancel close did not retain the browser")
-                    report["checks"]["native_save_before_exit_reminder"]="PASS"
+                        raise AssertionError("Cancel close terminated the browser")
+                    after_cancel = request_probe("artbazi")["result"]
+                    if not after_cancel.get("workspaceViewMounted") or after_cancel.get("workspaceViewError"):
+                        raise AssertionError("Cancelled close lost the current T2 Workspace view")
+                    report["checks"]["native_save_first_return_to_site"] = "PASS"
+
+                    # A second real OS-close request, then a user-chosen
+                    # confirmation (Tab from focused Cancel, Return on Confirm).
+                    gui.key("alt+F4")
+                    wait_save_first_dialog(before_close, "save-first-confirmation")
+                    gui.key("Tab")
+                    gui.key("Return")
+                    try:
+                        exit_code = process.wait(timeout=12)
+                    except subprocess.TimeoutExpired as error:
+                        raise AssertionError("Confirmed OS close did not terminate Tauri") from error
+                    if exit_code != 0:
+                        raise AssertionError(f"Confirmed browser exit returned {exit_code}")
+                    report["checks"]["native_save_first_confirmed_exit"] = "PASS"
+                    report["checks"]["native_save_before_exit_reminder"] = "PASS"
                     # A Workspace record is not a domain Result or receipt.
-                    report["checks"]["artbazi_t2_result_readback"]="UNQUALIFIED"
+                    report["checks"]["artbazi_t2_result_readback"] = "UNQUALIFIED"
                 gui.stop_tree(process)
                 process = None
                 # Observe the *actual T2 IndexedDB key* while the only
