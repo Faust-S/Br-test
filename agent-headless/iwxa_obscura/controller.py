@@ -6,6 +6,9 @@ experiment, NOT an OS sandbox or a safe general-purpose web crawler.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Mapping
+from types import MappingProxyType
+from .trust import PinnedCABundle, CertificateTrustError
 from datetime import datetime, timezone
 import hashlib
 import ipaddress
@@ -98,6 +101,8 @@ class Observation:
     content_bytes: int
     retrieved_at: str
     elapsed_ms: int
+    certificate_trust_mode: str
+    ca_bundle_sha256: str | None
 
     def as_data(self) -> dict:
         return {
@@ -110,6 +115,12 @@ class Observation:
             "content_bytes": self.content_bytes,
             "retrieved_at": self.retrieved_at,
             "elapsed_ms": self.elapsed_ms,
+            "tls_trust": {
+                "mode": self.certificate_trust_mode,
+                "additional_ca_bundle_sha256": self.ca_bundle_sha256,
+                "scope": "ENTIRE_CHILD_PROCESS_NOT_DOMAIN_RESTRICTED",
+                "tls_chain_proof": "NOT_INDEPENDENTLY_ATTESTED",
+            },
             "evidence_status": "SOURCE_CONTENT_CAPTURED_NOT_U1_VERIFIED",
             "origin_check": "REQUESTED_ORIGIN_ONLY",
         }
@@ -134,7 +145,8 @@ class ObscuraController:
 
     def __init__(self, *, binary: str | Path, binary_sha256: str,
                  allowed_origins: frozenset[str], timeout_seconds: float = 20,
-                 max_output_bytes: int = 512_000):
+                 max_output_bytes: int = 512_000,
+                 ca_bundles: Mapping[str, PinnedCABundle] | None = None):
         if not isinstance(binary_sha256, str) or not _SHA256.fullmatch(binary_sha256):
             raise ValueError("pinned SHA-256 required")
         if not isinstance(allowed_origins, frozenset) or not allowed_origins:
@@ -151,6 +163,18 @@ class ObscuraController:
         self.allowed_origins = allowed_origins
         self.timeout_seconds = timeout_seconds
         self.max_output_bytes = max_output_bytes
+        # Only authorized application configuration may supply CA roots. Page
+        # contents and ToolRuntime web.fetch arguments cannot change this map.
+        if ca_bundles is None:
+            ca_bundles = {}
+        if not isinstance(ca_bundles, Mapping) or len(ca_bundles) > 32:
+            raise ValueError("CA profiles must be a bounded mapping")
+        for origin, profile in ca_bundles.items():
+            if (not isinstance(origin, str) or origin not in allowed_origins or
+                    _canonical_origin(origin) != origin or
+                    not isinstance(profile, PinnedCABundle)):
+                raise ValueError("CA profile must match approved canonical origin")
+        self.ca_bundles = MappingProxyType(dict(ca_bundles))
 
     def _verify_binary(self) -> None:
         try:
@@ -169,6 +193,8 @@ class ObscuraController:
         if not isinstance(format, str) or format not in _ALLOWED_FORMATS:
             raise ObscuraControllerError("FORMAT_DENIED")
         safe_url = approved_url(url, self.allowed_origins)
+        selected_origin = "https://" + urlsplit(safe_url).hostname
+        selected_ca = self.ca_bundles.get(selected_origin)
         started = time.monotonic()
         self._verify_binary()
         # Non-privileged environment: never inherit OBSCURA_* settings,
@@ -181,6 +207,21 @@ class ObscuraController:
             # browser profile. Not a security sandbox for hostile web content.
             env["HOME"] = workdir
             env["USERPROFILE"] = workdir
+            env["TEMP"] = env["TMP"] = env["TMPDIR"] = workdir
+            trust_mode = "ENGINE_DEFAULT"
+            ca_sha = None
+            if selected_ca is not None:
+                # SSL_CERT_FILE is supported by Obscura 0.2.6 in reqwest.  This
+                # adds roots to the standard client; no --stealth is requested.
+                # All child destinations (including redirects / JS requests)
+                # share this root. This is NOT per-host TLS scoping.
+                try:
+                    cert_file = selected_ca.stage(workdir)
+                except CertificateTrustError as exc:
+                    raise ObscuraControllerError(exc.code) from None
+                env["SSL_CERT_FILE"] = str(cert_file)
+                trust_mode = "PINNED_ADDITIONAL_CA"
+                ca_sha = selected_ca.sha256
             args = [str(self.binary), "fetch", safe_url, "--dump", format,
                     "--timeout", str(max(1, int(self.timeout_seconds))),
                     "--obey-robots", "--quiet"]
@@ -245,4 +286,6 @@ class ObscuraController:
             content_bytes=len(data),
             retrieved_at=datetime.now(timezone.utc).isoformat(),
             elapsed_ms=max(0, round((time.monotonic() - started) * 1000)),
+            certificate_trust_mode=trust_mode,
+            ca_bundle_sha256=ca_sha,
         )

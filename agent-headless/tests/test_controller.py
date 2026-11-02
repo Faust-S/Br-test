@@ -17,6 +17,10 @@ a=sys.argv[1:]
 assert a[0]=='fetch' and '--obey-robots' in a
 assert '--eval' not in a and '--storage-dir' not in a
 assert not os.getenv('OBSCURA_CDP_TOKEN') and not os.getenv('HTTPS_PROXY')
+if urlsplit(a[1]).path=='/no-ca':assert 'SSL_CERT_FILE' not in os.environ
+if urlsplit(a[1]).path=='/with-ca':
+ assert os.environ.get('SSL_CERT_FILE')
+ assert open(os.environ['SSL_CERT_FILE'],'rb').read().startswith(b'-----BEGIN CERTIFICATE-----')
 path=urlsplit(a[1]).path
 if path=='/slow':time.sleep(2)
 if path=='/fail':sys.exit(1)
@@ -109,6 +113,10 @@ class ControllerTest(unittest.TestCase):
         observation=self.c.observe('https://example.org/')
         self.assertGreaterEqual(observation.elapsed_ms,0)
         self.assertEqual(observation.as_data()['elapsed_ms'],observation.elapsed_ms)
+
+    def test_ambient_ca_environment_is_not_inherited(self):
+        with mock.patch.dict(os.environ,{'SSL_CERT_FILE':'/tmp/unapproved-root.pem'}):
+            self.assertTrue(self.c.observe('https://example.org/no-ca').content.startswith('observed:'))
 
     def test_environment_isolation(self):
         with mock.patch.dict(os.environ,{'OBSCURA_CDP_TOKEN':'secret','HTTPS_PROXY':'proxy'}):
