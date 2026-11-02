@@ -1449,7 +1449,6 @@ mod tests {
         }));
         assert!(!is_unavailable_confirmation_notice(&forged, "session-own"));
     }
-    use super::*;
     #[test]
     fn packaged_engine_integrity_check_reads_multiple_bounded_chunks() {
         let file = std::env::temp_dir().join(format!("iwxa-engine-digest-{}", Uuid::new_v4()));
