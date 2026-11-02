@@ -239,8 +239,24 @@ def wait_artbazi_overview(initial, report, seconds=70):
     started=time.monotonic()
     deadline=started+seconds
     attempts=0
+    scheduler_samples=[]
     while time.monotonic()<deadline:
         view=state.get("result") or {}
+        # Record only queue sizes/flags from the existing read-only native
+        # probe. Never copy page content, URLs or Result values into CI.
+        metrics=(view.get("moduleBoot") or {}).get("engineTasks")
+        if isinstance(metrics,dict) and len(scheduler_samples)<40:
+            scheduler_samples.append(metrics)
+        report["checks"]["artbazi_scheduler_observation"]={
+            "sample_count":len(scheduler_samples),
+            "first":scheduler_samples[0] if scheduler_samples else None,
+            "last":scheduler_samples[-1] if scheduler_samples else None,
+            "max_queued":max(
+                (item.get("queuedTotal") for item in scheduler_samples
+                    if isinstance(item.get("queuedTotal"),int)), default=None),
+            "ever_wake_pending":any(
+                item.get("wakePending") is True for item in scheduler_samples),
+        }
         if view.get("overviewRendered") and (view.get("buttons") or {}).get("new-workspace-toggle"):
             report["checks"]["artbazi_overview_rendered"]="PASS"
             report["checks"]["artbazi_overview_probe_count"]=attempts+1
@@ -597,7 +613,7 @@ def main():
         "not_qualified": [
             "T2 receipts", "T2 Result readback",
             "Exchange", "arbitrary-Internet process isolation",
-            "JavaScript confirm dialog (Obscura upstream auto-accept)"
+            "Native JavaScript confirmation dialog (fail-closed fallback only)"
         ],
     }
     manager = None

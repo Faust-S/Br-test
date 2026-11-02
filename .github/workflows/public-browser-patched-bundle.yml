@@ -6,6 +6,7 @@ on:
       - ".github/workflows/public-browser-patched-bundle.yml"
       - "browser-lab/tests/packaged_idb_gui.py"
       - "browser-lab/tests/live_sites_gui.py"
+      - "browser-lab/tests/workspace_task_probe.test.mjs"
       - "browser-lab/src-tauri/src/controller.rs"
       - "engine-overrides/obscura-v0.2.6/crates/obscura-js/src/module_loader.rs"
       - "engine-overrides/obscura-v0.2.6/patches/spa-parser-module-budget.patch"
@@ -56,6 +57,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Read-only scheduler diagnostic probe regression
+        run: node --test browser-lab/tests/workspace_task_probe.test.mjs
       - name: Verify pinned source and apply public native engine fixes
         shell: bash
         run: |

@@ -293,7 +293,43 @@ const WORKSPACE_CONFIG_PROBE: &str = r#"(function() {
             function(entry){return entry && typeof entry.name==='string' &&
                 entry.name.includes('/workspace/assets/')}).length;
     } catch (_) {}
+    // Debug-only readback of browser scheduler counters. No callbacks are
+    // executed, no queues are drained and no Result or module source is read.
+    // These lexical bindings may be unavailable in another engine revision:
+    // report that explicitly rather than misclassifying absence as zero.
+    var engineTasks = {
+        available:false,queuedByPriority:null,queuedTotal:null,
+        wakePending:null,retryScheduled:null,retryCount:null,
+        dynamicScriptsPending:null,loadDelayingScriptsPending:null
+    };
+    try {
+        if (typeof _browserPostedTaskQueues !== 'undefined' &&
+            Array.isArray(_browserPostedTaskQueues)) {
+            var counts = _browserPostedTaskQueues.map(function(queue) {
+                return Array.isArray(queue) ? queue.length : 0;
+            });
+            engineTasks.available = true;
+            engineTasks.queuedByPriority = counts;
+            engineTasks.queuedTotal = counts.reduce(function(sum,n) {return sum+n;},0);
+            engineTasks.wakePending = typeof _browserPostedTaskWakePending === 'boolean' ?
+                _browserPostedTaskWakePending : null;
+            engineTasks.retryScheduled = typeof _browserPostedTaskRetryTimer !== 'undefined' ?
+                _browserPostedTaskRetryTimer !== null : null;
+            engineTasks.retryCount = typeof _browserPostedTaskRetryCount === 'number' ?
+                _browserPostedTaskRetryCount : null;
+        }
+        engineTasks.dynamicScriptsPending =
+            typeof __obscura_hasPendingDynamicScripts === 'function' ?
+                __obscura_hasPendingDynamicScripts() === true : null;
+        engineTasks.loadDelayingScriptsPending =
+            typeof __obscura_hasPendingLoadDelayingScripts === 'function' ?
+                __obscura_hasPendingLoadDelayingScripts() === true : null;
+    } catch (_) {
+        // The debug probe may encounter a replaced realm. This has no
+        // bearing on page correctness and must never interrupt rendering.
+    }
     var moduleBoot = {
+        engineTasks:engineTasks,
         bootstrapPresent:hostBootstrap,
         shellPresent:!!hostShell,
         shellVisible:!!(hostShell && hostShell.style.display!=='none'),
