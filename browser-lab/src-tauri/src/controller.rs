@@ -148,13 +148,28 @@ impl Default for Controller {
         }
     }
 }
-impl Drop for Controller {
-    fn drop(&mut self) {
-        // A process owned by this controller only; not a substitute for a Job Object.
-        if let Some(child) = self.owned.as_mut() {
+impl Controller {
+    /// Tauri calls this before its event loop exits. A managed State may
+    /// outlive the native application, so relying only on Drop can orphan
+    /// the console-subsystem Obscura process on Windows.
+    pub(crate) fn terminate_on_exit(&mut self) {
+        self.connection.take();
+        self.stream_session = None;
+        self.stream_latest = None;
+        self.stream_ack_ids.clear();
+        if let Some(mut child) = self.owned.take() {
             let _ = child.start_kill();
+            // This is a bounded termination readback for our *own* child,
+            // never a PID-name lookup or termination of a foreign process.
+            for _ in 0..50 {
+                if !matches!(child.try_wait(), Ok(None)) { break; }
+                std::thread::sleep(Duration::from_millis(20));
+            }
         }
     }
+}
+impl Drop for Controller {
+    fn drop(&mut self) { self.terminate_on_exit(); }
 }
 
 
@@ -957,6 +972,14 @@ impl Controller {
         // readiness atomically, including its PID.
         let ready_file = profile.join(format!(".obscura-cdp-{}.ready.json", Uuid::new_v4()));
         let mut child = Command::new(binary);
+        // A GUI browser must never spawn a console window for its engine.
+        // This Windows flag hides the *child console*, not native Yes/No
+        // dialogs and not the Tauri application window.
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            child.as_std_mut().creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+        }
         child.args(["serve", "--host", "127.0.0.1", "--port", "0",
             "--workers", "1", "--max-connections", "1", "--ready-file"])
             .arg(&ready_file)

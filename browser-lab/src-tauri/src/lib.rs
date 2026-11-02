@@ -18,6 +18,17 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![command])
-        .run(tauri::generate_context!())
-        .expect("Browser lab failed to start");
+        .build(tauri::generate_context!())
+        .expect("Browser lab failed to build")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                // Tauri may call process::exit without dropping managed State.
+                // Terminate and reap only the Obscura child this controller
+                // originally spawned, even when the user closes the OS window.
+                if let Some(state) = app.try_state::<Mutex<Controller>>() {
+                    let mut owner = state.blocking_lock();
+                    owner.terminate_on_exit();
+                }
+            }
+        });
 }
