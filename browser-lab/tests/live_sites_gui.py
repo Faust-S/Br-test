@@ -16,6 +16,8 @@ import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from PIL import ImageChops, ImageStat
+
 import packaged_idb_gui as gui
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -383,6 +385,8 @@ def wait_probe_scope(scope, seconds=45):
 def click_probe_control(scope, field, seconds=55):
     deadline=time.monotonic()+seconds
     last={}
+    baseline=None
+    pending_visual=False
     while time.monotonic()<deadline:
         state=request_probe("artbazi")["result"]
         if state.get("scope")!=scope:
@@ -391,27 +395,49 @@ def click_probe_control(scope, field, seconds=55):
         controls=state.get("controls" if scope=="artbazi-launch-navigator" else "resultControls") or {}
         last=controls.get(field) or {}
         if last.get("visible") and last.get("enabled"):
-            # A DOM rect alone may disagree with Obscura's actual hit-test
-            # after a wheel scroll. Never claim a click on the wrong element.
             if last.get("hitMatches") is False:
                 screenshot("artbazi-radio-"+field+"-hit-mismatch")
-                raise AssertionError(
-                    f"Native hit-test cannot reach {field}: "
-                    f"target={last.get('hitTag')}, coords={last.get('x')},{last.get('y')}, "
-                    f"scroll={state.get('scrollY')}")
+                raise AssertionError(f"Native hit-test cannot reach {field}; target={last}")
+            if baseline is not None:
+                screen=gui.screenshot("site-artbazi-scroll-present-"+field)
+                region=(140,205,min(1100,screen.width),min(790,screen.height))
+                difference=ImageChops.difference(
+                    baseline.crop(region),screen.crop(region)).convert("L")
+                if ImageStat.Stat(difference).mean[0] < 7.0:
+                    # DOM changed its scrollY, but the *displayed* Obscura
+                    # image is still at the old position. Real users cannot
+                    # correctly click an input that has not been painted.
+                    pending_visual=True
+                    time.sleep(.35)
+                    continue
             if field in ("situation","resources"):
                 screenshot("artbazi-radio-"+field+"-before-native-click")
+                fresh=request_probe("artbazi")["result"]
+                actual=(fresh.get("controls") or {}).get(field) or {}
+                if not (actual.get("visible") and actual.get("hitMatches") and
+                        abs(actual.get("y",99999)-last["y"]) <= 8 and
+                        abs(fresh.get("scrollY",0)-state.get("scrollY",0)) <= 8):
+                    last=actual
+                    time.sleep(.35)
+                    continue
             native_workspace_click(last)
             return
-        # Scroll only when the actual target is outside the native viewport.
-        # Disabled forms must not be "fixed" by repeatedly scrolling.
-        if isinstance(last.get("y"), int) and last["y"] < 55:
+        if isinstance(last.get("y"),int) and last["y"] < 55:
+            if baseline is None:
+                baseline=gui.screenshot("site-artbazi-before-scroll-"+field)
             scroll_native_page("up")
-        elif isinstance(last.get("y"), int) and last["y"] > 650:
+        elif isinstance(last.get("y"),int) and last["y"] > 650:
+            if baseline is None:
+                baseline=gui.screenshot("site-artbazi-before-scroll-"+field)
             scroll_native_page("down")
         else:
             time.sleep(.8)
         time.sleep(.3)
+    if pending_visual:
+        screenshot("artbazi-"+field+"-visual-scroll-desync")
+        raise AssertionError(
+            f"ArtBazi DOM reached {field} but the Tauri image did not follow "
+            f"the real wheel scroll; last={last}")
     raise AssertionError(f"Real ArtBazi UI control {field} not ready, last={last}")
 
 

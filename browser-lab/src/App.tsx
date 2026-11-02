@@ -291,11 +291,12 @@ export default function App() {
   }
   function point(e: MouseEvent<HTMLDivElement>) {
     const rect = e.currentTarget.getBoundingClientRect();
+    // Keep the shell focusable for keys without scrolling its viewport.
+    e.currentTarget.focus({ preventScroll: true });
     void issue({ type: "click",
       x: Math.round((e.clientX - rect.left) * view.width / rect.width),
       y: Math.round((e.clientY - rect.top) * view.height / rect.height)
     });
-    e.currentTarget.focus();
   }
   function move(e: MouseEvent<HTMLDivElement>) {
     // Hover menus need real mouseMoved events inside Obscura, but not a
