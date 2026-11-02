@@ -151,7 +151,7 @@ export default function App() {
       });
     } else if (action.kind === "restart") void issue({ type: "restart" });
     else if (action.kind === "reset") void issue({ type: "reset_sites" });
-    else void issue({ type: "close_tab", id: action.id });
+    else if (action.kind === "close_tab") void issue({ type: "close_tab", id: action.id });
   }, [issue]);
 
   const askBeforeLeaving = useCallback((action: LeaveAction) => {
