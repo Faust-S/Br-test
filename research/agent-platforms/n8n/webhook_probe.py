@@ -158,7 +158,15 @@ def execute(result: dict) -> None:
             wait_for_server(port, server_container)
             result["server_http_ready"] = True
             key = "IWXA-SAME-PUBLIC-KEY"
-            result["ok_response"] = request_workflow(port, "ok", key)
+            # TCP readiness precedes n8n workflow activation; only retry 404,
+            # which means the route was not registered and no node was executed.
+            for readiness_attempt in range(20):
+                first_response = request_workflow(port, "ok", key)
+                if first_response["status"] != 404:
+                    break
+                time.sleep(1)
+            result["webhook_registration_404_retries"] = readiness_attempt
+            result["ok_response"] = first_response
             with PostLedger.lock:
                 after_first = [dict(x) for x in PostLedger.entries]
             result["ok_server_receipts"] = after_first
