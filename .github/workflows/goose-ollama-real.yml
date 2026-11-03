@@ -1,0 +1,67 @@
+name: IWXA Agent Platforms - Goose real small local model
+on:
+  push:
+    branches:
+      - research/2026-11-03-agent-platforms-goose-ollama
+    paths:
+      - research/agent-platforms/goose-ollama/**
+      - .github/workflows/goose-ollama-real.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-goose-real-local-model
+  cancel-in-progress: true
+jobs:
+  goose-ollama:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 17
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch pin-compatible Goose CLI and verify upstream SHA256
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/goose"
+          curl -fL --retry 2 --connect-timeout 10 -o "$RUNNER_TEMP/goose.tar.bz2" \
+            https://github.com/aaif-goose/goose/releases/download/v1.55.0/goose-x86_64-unknown-linux-gnu.tar.bz2
+          echo "d9afefe7b8f4e372ebefd8b465ab6eea1f297304d058e8e9379ed627e0329708  $RUNNER_TEMP/goose.tar.bz2" | sha256sum -c -
+          tar -xjf "$RUNNER_TEMP/goose.tar.bz2" -C "$RUNNER_TEMP/goose"
+          CLI="$(find "$RUNNER_TEMP/goose" -maxdepth 3 -type f -name goose -print -quit)"
+          test -n "$CLI"
+          chmod +x "$CLI"
+          echo "$(dirname "$CLI")" >> "$GITHUB_PATH"
+      - name: Pull exact Ollama release
+        run: docker pull ollama/ollama:0.40.14
+      - name: Start real local Ollama server and pull a small model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/ollama-cache"
+          docker run -d --rm --network host \
+            --name iwxa-ollama --volume "$RUNNER_TEMP/ollama-cache:/root/.ollama" \
+            -e OLLAMA_HOST=127.0.0.1:11434 \
+            ollama/ollama:0.40.14 serve
+          for i in $(seq 1 50); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          docker exec iwxa-ollama ollama --version
+          docker exec iwxa-ollama ollama pull qwen2.5:0.5b
+      - name: Execute real LLM task and verify on-disk effect
+        run: python research/agent-platforms/goose-ollama/probe.py
+      - name: Save real-model evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-goose-real-ollama
+          path: artifacts/agent-platforms/goose-ollama-real.json
+          retention-days: 5
+          if-no-files-found: warn
+      - name: Stop local model server
+        if: always()
+        run: docker rm -f iwxa-ollama 2>/dev/null || true
