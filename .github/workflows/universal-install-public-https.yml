@@ -1,0 +1,143 @@
+name: IWXA Universal Install - public HTTPS prerelease qualification
+on:
+  push:
+    branches: [work/2026-11-03-universal-install-module]
+    paths:
+      - 'universal-install/qualification/package_native_release.py'
+      - 'universal-install/qualification/network_release_install.py'
+      - '.github/workflows/universal-install-public-https.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: universal-install-public-https-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  CI_TEST_TAG: iwxa-obscura-native-ci-2026-11-04-test1
+  SOURCE_NATIVE_RUN: '41735454659'
+  SOURCE_NATIVE_SHA: '4d52b80fc3575c8a63ed44188703485f09852704'
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: write
+    outputs:
+      tag: ${{ steps.publish.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify source native run identity and qualification
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(gh api "repos/${{ github.repository }}/actions/runs/$SOURCE_NATIVE_RUN")"
+          test "$(echo "$response" | jq -r .head_sha)" = "$SOURCE_NATIVE_SHA"
+          test "$(echo "$response" | jq -r .conclusion)" = "success"
+          echo "SOURCE_NATIVE_VALIDATED $SOURCE_NATIVE_SHA"
+      - name: Download six verified native GitHub Actions artifacts
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 41735454659
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          pattern: universal-native-obscura-*
+          merge-multiple: false
+          path: native-source
+      - name: Package six exact platform archives and pinned manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m compileall -q universal-install/qualification
+          python -m unittest discover -s universal-install/tests -p 'test_package_native_release.py' -v
+          python universal-install/qualification/package_native_release.py \
+            --artifacts native-source \
+            --output artifacts/test-release \
+            --source-run "$SOURCE_NATIVE_RUN" \
+            --source-sha "$SOURCE_NATIVE_SHA" \
+            --tag "$CI_TEST_TAG" \
+            --patch agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch
+          test "$(find artifacts/test-release -maxdepth 1 -type f -name 'obscura-*' | wc -l | xargs)" = 6
+      - name: Checkout the pinned public Obscura license
+        uses: actions/checkout@v4
+        with:
+          repository: h4ckf0r0day/obscura
+          ref: 8534b401898ed17b62f69bdc3d5eb186bffb0d60
+          path: upstream-license
+          persist-credentials: false
+      - name: Include upstream Apache-2.0 license in test package
+        shell: bash
+        run: |
+          test -f upstream-license/LICENSE
+          cp upstream-license/LICENSE artifacts/test-release/LICENSE-OBSCURA.txt
+          sha256sum artifacts/test-release/* > artifacts/test-release-sha256.txt
+      - name: Publish test-only GitHub prerelease (never a product release)
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$CI_TEST_TAG" > /dev/null 2>&1; then
+            echo "TEST_TAG_ALREADY_EXISTS: will not mutate an existing release" >&2
+            exit 1
+          fi
+          gh release create "$CI_TEST_TAG" artifacts/test-release/* \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --title "IWXA Obscura native CI network fixture — NOT FOR USERS" \
+            --notes "Test-only native artifacts. Source GitHub Actions run $SOURCE_NATIVE_RUN at $SOURCE_NATIVE_SHA. Six independent platform binaries and pinned SHA-256 manifest. NOT an end-user release; NOT IWXA Browser; NOT Agent. Apache-2.0 upstream license is included. This prerelease is for verifying the public universal installation backend."
+          echo "tag=$CI_TEST_TAG" >> "$GITHUB_OUTPUT"
+      - name: Archive test release packaging evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-universal-test-release-provenance
+          path: |
+            artifacts/test-release/manifest.test-only.json
+            artifacts/test-release/LICENSE-OBSCURA.txt
+            artifacts/test-release-sha256.txt
+          if-no-files-found: warn
+          retention-days: 7
+  public-https-lifecycle:
+    needs: package
+    timeout-minutes: 18
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2022, windows-11-arm, macos-15-intel, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download pinned prerelease manifest from public GitHub HTTPS
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/public-https
+          curl --fail --location --show-error --silent --max-time 60 \
+            "https://github.com/Faust-S/Br-test/releases/download/$CI_TEST_TAG/manifest.test-only.json" \
+            --output artifacts/public-https/manifest.test-only.json
+      - name: Real public HTTPS download, install, execute, remove and readback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python universal-install/qualification/network_release_install.py \
+            --manifest artifacts/public-https/manifest.test-only.json \
+            --expected-source-sha "$SOURCE_NATIVE_SHA" \
+            --report "artifacts/public-https/lifecycle-$RUNNER_OS-$RUNNER_ARCH.json"
+      - name: Preserve per-platform HTTPS lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-public-https-${{ matrix.os }}
+          path: artifacts/public-https/
+          if-no-files-found: warn
+          retention-days: 7

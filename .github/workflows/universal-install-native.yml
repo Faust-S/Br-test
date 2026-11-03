@@ -3,7 +3,8 @@ on:
   push:
     branches: [work/2026-11-03-universal-install-module]
     paths:
-      - 'universal-install/**'
+      - 'universal-install/iwxa_universal_install/**'
+      - 'universal-install/qualification/native_obscura_install.py'
       - 'agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch'
       - '.github/workflows/universal-install-native.yml'
   workflow_dispatch:
