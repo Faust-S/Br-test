@@ -1,0 +1,161 @@
+"""Public IWXA-managed Obscura Worker backend used by embedding products.
+
+This backend installs pinned bytes into a host-selected *versioned* directory.
+It never starts the worker, activates a provider, creates a receipt, or changes
+another installed version. Host authorization is REQUIRED before apply().
+"""
+from __future__ import annotations
+
+import hashlib
+import os
+from pathlib import Path
+import re
+
+from .contract import ApprovedInstall, InstallError, InstallObservation
+from iwxa_obscura.preparer import (
+    ArtifactPreparationError, ArtifactSpec, ObscuraArtifactPreparer,
+    _check_parent_chain, _sha_file, BINARY_LIMIT,
+)
+
+
+PROGRAM_ID = "OBSCURA_WORKER_V1"
+FAMILY = "IWXA_MANAGED_ARTIFACT_V1"
+_CHUNK = 1024 * 1024
+
+
+def _root(value: str) -> Path:
+    if not isinstance(value, str) or not value or len(value) > 4096:
+        raise InstallError("INSTALL_ROOT_INVALID")
+    root = Path(value)
+    if not root.is_absolute() or root == Path(root.anchor):
+        raise InstallError("INSTALL_ROOT_INVALID")
+    try:
+        _check_parent_chain(root)
+    except ArtifactPreparationError as exc:
+        raise InstallError(exc.code) from None
+    if root.exists() and not root.is_dir():
+        raise InstallError("INSTALL_ROOT_INVALID")
+    return root
+
+
+class ObscuraManagedBackend:
+    """One backend implementation; the host still owns the installer workflow."""
+
+    family = FAMILY
+    program_id = PROGRAM_ID
+
+    @staticmethod
+    def _target(spec: ArtifactSpec, installation_root: str) -> Path:
+        if not isinstance(spec, ArtifactSpec):
+            raise InstallError("INSTALL_SPEC_INVALID")
+        return _root(installation_root) / "obscura-worker" / spec.release_id / spec.platform
+
+    def inspect(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
+        return self.verify(spec, installation_root)
+
+    def prepare(self, spec: ArtifactSpec, staging_root: str, *, archive_path: str | None = None):
+        """Stage real archive bytes, never declare those bytes installed."""
+        if not isinstance(spec, ArtifactSpec):
+            raise InstallError("INSTALL_SPEC_INVALID")
+        root = _root(staging_root)
+        if archive_path is None:
+            # Download is an explicit request from the host, not a background task.
+            return ObscuraArtifactPreparer(managed_root=root).download_and_prepare(spec)
+        return ObscuraArtifactPreparer(managed_root=root).prepare_local(archive_path, spec)
+
+    def verify(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
+        """Read-only disk verification; no implicit repair or activation."""
+        directory = self._target(spec, installation_root)
+        executable = directory / spec.executable_name
+        _check_parent_chain(directory)
+        if not directory.exists():
+            return InstallObservation("NOT_INSTALLED", PROGRAM_ID)
+        if not directory.is_dir() or not executable.is_file():
+            return InstallObservation("INSTALL_INCOMPLETE", PROGRAM_ID)
+        try:
+            digest = _sha_file(executable, BINARY_LIMIT)
+        except (ArtifactPreparationError, OSError):
+            return InstallObservation("INSTALL_MISMATCH", PROGRAM_ID)
+        if digest != spec.executable_sha256:
+            return InstallObservation("INSTALL_MISMATCH", PROGRAM_ID)
+        return InstallObservation(
+            "INSTALLED_NOT_CONNECTED", PROGRAM_ID, executable=str(executable),
+            sha256=digest, installed=True,
+        )
+
+    def recover(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
+        """After a crash only observe; never download, copy or rerun apply."""
+        return self.verify(spec, installation_root)
+
+    def apply(self, spec: ArtifactSpec, staging_root: str,
+              approval: ApprovedInstall) -> InstallObservation:
+        """Install one pinned binary into a new, host-owned version directory.
+
+        The host must persist STARTED and serialize installs before this call.
+        The resulting file is NOT connected or executed. No rollback API.
+        """
+        if not isinstance(approval, ApprovedInstall) or approval.confirmed is not True:
+            raise InstallError("INSTALL_OWNER_APPROVAL_REQUIRED")
+        if (approval.program_id != PROGRAM_ID or
+                approval.spec_fingerprint != getattr(spec, "fingerprint", None) or
+                not isinstance(approval.receipt_id, str) or
+                re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", approval.receipt_id) is None):
+            raise InstallError("INSTALL_APPROVAL_MISMATCH")
+        stage_root = _root(staging_root)
+        installation_root = _root(approval.installation_root)
+        if stage_root == installation_root:
+            raise InstallError("INSTALL_STAGING_EQUALS_TARGET")
+        target = self._target(spec, str(installation_root))
+        if target.exists() or target.is_symlink():
+            existing = self.verify(spec, approval.installation_root)
+            if existing.installed:
+                return existing
+            raise InstallError("INSTALL_TARGET_CONFLICT")
+        try:
+            prepared = ObscuraArtifactPreparer(managed_root=stage_root).verify_prepared(spec)
+            source = Path(prepared.executable)
+            _check_parent_chain(source)
+            if source.resolve() == (target / spec.executable_name).resolve():
+                raise InstallError("INSTALL_STAGING_EQUALS_TARGET")
+            parent = target.parent
+            _check_parent_chain(parent)
+            parent.mkdir(parents=True, exist_ok=True)
+            # mkdir is an atomic no-overwrite gate, including on POSIX.
+            target.mkdir()
+        except InstallError:
+            raise
+        except FileExistsError:
+            raise InstallError("INSTALL_TARGET_CONFLICT") from None
+        except (ArtifactPreparationError, OSError) as exc:
+            raise InstallError(getattr(exc, "code", "INSTALL_PREPARED_UNAVAILABLE")) from None
+        destination = target / spec.executable_name
+        try:
+            sha = hashlib.sha256()
+            size = 0
+            with source.open("rb") as inp, destination.open("xb") as out:
+                while True:
+                    block = inp.read(_CHUNK)
+                    if not block:
+                        break
+                    size += len(block)
+                    if size > BINARY_LIMIT:
+                        raise InstallError("INSTALL_SIZE_LIMIT")
+                    sha.update(block)
+                    out.write(block)
+                out.flush()
+                os.fsync(out.fileno())
+            if sha.hexdigest() != spec.executable_sha256:
+                raise InstallError("INSTALL_INPUT_CHANGED")
+            if os.name != "nt":
+                destination.chmod(0o500)
+            observation = self.verify(spec, approval.installation_root)
+            if not observation.installed:
+                raise InstallError("INSTALL_VERIFY_FAILED")
+            return observation
+        except (OSError, InstallError) as exc:
+            try:
+                destination.unlink(missing_ok=True)
+                target.rmdir()
+            except OSError:
+                pass
+            raise InstallError(getattr(exc, "code", "INSTALL_WRITE_FAILED")) from None

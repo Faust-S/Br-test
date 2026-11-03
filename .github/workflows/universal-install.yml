@@ -1,0 +1,34 @@
+name: IWXA Universal Program Install - Windows Linux
+on:
+  push:
+    branches: [work/2026-11-03-universal-install-module]
+    paths:
+      - 'universal-install/**'
+      - 'agent-headless/iwxa_obscura/preparer.py'
+      - 'agent-headless/tests/test_preparer.py'
+      - '.github/workflows/universal-install.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: universal-install-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Universal install contract and actual disk fixture
+        shell: bash
+        run: python -m unittest discover -s universal-install/tests -v
+      - name: Existing public Obscura preparer regressions
+        shell: bash
+        run: python -m unittest discover -s agent-headless/tests -v
