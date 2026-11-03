@@ -24,14 +24,7 @@ from iwxa_universal_install import (ApprovedInstall, ApprovedRemoval,
                                     ManagedArtifactBackend, ManagedArtifactSpec)
 from iwxa_universal_install.managed import _native_platform
 
-UPSTREAM_TAG = "jq-1.8.1"
-OFFICIAL = {
-    "windows-x86_64": ("jq-win64.exe", "23cb60a1354eed6bcc8d9b9735e8c7b388cd1fdcb75726b93bc299ef22dd9334"),
-    "linux-x86_64": ("jq-linux-amd64", "020468de7539ce70ef1bceaf7cde2e8c4f2ca6c3afb84642aabc5c97d9fc2a0d"),
-    "linux-arm64": ("jq-linux-arm64", "6bc62f25981328edd3cfcfe6fe51b073f2d7e7710d7ef7fcdac28d4e384fc3d4"),
-    "macos-x86_64": ("jq-macos-amd64", "e80dbe0d2a2597e3c11c404f03337b981d74b4a8504b70586c354b7697a7c27f"),
-    "macos-arm64": ("jq-macos-arm64", "a9fe3ea2f86dfc72f6728417521ec9067b343277152b114f4e98d8cb0e263603"),
-}
+CATALOG = ROOT / "universal-install" / "catalog" / "jq-1.8.1.json"
 
 
 def hash_file(path):
@@ -44,13 +37,17 @@ def hash_file(path):
 
 def execute() -> dict:
     target = _native_platform()
-    if target not in OFFICIAL:
+    catalog = json.loads(CATALOG.read_text(encoding="utf-8"))
+    if catalog.get("schema") != "IWXA_INDEPENDENT_BINARY_CATALOG/1":
+        raise RuntimeError("INDEPENDENT_CATALOG_INVALID")
+    if target not in catalog["platforms"]:
         raise RuntimeError("INDEPENDENT_PROGRAM_PLATFORM_NOT_PUBLISHED")
-    asset, expected_sha = OFFICIAL[target]
+    item = catalog["platforms"][target]
+    asset, expected_sha = item["asset"], item["sha256"]
     with tempfile.TemporaryDirectory(prefix="iwxa-generic-jq-") as temp:
         root=Path(temp).resolve()
         raw=root/asset
-        url=f"https://github.com/jqlang/jq/releases/download/{UPSTREAM_TAG}/{asset}"
+        url=f"https://github.com/jqlang/jq/releases/download/{catalog['upstream_tag']}/{asset}"
         with urlopen(Request(url,headers={"User-Agent":"IWXA-generic-install-qualification"}), timeout=45) as response:
             with raw.open("xb") as fd:
                 total=0
@@ -61,7 +58,7 @@ def execute() -> dict:
                     fd.write(block)
         if hash_file(raw)!=expected_sha:
             raise RuntimeError("INDEPENDENT_OFFICIAL_DIGEST_MISMATCH")
-        filename="jq.exe" if os.name=="nt" else "jq"
+        filename=item["executable"]
         format_name="zip" if os.name=="nt" else "tar.gz"
         archive_name=f"jq-{target}.{format_name}"
         archive=root/archive_name
@@ -77,7 +74,7 @@ def execute() -> dict:
                     t.addfile(info,fd)
         # Nothing below this line contains jq-specific installer code.
         spec=ManagedArtifactSpec(
-            program_id="JQ_CLI_V1",slug="jq-cli",release_id="jq-managed-qualification-1.8.1",platform=target,
+            program_id=catalog["program_id"],slug=catalog["slug"],release_id="jq-managed-qualification-1.8.1",platform=target,
             executable_name=filename,archive_name=archive_name,
             archive_format=format_name,archive_sha256=hash_file(archive),
             executable_sha256=expected_sha,
@@ -113,7 +110,7 @@ def execute() -> dict:
             raise RuntimeError("INDEPENDENT_REMOVE_READBACK_FAILED")
         report={
             "schema":"IWXA_MANAGED_SECOND_PROGRAM/1",
-            "status":"PASS","platform":target,"program":"jq","version":"1.8.1",
+            "status":"PASS","platform":target,"program":"jq","version":catalog["version"],
             "official_source_url":url,"official_binary_sha256":expected_sha,
             "managed_archive_sha256":spec.archive_sha256,
             "generic_backend_class":"ManagedArtifactBackend",

@@ -5,6 +5,7 @@ on:
     paths:
       - 'universal-install/iwxa_universal_install/**'
       - 'universal-install/qualification/independent_jq.py'
+      - 'universal-install/catalog/jq-1.8.1.json'
       - 'universal-install/tests/test_managed_backend.py'
       - '.github/workflows/universal-install-independent-jq.yml'
   workflow_dispatch:

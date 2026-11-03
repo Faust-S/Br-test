@@ -15,11 +15,12 @@
 - `universal-install/iwxa_universal_install/preparer.py`: общий подготовитель ZIP/tar.gz с HTTPS-прокси, строгими хешами и очисткой временных файлов.
 - `universal-install/iwxa_universal_install/managed.py`: общие операции `prepare / apply / inspect / verify / recover / remove`, без вшитой логики конкретного продукта.
 - `universal-install/iwxa_universal_install/obscura.py`: адаптер совместимости `ObscuraManagedBackend`, наследуется от общего backend; специфичный `ArtifactSpec` и старый подготовитель Obscura остаются.
-- `universal-install/qualification/independent_jq.py`: второй независимый реальный продукт, официальный jq 1.8.1, публично опубликованные SHA-256, установка из локально запакованного однофайлового архива, запуск и удаление без jq-backend.
+- `universal-install/catalog/jq-1.8.1.json`: данные настоящего jq 1.8.1: официальные URL-активы, SHA-256, ОС и имена исполняемых файлов. Нет Windows ARM64 актива в указанном upstream-релизе.
+- `universal-install/qualification/independent_jq.py`: тест второй независимой реальной программы, читает указанный JSON-каталог, скачивает проверенный официальный бинарник, формирует однофайловый архив, запускает общий backend, проверяет запуск jq и удаление; нет jq-specific backend.
 - `universal-install/tests/test_managed_backend.py`: два независимых data-only манифеста, установка, повторное чтение, удаление, отрицательные сценарии.
 - `.github/workflows/universal-install-independent-jq.yml`: реальные jq-прогоны на 5 GitHub-hosted конфигурациях (официального Windows ARM64 в выбранном upstream-релизе нет).
 
-**Важно:** рефакторинг ещё требует независимой полной приёмки. Нельзя выдавать новый generic backend за PASS, пока не получены фактические отчёты Actions. Проверить старые Obscura regression/native/network workflow на новой ветке и SHA, исправлять дефекты общего кода, не плодить отдельные обработчики программ.
+**Важно:** после этой передачи необходимо проверить свежие HEAD/TREE: они меняются по мере устранения дефектов. Рефакторинг ещё требует независимой полной приёмки. Нельзя выдавать новый generic backend за PASS, пока не получены фактические отчёты Actions. Проверить старые Obscura regression/native/network workflow на новой ветке и SHA, исправлять дефекты общего кода, не плодить отдельные обработчики программ.
 
 ## Непременные критерии
 
