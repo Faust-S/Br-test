@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import io
+from urllib.error import HTTPError, URLError
 import json
 import os
 from pathlib import Path
@@ -188,7 +189,7 @@ class TestArtifactPreparation(unittest.TestCase):
                 raise TimeoutError("simulated network timeout")
         opener = TimeoutOpener()
         with mock.patch("iwxa_obscura.preparer.build_opener", return_value=opener):
-            self.rejected("ARTIFACT_DOWNLOAD_FAILED",
+            self.rejected("ARTIFACT_DOWNLOAD_TIMEOUT",
                           lambda: self.preparer.download_and_prepare(self.spec()))
         self.assertEqual(opener.calls, 1)
         self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")), [])
@@ -239,6 +240,93 @@ class TestArtifactPreparation(unittest.TestCase):
         self.assertEqual(self.preparer.verify_prepared(original), existing)
         self.assertEqual(Path(existing.executable).read_bytes(), before)
         self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")), [])
+
+
+    def test_download_honors_system_proxy_configuration(self):
+        class Opener:
+            def open(self,*_args,**_kwargs):
+                return io.BytesIO(self_content)
+        self_content = self.archive.read_bytes()
+        with mock.patch("iwxa_obscura.preparer.ProxyHandler") as proxy, \
+             mock.patch("iwxa_obscura.preparer.build_opener",return_value=Opener()):
+            self.preparer.download_and_prepare(self.spec())
+        proxy.assert_called_once_with()
+
+    def test_download_progress_and_cancellation(self):
+        content=self.archive.read_bytes()
+        class Response(io.BytesIO):
+            headers={"Content-Length":str(len(content))}
+        class Opener:
+            def open(self,*_args,**_kwargs):
+                return Response(content)
+        updates=[]
+        with mock.patch("iwxa_obscura.preparer.build_opener",return_value=Opener()), \
+             mock.patch("iwxa_obscura.preparer._CHUNK",7):
+            result=self.preparer.download_and_prepare(
+                self.spec(),on_progress=lambda n,total: updates.append((n,total)))
+        self.assertEqual(result.status,"STAGED_NOT_ACTIVATED")
+        self.assertEqual(updates[0],(0,len(content)))
+        self.assertEqual(updates[-1],(len(content),len(content)))
+        self.assertTrue(all(a[0]<=b[0] for a,b in zip(updates,updates[1:])))
+
+        self.preparer=ObscuraArtifactPreparer(managed_root=self.base/"software-second")
+        progress=[]
+        with mock.patch("iwxa_obscura.preparer.build_opener",return_value=Opener()), \
+             mock.patch("iwxa_obscura.preparer._CHUNK",7):
+            self.rejected("ARTIFACT_DOWNLOAD_CANCELLED",
+                lambda:self.preparer.download_and_prepare(
+                    self.spec(),on_progress=lambda n,total:progress.append(n),
+                    is_cancelled=lambda:bool(progress and progress[-1]>0)))
+        self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")),[])
+        self.assertFalse(self.preparer._target(self.spec()).exists())
+
+    def test_download_cancel_before_network(self):
+        with mock.patch("iwxa_obscura.preparer.build_opener") as opener:
+            self.rejected("ARTIFACT_DOWNLOAD_CANCELLED",
+                lambda:self.preparer.download_and_prepare(
+                    self.spec(),is_cancelled=lambda:True))
+        opener.assert_not_called()
+
+    def test_download_distinguishes_missing_denied_and_server_error(self):
+        for status,expected in ((404,"ARTIFACT_DOWNLOAD_NOT_FOUND"),
+                                (401,"ARTIFACT_DOWNLOAD_ACCESS_DENIED"),
+                                (403,"ARTIFACT_DOWNLOAD_ACCESS_DENIED"),
+                                (502,"ARTIFACT_DOWNLOAD_HTTP_FAILED")):
+            class Opener:
+                def open(self,*_args,**_kwargs):
+                    raise HTTPError("https://github.com",status,"failed",{},None)
+            with self.subTest(status=status), \
+                 mock.patch("iwxa_obscura.preparer.build_opener",return_value=Opener()):
+                self.rejected(expected,lambda:self.preparer.download_and_prepare(self.spec()))
+
+    def test_download_tls_error_and_unreachable_proxy(self):
+        import ssl
+        for failure,expected in ((URLError(ssl.SSLError("bad cert")),
+                                  "ARTIFACT_DOWNLOAD_TLS_FAILED"),
+                                 (URLError("proxy unavailable"),"ARTIFACT_DOWNLOAD_FAILED")):
+            class Opener:
+                def open(self,*_args,**_kwargs):
+                    raise failure
+            with self.subTest(expected=expected), \
+                 mock.patch("iwxa_obscura.preparer.build_opener",return_value=Opener()):
+                self.rejected(expected,lambda:self.preparer.download_and_prepare(self.spec()))
+
+    def test_download_rejects_bad_callbacks(self):
+        with self.assertRaises(ValueError):
+            self.preparer.download_and_prepare(self.spec(),on_progress="not callable")
+        with self.assertRaises(ValueError):
+            self.preparer.download_and_prepare(self.spec(),is_cancelled="not callable")
+
+    def test_download_rejects_declared_oversize_without_writing(self):
+        class Response(io.BytesIO):
+            headers={"Content-Length":str(200*1024*1024)}
+        class Opener:
+            def open(self,*_args,**_kwargs):
+                return Response(b"partial")
+        with mock.patch("iwxa_obscura.preparer.build_opener",return_value=Opener()):
+            self.rejected("ARTIFACT_DOWNLOAD_TOO_LARGE",
+                          lambda:self.preparer.download_and_prepare(self.spec()))
+        self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")),[])
 
 
 if __name__=='__main__':

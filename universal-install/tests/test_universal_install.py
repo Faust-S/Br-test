@@ -87,6 +87,21 @@ class PortableInstallTest(unittest.TestCase):
         installed = self.backend.apply(spec, str(self.staging), self.approval(spec))
         return spec, prepared, installed
 
+    def test_local_prepare_progress_and_cancel_contract(self):
+        archive, spec = self.package()
+        with self.assertRaisesRegex(InstallError, "ARTIFACT_DOWNLOAD_CANCELLED"):
+            self.backend.prepare(spec, str(self.staging), archive_path=str(archive),
+                                 is_cancelled=lambda: True)
+        self.assertFalse(self.staging.exists())
+        events = []
+        result = self.backend.prepare(
+            spec, str(self.staging), archive_path=str(archive),
+            on_progress=lambda count, total: events.append((count,total)),
+            is_cancelled=lambda: False,
+        )
+        self.assertEqual(result.status, "STAGED_NOT_ACTIVATED")
+        self.assertEqual(events, [(1,1)])
+
     def test_public_contract_and_host_install(self):
         for name in ("inspect", "prepare", "apply", "verify", "recover"):
             self.assertTrue(callable(getattr(self.backend, name)))

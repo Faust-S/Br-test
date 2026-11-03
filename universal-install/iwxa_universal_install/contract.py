@@ -7,7 +7,7 @@ Backends receive an approved operation and return verifiable observations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 
 class InstallError(RuntimeError):
@@ -65,7 +65,10 @@ class ProgramInstallBackend(Protocol):
     family: str
 
     def inspect(self, spec: Any, installation_root: str) -> InstallObservation: ...
-    def prepare(self, spec: Any, staging_root: str, *, archive_path: str | None = None) -> Any: ...
+    def prepare(self, spec: Any, staging_root: str, *,
+                archive_path: str | None = None,
+                on_progress: Callable[[int, int | None], None] | None = None,
+                is_cancelled: Callable[[], bool] | None = None) -> Any: ...
     def apply(self, spec: Any, staging_root: str, approval: ApprovedInstall) -> InstallObservation: ...
     def remove(self, spec: Any, approval: ApprovedRemoval) -> InstallObservation: ...
     def verify(self, spec: Any, installation_root: str) -> InstallObservation: ...

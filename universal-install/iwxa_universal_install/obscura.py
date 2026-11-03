@@ -11,6 +11,7 @@ import json
 import os
 import platform as host_platform
 from pathlib import Path
+from typing import Callable
 import sys
 import re
 import stat
@@ -110,15 +111,34 @@ class ObscuraManagedBackend:
     def inspect(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
         return self.verify(spec, installation_root)
 
-    def prepare(self, spec: ArtifactSpec, staging_root: str, *, archive_path: str | None = None):
-        """Stage real archive bytes, never declare those bytes installed."""
+    def prepare(
+        self, spec: ArtifactSpec, staging_root: str, *,
+        archive_path: str | None = None,
+        on_progress: Callable[[int, int | None], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
+    ):
+        """Stage pinned bytes, with optional progress/cancel for HTTPS downloads.
+
+        A local archive is an already completed transfer. The host still
+        decides when to stage, install, connect or stop a Worker.
+        """
         if not isinstance(spec, ArtifactSpec):
             raise InstallError("INSTALL_SPEC_INVALID")
         root = _root(staging_root)
+        if is_cancelled is not None:
+            if not callable(is_cancelled):
+                raise InstallError("INSTALL_CANCEL_CALLBACK_INVALID")
+            if is_cancelled():
+                raise InstallError("ARTIFACT_DOWNLOAD_CANCELLED")
+        preparer = ObscuraArtifactPreparer(managed_root=root)
         if archive_path is None:
             # Download is an explicit request from the host, not a background task.
-            return ObscuraArtifactPreparer(managed_root=root).download_and_prepare(spec)
-        return ObscuraArtifactPreparer(managed_root=root).prepare_local(archive_path, spec)
+            return preparer.download_and_prepare(
+                spec, on_progress=on_progress, is_cancelled=is_cancelled)
+        result = preparer.prepare_local(archive_path, spec)
+        if on_progress is not None:
+            on_progress(1, 1)
+        return result
 
     def verify(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
         """Read-only disk verification; no implicit repair or activation."""

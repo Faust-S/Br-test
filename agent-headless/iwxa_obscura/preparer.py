@@ -7,6 +7,7 @@ an explicitly pinned release and prepares an immutable, inactive executable.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 import hashlib
 import io
 import json
@@ -19,6 +20,7 @@ import stat
 import tarfile
 import tempfile
 from urllib.parse import urlsplit
+from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, HTTPSHandler, ProxyHandler, HTTPRedirectHandler
 import zipfile
 
@@ -328,24 +330,56 @@ class ObscuraArtifactPreparer:
             if temp_dir.exists():
                 shutil.rmtree(temp_dir)
 
-    def download_and_prepare(self, spec: ArtifactSpec, *, timeout_seconds: float = 30) -> PreparedArtifact:
-        """Explicitly called after Agent grants authority; never auto-update."""
+    def download_and_prepare(
+        self, spec: ArtifactSpec, *, timeout_seconds: float = 30,
+        on_progress: Callable[[int, int | None], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> PreparedArtifact:
+        """Download a pinned release on explicit request; never auto-update.
+
+        The host may show progress and cancel its own request. The transient
+        archive is always cleaned on failure/cancel. Use the OS HTTPS proxy
+        configuration where present, still validating TLS, redirects and SHA.
+        """
         if not isinstance(spec, ArtifactSpec):
             raise ValueError("trusted ArtifactSpec required")
         if not isinstance(timeout_seconds, (int, float)) or not 1 <= timeout_seconds <= 60:
             raise ValueError("invalid download timeout")
+        if on_progress is not None and not callable(on_progress):
+            raise ValueError("on_progress must be callable")
+        if is_cancelled is not None and not callable(is_cancelled):
+            raise ValueError("is_cancelled must be callable")
+        if is_cancelled is not None and is_cancelled():
+            raise ArtifactPreparationError("ARTIFACT_DOWNLOAD_CANCELLED")
         _check_parent_chain(self.root)
-        opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context()),
+        # Honor system and corporate HTTPS proxy settings. The worker itself
+        # still gets its separately isolated environment.
+        opener = build_opener(ProxyHandler(), HTTPSHandler(context=ssl.create_default_context()),
                               _SafeRedirect())
         with tempfile.TemporaryDirectory(prefix=".obscura-download-", dir=self.root) as workdir:
             local = Path(workdir) / spec.archive_name
             try:
                 with opener.open(Request(spec.download_url, headers={"User-Agent": "IWXA-Obscura-Preparer/1.0"}),
                                  timeout=timeout_seconds) as response:
+                    raw_length = getattr(response, "headers", {}).get("Content-Length")
+                    total = None
+                    if raw_length is not None:
+                        try:
+                            value = int(raw_length)
+                            if value >= 0:
+                                total = value
+                        except (ValueError, TypeError):
+                            pass
+                    if total is not None and total > ARCHIVE_LIMIT:
+                        raise ArtifactPreparationError("ARTIFACT_DOWNLOAD_TOO_LARGE")
+                    if on_progress is not None:
+                        on_progress(0, total)
                     with local.open("xb") as sink:
                         amount = 0
                         digest = hashlib.sha256()
                         while True:
+                            if is_cancelled is not None and is_cancelled():
+                                raise ArtifactPreparationError("ARTIFACT_DOWNLOAD_CANCELLED")
                             chunk = response.read(_CHUNK)
                             if not chunk:
                                 break
@@ -354,12 +388,33 @@ class ObscuraArtifactPreparer:
                                 raise ArtifactPreparationError("ARTIFACT_DOWNLOAD_TOO_LARGE")
                             sink.write(chunk)
                             digest.update(chunk)
+                            if on_progress is not None:
+                                on_progress(amount, total)
                         sink.flush()
                         os.fsync(sink.fileno())
                     if digest.hexdigest() != spec.archive_sha256:
                         raise ArtifactPreparationError("ARTIFACT_ARCHIVE_DIGEST_MISMATCH")
             except ArtifactPreparationError:
                 raise
+            except HTTPError as exc:
+                if exc.code == 404:
+                    code = "ARTIFACT_DOWNLOAD_NOT_FOUND"
+                elif exc.code in (401, 403):
+                    code = "ARTIFACT_DOWNLOAD_ACCESS_DENIED"
+                else:
+                    code = "ARTIFACT_DOWNLOAD_HTTP_FAILED"
+                raise ArtifactPreparationError(code) from exc
+            except (TimeoutError, URLError) as exc:
+                reason = getattr(exc, "reason", exc)
+                if isinstance(reason, ssl.SSLError):
+                    code = "ARTIFACT_DOWNLOAD_TLS_FAILED"
+                elif isinstance(reason, TimeoutError):
+                    code = "ARTIFACT_DOWNLOAD_TIMEOUT"
+                else:
+                    code = "ARTIFACT_DOWNLOAD_FAILED"
+                raise ArtifactPreparationError(code) from exc
+            except ssl.SSLError as exc:
+                raise ArtifactPreparationError("ARTIFACT_DOWNLOAD_TLS_FAILED") from exc
             except (OSError, ValueError) as exc:
                 raise ArtifactPreparationError("ARTIFACT_DOWNLOAD_FAILED") from exc
             return self.prepare_local(local, spec)
