@@ -47,15 +47,15 @@ class TestOriginGuard(unittest.TestCase):
                          'IWXA_GUARD_V2_GREETING_CONFIRMED_NO_OS_SANDBOX')
 
     def test_unpatched_worker_rejected(self):
-        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER')",
+        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER',flush=True)",
                                             "print('wrong-marker')"))
-        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_ORIGIN_GUARD_UNAVAILABLE'):
+        with self.assertRaisesRegex(ObscuraControllerError,'WORKER_READY_INVALID'):
             self.make().observe('https://example.org')
 
     def test_guard_probe_failure_rejects_navigation(self):
-        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER')",
+        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER',flush=True)",
                                             "sys.exit(77)"))
-        with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_ORIGIN_GUARD_UNAVAILABLE'):
+        with self.assertRaisesRegex(ObscuraControllerError,'WORKER_READY_INVALID'):
             self.make().observe('https://example.org')
 
     def test_bypass_is_not_exposed(self):
