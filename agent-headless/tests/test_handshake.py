@@ -63,7 +63,7 @@ class GreetingTests(unittest.TestCase):
             require_worker_greeting(proc.stdout, deadline=time.monotonic() + 5)
             proc.stdin.write(b"navigate\n")
             proc.stdin.flush()
-            self.assertEqual(proc.stdout.readline(), b"OK:navigate\n")
+            self.assertEqual(proc.stdout.readline().rstrip(b"\r\n"), b"OK:navigate")
         finally:
             if proc.poll() is None:
                 proc.kill()
