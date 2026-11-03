@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import platform as host_platform
 from pathlib import Path
+import sys
 import re
 
 from .contract import ApprovedInstall, InstallError, InstallObservation
@@ -21,6 +23,32 @@ from iwxa_obscura.preparer import (
 PROGRAM_ID = "OBSCURA_WORKER_V1"
 FAMILY = "IWXA_MANAGED_ARTIFACT_V1"
 _CHUNK = 1024 * 1024
+
+
+def _native_platform() -> str:
+    arch = host_platform.machine().lower()
+    if arch in ("x86_64", "amd64"):
+        arch = "x86_64"
+    elif arch in ("aarch64", "arm64"):
+        arch = "arm64"
+    else:
+        raise InstallError("INSTALL_PLATFORM_UNSUPPORTED")
+    if os.name == "nt":
+        family = "windows"
+    elif sys.platform == "linux":
+        family = "linux"
+    elif sys.platform == "darwin":
+        family = "macos"
+    else:
+        raise InstallError("INSTALL_PLATFORM_UNSUPPORTED")
+    return f"{family}-{arch}"
+
+
+def _require_host_platform(spec: ArtifactSpec) -> None:
+    if not isinstance(spec, ArtifactSpec):
+        raise InstallError("INSTALL_SPEC_INVALID")
+    if spec.platform != _native_platform():
+        raise InstallError("INSTALL_PLATFORM_MISMATCH")
 
 
 def _root(value: str) -> Path:
@@ -65,6 +93,7 @@ class ObscuraManagedBackend:
 
     def verify(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
         """Read-only disk verification; no implicit repair or activation."""
+        _require_host_platform(spec)
         directory = self._target(spec, installation_root)
         executable = directory / spec.executable_name
         try:
@@ -104,6 +133,7 @@ class ObscuraManagedBackend:
                 not isinstance(approval.receipt_id, str) or
                 re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", approval.receipt_id) is None):
             raise InstallError("INSTALL_APPROVAL_MISMATCH")
+        _require_host_platform(spec)
         stage_root = _root(staging_root)
         installation_root = _root(approval.installation_root)
         # Prevent nested software/staging roots and partial releases in a

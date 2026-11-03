@@ -21,9 +21,11 @@ sys.path.insert(0, str(ROOT / "agent-headless"))
 
 from iwxa_obscura.preparer import ArtifactSpec, GUARD_PROTOCOL, UPSTREAM_COMMIT
 from iwxa_universal_install import ApprovedInstall, InstallError, ObscuraManagedBackend
+from iwxa_universal_install.obscura import _native_platform
 
 PAYLOAD = b"MZ - synthetic integration fixture, NOT native Obscura"
 RELEASE = "v0.2.6-iwxa.1-test"
+HOST_PLATFORM = _native_platform()
 
 
 class PortableInstallTest(unittest.TestCase):
@@ -35,7 +37,8 @@ class PortableInstallTest(unittest.TestCase):
         self.destination = self.root / "isolated-product-software"
         self.backend = ObscuraManagedBackend()
 
-    def package(self, platform="windows-x86_64", payload=PAYLOAD, release=RELEASE):
+    def package(self, platform=None, payload=PAYLOAD, release=RELEASE):
+        platform = platform or HOST_PLATFORM
         name = "obscura-worker.exe" if platform.startswith("windows") else "obscura-worker"
         extension = ".zip" if platform.startswith("windows") else ".tar.gz"
         archive_name = "obscura-" + platform + extension
@@ -68,13 +71,13 @@ class PortableInstallTest(unittest.TestCase):
             confirmed=allowed,
         )
 
-    def install_fixture(self, platform="windows-x86_64"):
+    def install_fixture(self, platform=None):
         archive, spec = self.package(platform)
         prepared = self.backend.prepare(spec, str(self.staging), archive_path=str(archive))
         installed = self.backend.apply(spec, str(self.staging), self.approval(spec))
         return spec, prepared, installed
 
-    def test_public_contract_and_windows_install(self):
+    def test_public_contract_and_host_install(self):
         for name in ("inspect", "prepare", "apply", "verify", "recover"):
             self.assertTrue(callable(getattr(self.backend, name)))
         self.assertEqual(self.backend.family, "IWXA_MANAGED_ARTIFACT_V1")
@@ -90,8 +93,10 @@ class PortableInstallTest(unittest.TestCase):
         self.assertNotEqual(Path(result.executable), Path(prepared.executable))
         self.assertEqual(self.backend.recover(spec, str(self.destination)), result)
 
-    def test_linux_tarball_install(self):
-        spec, prepared, installed = self.install_fixture("linux-x86_64")
+    def test_unix_tarball_install(self):
+        if HOST_PLATFORM.startswith("windows"):
+            self.skipTest("Windows uses ZIP, not tar.gz")
+        spec, prepared, installed = self.install_fixture(HOST_PLATFORM)
         self.assertEqual(installed.status, "INSTALLED_NOT_CONNECTED")
         self.assertEqual(installed.sha256, prepared.executable_sha256)
         self.assertEqual(Path(installed.executable).read_bytes(), PAYLOAD)
@@ -238,11 +243,20 @@ class PortableInstallTest(unittest.TestCase):
                 self.assertTrue(archive.name.endswith(suffix))
                 prepared = self.backend.prepare(
                     spec, str(self.staging / platform), archive_path=str(archive))
-                installed = self.backend.apply(
-                    spec, str(self.staging / platform),
-                    self.approval(spec, installation_root=self.destination / platform))
-                self.assertEqual(installed.sha256, prepared.executable_sha256)
-                self.assertTrue(self.backend.recover(spec, str(self.destination / platform)).installed)
+                if platform != HOST_PLATFORM:
+                    with self.assertRaisesRegex(InstallError, "INSTALL_PLATFORM_MISMATCH"):
+                        self.backend.apply(
+                            spec, str(self.staging / platform),
+                            self.approval(spec, installation_root=self.destination / platform))
+                    with self.assertRaisesRegex(InstallError, "INSTALL_PLATFORM_MISMATCH"):
+                        self.backend.recover(spec, str(self.destination / platform))
+                    self.assertFalse((self.destination / platform).exists())
+                else:
+                    installed = self.backend.apply(
+                        spec, str(self.staging / platform),
+                        self.approval(spec, installation_root=self.destination / platform))
+                    self.assertEqual(installed.sha256, prepared.executable_sha256)
+                    self.assertTrue(self.backend.recover(spec, str(self.destination / platform)).installed)
 
     def test_reject_mismatched_os_archive_format(self):
         archive, spec = self.package("linux-x86_64")
@@ -272,6 +286,29 @@ class PortableInstallTest(unittest.TestCase):
                          "INSTALL_INCOMPLETE")
         with self.assertRaisesRegex(InstallError, "INSTALL_TARGET_CONFLICT"):
             self.backend.apply(spec, str(self.staging), self.approval(spec))
+
+
+    def test_disk_full_after_write_leaves_no_claim_of_installation(self):
+        # fsync failure emulates exhausted storage after a file was created.
+        from unittest import mock
+        archive, spec = self.package()
+        self.backend.prepare(spec, str(self.staging), archive_path=str(archive))
+        with mock.patch("iwxa_universal_install.obscura.os.fsync",
+                        side_effect=OSError("simulated disk full")):
+            with self.assertRaisesRegex(InstallError, "INSTALL_WRITE_FAILED"):
+                self.backend.apply(spec, str(self.staging), self.approval(spec))
+        self.assertEqual(self.backend.recover(spec, str(self.destination)).status,
+                         "NOT_INSTALLED")
+
+    def test_directory_traversal_in_requested_install_root_is_denied(self):
+        archive, spec = self.package()
+        self.backend.prepare(spec, str(self.staging), archive_path=str(archive))
+        root_with_dotdot = self.destination / "child" / ".."
+        with self.assertRaisesRegex(InstallError, "INSTALL_ROOT_INVALID"):
+            self.backend.apply(
+                spec, str(self.staging),
+                self.approval(spec, installation_root=root_with_dot))
+        self.assertFalse(self.destination.exists())
 
 if __name__ == "__main__":
     unittest.main()
