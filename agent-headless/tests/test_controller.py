@@ -33,6 +33,7 @@ sys.stdout.write('observed:'+a[1])
 """
 
 
+@unittest.skipIf(os.name == "nt", "POSIX shebang fixture; actual native Windows worker is tested separately")
 class ControllerTest(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory()
@@ -161,6 +162,7 @@ class ControllerTest(unittest.TestCase):
                 ca_bundles={"https://unapproved.org":ca})
 
 
+@unittest.skipIf(os.name == "nt", "POSIX shebang fixture; actual native Windows worker is tested separately")
 class BridgeTest(unittest.TestCase):
     def setUp(self):
         ControllerTest.setUp(self)

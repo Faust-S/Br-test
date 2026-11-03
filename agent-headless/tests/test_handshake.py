@@ -51,7 +51,8 @@ class GreetingTests(unittest.TestCase):
     def test_real_process_greets_before_command(self):
         program = (
             "import sys;"
-            "print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER',flush=True);"
+            "sys.stdout.buffer.write(b'IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER\\n');"
+            "sys.stdout.buffer.flush();"
             "line=sys.stdin.readline();"
             "print('OK:'+line.strip(),flush=True)"
         )
