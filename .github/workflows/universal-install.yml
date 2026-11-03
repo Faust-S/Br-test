@@ -32,3 +32,6 @@ jobs:
       - name: Existing public Obscura preparer regressions
         shell: bash
         run: python -m unittest discover -s agent-headless/tests -p 'test_preparer.py' -v
+      - name: Public Obscura controller and worker regressions
+        shell: bash
+        run: PYTHONPATH=agent-headless python -m unittest discover -s agent-headless/tests -v

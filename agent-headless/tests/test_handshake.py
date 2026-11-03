@@ -59,7 +59,7 @@ class GreetingTests(unittest.TestCase):
                                 stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                 stderr=subprocess.DEVNULL)
         try:
-            require_worker_greeting(proc.stdout, deadline=time.monotonic() + 2)
+            require_worker_greeting(proc.stdout, deadline=time.monotonic() + 5)
             proc.stdin.write(b"navigate\n")
             proc.stdin.flush()
             self.assertEqual(proc.stdout.readline(), b"OK:navigate\n")

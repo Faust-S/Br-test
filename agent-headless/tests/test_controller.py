@@ -7,8 +7,8 @@ import tempfile
 import types
 import unittest
 from unittest import mock
-from iwxa_obscura.trust import PinnedCABundle
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from iwxa_obscura.trust import PinnedCABundle
 from iwxa_obscura import ObscuraController, ObscuraControllerError, ObscuraAgentToolPort
 
 FAKE = """#!/usr/bin/env python3

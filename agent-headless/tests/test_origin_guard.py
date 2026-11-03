@@ -48,7 +48,7 @@ class TestOriginGuard(unittest.TestCase):
 
     def test_unpatched_worker_rejected(self):
         self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER',flush=True)",
-                                            "print('wrong-marker')"))
+                                            "print('wrong-marker',flush=True)"))
         with self.assertRaisesRegex(ObscuraControllerError,'WORKER_READY_INVALID'):
             self.make().observe('https://example.org')
 

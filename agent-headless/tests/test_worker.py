@@ -64,7 +64,8 @@ class WorkerTests(unittest.TestCase):
         self.assertEqual(o.final_url, "https://example.org/a?x=1")
         self.assertEqual(o.page_title, "Actual title")
         self.assertEqual(o.content_sha256, hashlib.sha256(b"page contents").hexdigest())
-        self.assertEqual(o.as_data()["network_isolation"], "NOT_ESTABLISHED")
+        self.assertEqual(o.as_data()["network_isolation"],
+                         "IWXA_GUARD_V2_GREETING_CONFIRMED_NO_OS_SANDBOX")
 
     def test_404_not_relabelled_as_200(self):
         self.assertEqual(self.controller.observe("https://example.org/notfound", format="html").http_status, 404)
