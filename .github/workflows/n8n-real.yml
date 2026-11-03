@@ -1,0 +1,47 @@
+name: IWXA Agent Platforms - n8n real workflow
+on:
+  push:
+    branches:
+      - research/2026-11-03-agent-platforms-n8n
+    paths:
+      - .github/workflows/n8n-real.yml
+      - research/agent-platforms/n8n/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-research-n8n-real-workflow
+  cancel-in-progress: true
+jobs:
+  real-n8n:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 16
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check public test fixture
+        run: python -m unittest discover -s research/agent-platforms/n8n -p 'test_*.py' -v
+      - name: Install exact self-hosted n8n
+        run: npm install --no-audit --no-fund --prefix "$RUNNER_TEMP/iwxa-n8n" "n8n@2.46.4"
+      - name: Execute two real n8n workflow scenarios
+        run: |
+          echo "$RUNNER_TEMP/iwxa-n8n/node_modules/.bin" >> "$GITHUB_PATH"
+          export PATH="$RUNNER_TEMP/iwxa-n8n/node_modules/.bin:$PATH"
+          python research/agent-platforms/n8n/probe.py
+      - name: Save n8n evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-n8n-real-workflow
+          path: artifacts/agent-platforms/n8n-real-workflow.json
+          if-no-files-found: warn
+          retention-days: 5
