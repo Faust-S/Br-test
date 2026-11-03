@@ -86,7 +86,12 @@ def _write_limited(source, target: Path):
 
 def _extract(archive: Path, destination: Path, spec: ManagedArtifactSpec) -> None:
     try:
-        if spec.archive_format == "zip":
+        if spec.archive_format == "binary":
+            # Official standalone executables need no repackaging.
+            # Both binary and downloaded artifact digests are still pinned.
+            with archive.open("rb") as source:
+                _write_limited(source, destination)
+        elif spec.archive_format == "zip":
             with zipfile.ZipFile(archive) as package:
                 entries = package.infolist()
                 if len(entries) != 1:

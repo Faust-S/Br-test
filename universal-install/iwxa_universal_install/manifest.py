@@ -50,8 +50,12 @@ class ManagedArtifactSpec:
                    for d in (self.archive_sha256, self.executable_sha256)):
             raise ValueError("MANAGED_SPEC_DIGEST_INVALID")
         expected = "zip" if self.platform.startswith("windows") else "tar.gz"
-        if self.archive_format != expected or not self.archive_name.endswith("." + expected):
+        if self.archive_format not in (expected, "binary"):
             raise ValueError("MANAGED_SPEC_FORMAT_INVALID")
+        if self.archive_format == expected and not self.archive_name.endswith("." + expected):
+            raise ValueError("MANAGED_SPEC_FORMAT_INVALID")
+        if self.archive_format == "binary" and self.archive_sha256 != self.executable_sha256:
+            raise ValueError("MANAGED_SPEC_BINARY_DIGEST_MISMATCH")
         if self.platform.startswith("windows") and not self.executable_name.endswith(".exe"):
             raise ValueError("MANAGED_SPEC_WINDOWS_EXECUTABLE_INVALID")
         u = self.download_url

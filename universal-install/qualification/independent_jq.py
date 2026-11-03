@@ -46,45 +46,22 @@ def execute() -> dict:
     asset, expected_sha = item["asset"], item["sha256"]
     with tempfile.TemporaryDirectory(prefix="iwxa-generic-jq-") as temp:
         root=Path(temp).resolve()
-        raw=root/asset
         url=f"https://github.com/jqlang/jq/releases/download/{catalog['upstream_tag']}/{asset}"
-        with urlopen(Request(url,headers={"User-Agent":"IWXA-generic-install-qualification"}), timeout=45) as response:
-            with raw.open("xb") as fd:
-                total=0
-                while block:=response.read(1024*1024):
-                    total+=len(block)
-                    if total>20*1024*1024:
-                        raise RuntimeError("INDEPENDENT_BINARY_OVERSIZE")
-                    fd.write(block)
-        if hash_file(raw)!=expected_sha:
-            raise RuntimeError("INDEPENDENT_OFFICIAL_DIGEST_MISMATCH")
         filename=item["executable"]
-        format_name="zip" if os.name=="nt" else "tar.gz"
-        archive_name=f"jq-{target}.{format_name}"
-        archive=root/archive_name
-        if format_name=="zip":
-            with zipfile.ZipFile(archive,"x",compression=zipfile.ZIP_DEFLATED) as z:
-                z.write(raw,arcname=filename)
-        else:
-            with tarfile.open(archive,"w:gz") as t:
-                info=tarfile.TarInfo(filename)
-                info.size=raw.stat().st_size
-                info.mode=0o755
-                with raw.open("rb") as fd:
-                    t.addfile(info,fd)
-        # Nothing below this line contains jq-specific installer code.
+        # A pinned official standalone binary is now an ordinary manifest
+        # entry: the installer downloads it over HTTPS without jq-specific
+        # repackaging, a jq backend, or separate install code.
         spec=ManagedArtifactSpec(
-            program_id=catalog["program_id"],slug=catalog["slug"],release_id="jq-managed-qualification-1.8.1",platform=target,
-            executable_name=filename,archive_name=archive_name,
-            archive_format=format_name,archive_sha256=hash_file(archive),
-            executable_sha256=expected_sha,
-            download_url=("https://github.com/Faust-S/Br-test/releases/download/"
-                          "jq-managed-qualification-1.8.1/"+archive_name),
+            program_id=catalog["program_id"],slug=catalog["slug"],
+            release_id=catalog["upstream_tag"],platform=target,
+            executable_name=filename,archive_name=asset,
+            archive_format="binary",archive_sha256=expected_sha,
+            executable_sha256=expected_sha,download_url=url,
         )
         backend=ManagedArtifactBackend()
         staging=root/"staging"
         install_root=root/"installed"
-        staged=backend.prepare(spec,str(staging),archive_path=str(archive))
+        staged=backend.prepare(spec,str(staging))
         if staged.status!="STAGED_NOT_ACTIVATED":
             raise RuntimeError("INDEPENDENT_STAGING_FAILED")
         approval=ApprovedInstall(spec.program_id,spec.fingerprint,
@@ -113,6 +90,7 @@ def execute() -> dict:
             "status":"PASS","platform":target,"program":"jq","version":catalog["version"],
             "official_source_url":url,"official_binary_sha256":expected_sha,
             "managed_archive_sha256":spec.archive_sha256,
+            "direct_official_https_download":True,
             "generic_backend_class":"ManagedArtifactBackend",
             "adapter_added":False,
             "executed":True,"removed":True,"private_agent_involved":False,

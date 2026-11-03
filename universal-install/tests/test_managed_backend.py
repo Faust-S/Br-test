@@ -92,6 +92,41 @@ class GenericProgramTest(unittest.TestCase):
         self.assertEqual(self.backend.recover(second,str(self.software)),other)
         self.assertEqual(self.backend.remove(jq,removal).status,"NOT_INSTALLED")
 
+    def test_official_standalone_binary_is_supported_by_manifest_only(self):
+        # No archive transformation. A pinned downloadable binary can be
+        # staged and installed directly on any supported host architecture.
+        target=_native_platform()
+        data=b"actual-binary-format-fixture-no-custom-adapter"
+        file_name="jq-standalone.exe" if os.name=="nt" else "jq-standalone"
+        source=self.root/file_name
+        source.write_bytes(data)
+        sha=hashlib.sha256(data).hexdigest()
+        spec=ManagedArtifactSpec(
+            program_id="JQ_CLI_V1",slug="jq-tool",release_id="jq-1.8.1",
+            platform=target,executable_name="jq.exe" if os.name=="nt" else "jq",
+            archive_name=file_name,archive_format="binary",
+            archive_sha256=sha,executable_sha256=sha,
+            download_url=("https://github.com/jqlang/jq/releases/download/"
+                          "jq-1.8.1/"+file_name),
+        )
+        prepared=self.backend.prepare(spec,str(self.staging),archive_path=str(source))
+        self.assertEqual(Path(prepared.executable).read_bytes(),data)
+        approval=ApprovedInstall(spec.program_id,spec.fingerprint,
+                                 "PINS-direct-binary",str(self.software),True)
+        installed=self.backend.apply(spec,str(self.staging),approval)
+        self.assertEqual(Path(installed.executable).read_bytes(),data)
+        self.assertTrue(self.backend.verify(spec,str(self.software)).installed)
+        removal=ApprovedRemoval(spec.program_id,spec.fingerprint,
+                                "PINS-direct-remove",str(self.software),True)
+        self.assertEqual(self.backend.remove(spec,removal).status,"REMOVED")
+
+    def test_direct_binary_must_pin_identical_archive_and_executable_hashes(self):
+        _,spec=self.package("JQ_CLI_V1")
+        bad={**spec.as_dict(),"archive_format":"binary",
+             "archive_sha256":"0"*64}
+        with self.assertRaisesRegex(ValueError,"MANAGED_SPEC_BINARY_DIGEST_MISMATCH"):
+            ManagedArtifactSpec.from_mapping(bad)
+
     def test_second_program_requires_no_backend_subclass(self):
         archive,spec=self.package("JQ_CLI_V1")
         self.assertEqual(type(self.backend),ManagedArtifactBackend)
