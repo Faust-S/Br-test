@@ -77,7 +77,7 @@ def execute() -> dict:
                     t.addfile(info,fd)
         # Nothing below this line contains jq-specific installer code.
         spec=ManagedArtifactSpec(
-            program_id="JQ_CLI_V1",slug="jq-cli",release_id="1.8.1",platform=target,
+            program_id="JQ_CLI_V1",slug="jq-cli",release_id="jq-managed-qualification-1.8.1",platform=target,
             executable_name=filename,archive_name=archive_name,
             archive_format=format_name,archive_sha256=hash_file(archive),
             executable_sha256=expected_sha,
