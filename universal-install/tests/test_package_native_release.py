@@ -80,6 +80,22 @@ class ReleasePackageTest(unittest.TestCase):
         spec = record["platforms"]["windows-x86_64"]
         self.assertTrue((self.output / spec["archive_name"]).is_file())
 
+    def test_windows_crlf_patch_has_separate_validated_digest(self):
+        self.fixture("windows-2022","windows-x86_64","obscura-worker.exe")
+        evidence = (self.archives / "universal-native-obscura-windows-2022" /
+                    "artifacts" / "universal-install" / "native-Windows.json")
+        data = json.loads(evidence.read_text())
+        data["patch_sha256"] = "f" * 64
+        evidence.write_text(json.dumps(data))
+        expected = {"windows-2022":("windows-x86_64","Windows","obscura-worker.exe")}
+        with mock.patch.dict(packaging.TARGETS,expected,clear=True):
+            with self.assertRaisesRegex(ValueError,"CI_EVIDENCE_INVALID"):
+                packaging.package(self.archives,self.output,"ci-test-one",123,SOURCE_SHA,PATCH_SHA)
+            info = packaging.package(self.archives,self.output,"ci-test-one",123,SOURCE_SHA,PATCH_SHA,
+                                     windows_patch_sha="f"*64)
+        self.assertEqual(info["platforms"]["windows-x86_64"]["origin_guard_patch_sha256"],
+                         "f"*64)
+
     def test_missing_or_forged_evidence_blocks_package(self):
         self.fixture("ubuntu-24.04","linux-x86_64","obscura-worker")
         path = self.archives / "universal-native-obscura-ubuntu-24.04" / "artifacts" / "universal-install" / "native-Linux.json"

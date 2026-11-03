@@ -86,7 +86,7 @@ def create_archive(source: Path, output: Path, member: str) -> None:
 
 
 def package(artifacts: Path, dest: Path, tag: str, source_run: int,
-            source_sha: str, patch_sha: str) -> dict:
+            source_sha: str, patch_sha: str, windows_patch_sha: str | None = None) -> dict:
     if dest.exists() and any(dest.iterdir()):
         raise ValueError("OUTPUT_NOT_EMPTY")
     dest.mkdir(parents=True, exist_ok=True)
@@ -111,7 +111,12 @@ def package(artifacts: Path, dest: Path, tag: str, source_run: int,
         binary_sha = report.get("build_binary_sha256")
         if not isinstance(binary_sha, str) or len(binary_sha) != 64:
             raise ValueError(f"NATIVE_DIGEST_MISSING:{runner}")
-        validate_report(report, platform, binary_sha, patch_sha)
+        # On Windows checkout, Git may convert the same text patch to CRLF.
+        # Accept ONLY that deterministic transformation of the pinned LF
+        # original; never accept a patch hash supplied by untrusted evidence.
+        platform_patch_sha = (windows_patch_sha if platform.startswith("windows")
+                              and windows_patch_sha is not None else patch_sha)
+        validate_report(report, platform, binary_sha, platform_patch_sha)
         binaries = [p for p in folder.rglob(name) if p.is_file() and digest(p) == binary_sha]
         if len(binaries) != 1 or binaries[0].stat().st_size <= 1024 * 1024:
             raise ValueError(f"NATIVE_BINARY_MISSING_OR_INVALID:{runner}")
@@ -127,7 +132,7 @@ def package(artifacts: Path, dest: Path, tag: str, source_run: int,
             download_url=("https://github.com/Faust-S/Br-test/releases/download/"
                           + tag + "/" + archive_name),
             source_commit=UPSTREAM_COMMIT,
-            origin_guard_patch_sha256=patch_sha,
+            origin_guard_patch_sha256=platform_patch_sha,
             guard_protocol=GUARD_PROTOCOL,
         )
         info["platforms"][platform] = spec.as_dict()
@@ -145,9 +150,14 @@ def main() -> int:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--patch", type=Path, required=True)
     args = parser.parse_args()
-    sha = digest(args.patch)
+    patch_bytes = args.patch.read_bytes()
+    if b"\\r\\n" in patch_bytes:
+        raise ValueError("PACKAGING_PATCH_MUST_USE_CANONICAL_LF")
+    sha = hashlib.sha256(patch_bytes).hexdigest()
+    windows_patch_sha = hashlib.sha256(
+        patch_bytes.replace(b"\\n", b"\\r\\n")).hexdigest()
     info = package(args.artifacts, args.output, args.tag, args.source_run,
-                   args.source_sha, sha)
+                   args.source_sha, sha, windows_patch_sha)
     print(json.dumps({
         "status": "PACKAGED_TEST_CANDIDATE",
         "release_id": info["release_id"],
