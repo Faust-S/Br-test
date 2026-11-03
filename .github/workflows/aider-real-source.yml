@@ -1,0 +1,55 @@
+name: IWXA research Aider real Br-test module repair
+on:
+  push:
+    branches:
+      - research/2026-11-03-agent-platforms-aider-real-source
+    paths:
+      - .github/workflows/aider-real-source.yml
+      - research/agent-platforms/aider-real-source/**
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-aider-existing-public-source
+  cancel-in-progress: true
+jobs:
+  actual-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Aider 0.86.0 and Pillow
+        run: python -m pip install --disable-pip-version-check "aider-chat==0.86.0" "Pillow>=10,<13"
+      - name: Pull pinned Ollama release
+        run: docker pull ollama/ollama:0.40.14
+      - name: Start CPU local model
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/iwxa-ollama-real-source"
+          docker run -d --rm --network host --name iwxa-aider-source-model \
+            -v "$RUNNER_TEMP/iwxa-ollama-real-source:/root/.ollama" \
+            -e OLLAMA_HOST=127.0.0.1:11434 \
+            -e OLLAMA_CONTEXT_LENGTH=8192 ollama/ollama:0.40.14 serve
+          for attempt in $(seq 1 50); do
+            if curl -fsS --max-time 2 http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 1
+          done
+          curl -fsS --max-time 5 http://127.0.0.1:11434/api/tags >/dev/null
+          docker exec iwxa-aider-source-model ollama pull qwen2.5-coder:3b
+      - name: Repair actual public benchmark module with Aider
+        run: python research/agent-platforms/aider-real-source/probe.py
+      - name: Preserve outcome and patch
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-aider-real-source-qualification
+          path: artifacts/agent-platforms/aider-real-source.json
+          if-no-files-found: warn
+          retention-days: 5
+      - name: Stop temporary model
+        if: always()
+        run: docker rm -f iwxa-aider-source-model 2>/dev/null || true
