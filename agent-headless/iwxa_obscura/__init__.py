@@ -2,7 +2,9 @@
 from .controller import ObscuraController, ObscuraControllerError, Observation, approved_url
 from .agent_port import ObscuraAgentToolPort
 
-__all__ = ["ObscuraController", "ObscuraControllerError", "Observation", "approved_url", "ObscuraAgentToolPort", "PinnedCABundle", "CertificateTrustError", "ObscuraWorkerController", "WorkerObservation"]
+__all__ = ["ObscuraController", "ObscuraControllerError", "Observation", "approved_url", "ObscuraAgentToolPort", "PinnedCABundle", "CertificateTrustError", "ObscuraWorkerController", "WorkerObservation", "ArtifactSpec", "PreparedArtifact", "ObscuraArtifactPreparer", "ArtifactPreparationError"]
 
 from .trust import PinnedCABundle, CertificateTrustError
 from .worker import ObscuraWorkerController, WorkerObservation
+
+from .preparer import ArtifactSpec, PreparedArtifact, ObscuraArtifactPreparer, ArtifactPreparationError
