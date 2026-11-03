@@ -15,7 +15,7 @@ concurrency:
 jobs:
   real-n8n:
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 20
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
@@ -39,11 +39,19 @@ jobs:
           chmod +x research/agent-platforms/n8n/n8n
           export PATH="$GITHUB_WORKSPACE/research/agent-platforms/n8n:$PATH"
           python research/agent-platforms/n8n/probe.py
+      - name: Real published webhook / response / repeated idempotency key
+        env:
+          TMPDIR: ${{ runner.temp }}
+        run: |
+          export PATH="$GITHUB_WORKSPACE/research/agent-platforms/n8n:$PATH"
+          python research/agent-platforms/n8n/webhook_probe.py
       - name: Save n8n evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: iwxa-n8n-real-workflow
-          path: artifacts/agent-platforms/n8n-real-workflow.json
+          path: |
+            artifacts/agent-platforms/n8n-real-workflow.json
+            artifacts/agent-platforms/n8n-webhook-real.json
           if-no-files-found: warn
           retention-days: 5

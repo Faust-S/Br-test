@@ -18,3 +18,18 @@ python research/agent-platforms/n8n/probe.py
 
 ## Runner installation decision
 Two independent npm installation attempts failed with EBADPLATFORM for @napi-rs/canvas-linux-arm64-musl@1.0.11 on Ubuntu x64, even with --omit=optional/--legacy-peer-deps. This is a dependency/packaging blocker of that npm method, not evidence of workflow correctness. To avoid altering n8n, the public test uses the upstream published Docker image 2.46.4 and isolated temporary profile. Host-networking is limited to this disposable Linux CI trial to communicate with the loopback HTTP fixture. Not an IWXA deployment recipe.
+
+## Server webhook trial (separate from CLI engine)
+
+`webhook_probe.py` imports two Webhook-triggered flows, uses the official CLI
+`publish:workflow --id`, starts a real n8n HTTP server in a disposable container
+(with localhost-only listen address), sends POST requests using the **field and
+header shape of IWXA's documented n8n workflow adapter**, and checks effects
+through an independently running local HTTP receiver.
+
+It deliberately sends the same idempotency-key twice to measure actual replay
+behavior. This is a risk observation, not a new deduplication/security system.
+A 503 downstream error must not appear as a successful 2xx webhook response.
+The CLI test above remains separately qualified. The public fixture is an
+interface-shape approximation; **the actual private IWXA adapter is not copied
+or executed here**. Results are stored as a separate JSON artifact.
