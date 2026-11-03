@@ -56,3 +56,33 @@ HTTP status и final URL не устанавливаются без доказа
 Объект `WorkerObservation` совместим с существующим `ObscuraAgentToolPort.invoke`, потому что предоставляет `observe(url)` и `as_data()`. Новый Core, отдельные права или схема хранения не вводятся. Результат содержит `http_status` и `final_url` **как наблюдения самого worker**, а не независимые криптографические свидетельства. Текст страницы по-прежнему недоверенный и не становится U1 Evidence автоматически.
 
 Выполнены 14 автономных Linux/Unix-проверок JSONL на фиктивном исполняемом файле. Это не реальный Obscura и не тест независимых сайтов. Тестовый исполняемый файл использует POSIX shebang и пропускается на Windows. Реальную проверку Windows/Linux, сетевую изоляцию и достоверность DOM необходимо выполнить отдельно.
+
+
+## Native origin gate для Obscura Worker (03.11.2026, кандидат)
+
+Добавлен отдельный исходный патч `agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch`. Он рассчитан на исходники upstream `h4ckf0r0day/obscura@v0.2.6` и **не изменяет** Tauri/React или самостоятельный графический браузер. На стороне `obscura-net` проверка `validate_url` отклоняет запросы не к исходному явно разрешённому HTTPS-origin, в том числе переходы и подресурсы, которые используют этот сетевой клиент. На стороне `obscura-worker` добавлен запуск без V8 для проверки `--iwxa-attest-origin-guard` и запрет запуска без переменной `IWXA_OBSCURA_ALLOWED_ORIGIN`.
+
+Контроллер Python `ObscuraWorkerController` по умолчанию требует именно такой pinned no-render бинарник и ожидаемый ответ build-probe *до* отправки первой навигации. Не прошедший проверку worker отвергается с `ENGINE_ORIGIN_GUARD_UNAVAILABLE`. Ключ `unsafe_allow_unpatched_worker=True` предназначен **только для изолированных тестовых подмен**, не для продукта: в результатах указывается `network_isolation=NOT_ESTABLISHED`.
+
+### Воспроизводимая сборка кандидата
+
+На машине с Rust toolchain и доступом к исходникам:
+
+```sh
+git clone https://github.com/h4ckf0r0day/obscura.git
+cd obscura
+git checkout v0.2.6
+git apply --check ../Br-test/agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch
+git apply ../Br-test/agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch
+cargo test -p obscura-net iwxa_agent_origin_guard_tests
+cargo build --release -p obscura-cli --bin obscura-worker
+./target/release/obscura-worker --iwxa-attest-origin-guard
+```
+
+Схематический путь `../Br-test` необходимо заменить на фактический checkout. При сборке **не включать** feature `render`. Для Windows используются соответствующие `.exe` и PowerShell-команды проверки; это не равно уже проведённой Windows-приёмке.
+
+**Ограничения:** Rust-сборка, тесты сетевого клиента, запуск реального Obscura и браузерное поведение на независимых сайтах не подтверждены в текущем окружении. Build-probe — признак наличия нашей версии исходников, **не удалённая криптографическая аттестация** и не ОС-песочница. Возможны другие сетевые пути внутри зависимостей и обходы, пока нет полного аудита исходящих соединений, DNS и файловых прав. Из-за ограничения origin сайты с внешними JS/CSS/CDN могут загрузиться неполностью — это ожидаемая функциональная цена строгого режима.
+
+Системные сертификаты не меняются; опциональные CA из предыдущей итерации продолжают действовать на весь дочерний процесс, поэтому их нельзя считать строго привязанными к домену лишь за счёт этого патча.
+
+Проверки контроллера на имитации worker: `python3 -m unittest discover -s agent-headless/tests -p 'test_origin_guard.py' -v`. Отдельные тесты `test_worker.py` включают явный небезопасный режим *только для заглушки*. После реального Rust-build нужны независимые интеграционные тесты соединений и приёмка в Agent.
