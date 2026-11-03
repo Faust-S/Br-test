@@ -146,6 +146,24 @@ class PortableInstallTest(unittest.TestCase):
             self.backend.apply(spec, str(self.staging), self.approval(spec))
         self.assertEqual(Path(installed.executable).read_bytes(), b"tampered")
 
+    def test_posix_execute_permission_is_part_of_installed_readback(self):
+        if os.name == "nt":
+            self.skipTest("POSIX permission bits do not control Windows executable launch")
+        spec, _, installed = self.install_fixture()
+        target = Path(installed.executable)
+        self.assertEqual(self.backend.verify(spec, str(self.destination)), installed)
+        target.chmod(0o600)
+        # The content hash is still correct, but the binary cannot launch.
+        self.assertEqual(hashlib.sha256(target.read_bytes()).hexdigest(), spec.executable_sha256)
+        observed = ObscuraManagedBackend().recover(spec, str(self.destination))
+        self.assertEqual(observed.status, "INSTALL_NOT_EXECUTABLE")
+        self.assertFalse(observed.installed)
+        with self.assertRaisesRegex(InstallError, "INSTALL_TARGET_CONFLICT"):
+            self.backend.apply(spec, str(self.staging), self.approval(spec))
+        self.assertEqual(target.read_bytes(), PAYLOAD)
+        target.chmod(0o500)
+        self.assertEqual(ObscuraManagedBackend().recover(spec, str(self.destination)), installed)
+
     def test_modified_stage_rejected_before_install(self):
         archive, spec = self.package()
         prepared = self.backend.prepare(spec, str(self.staging), archive_path=str(archive))

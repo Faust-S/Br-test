@@ -110,6 +110,16 @@ class ObscuraManagedBackend:
             return InstallObservation("INSTALL_MISMATCH", PROGRAM_ID)
         if digest != spec.executable_sha256:
             return InstallObservation("INSTALL_MISMATCH", PROGRAM_ID)
+        # A matching checksum alone is not enough on POSIX: users can remove
+        # execute permission after installation. Readback must not claim that
+        # an unlaunchable binary is an installed, usable Worker.
+        if os.name != "nt":
+            try:
+                mode = executable.stat().st_mode
+                if not (mode & 0o111) or not os.access(executable, os.X_OK):
+                    return InstallObservation("INSTALL_NOT_EXECUTABLE", PROGRAM_ID)
+            except OSError:
+                return InstallObservation("INSTALL_NOT_EXECUTABLE", PROGRAM_ID)
         return InstallObservation(
             "INSTALLED_NOT_CONNECTED", PROGRAM_ID, executable=str(executable),
             sha256=digest, installed=True,
