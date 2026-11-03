@@ -1,0 +1,44 @@
+name: IWXA research - real n8n webhook persists after server restart
+on:
+  push:
+    branches:
+      - research/2026-11-03-agent-platforms-n8n-restart
+    paths:
+      - .github/workflows/n8n-restart-real.yml
+      - research/agent-platforms/n8n/restart_probe.py
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-public-n8n-restart
+  cancel-in-progress: true
+jobs:
+  n8n-restart:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    env:
+      PYTHONUTF8: '1'
+      N8N_DIAGNOSTICS_ENABLED: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate public test fixture
+        run: python -m unittest discover -s research/agent-platforms/n8n -p 'test_*.py' -v
+      - name: Fetch pinned official self-hosted engine
+        run: docker pull docker.n8n.io/n8nio/n8n:2.46.4
+      - name: Run one import, two server processes, independent effect readback
+        run: |
+          set -euo pipefail
+          chmod +x research/agent-platforms/n8n/n8n
+          export PATH="$GITHUB_WORKSPACE/research/agent-platforms/n8n:$PATH"
+          python research/agent-platforms/n8n/restart_probe.py
+      - name: Preserve real restart evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-public-n8n-restart
+          path: artifacts/agent-platforms/n8n-restart-real.json
+          if-no-files-found: warn
+          retention-days: 5
