@@ -27,7 +27,14 @@ UPSTREAM_COMMIT = "8534b401898ed17b62f69bdc3d5eb186bffb0d60"
 GUARD_PROTOCOL = "IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER"
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
-PLATFORMS = {"windows-x86_64": "obscura-worker.exe", "linux-x86_64": "obscura-worker"}
+PLATFORMS = {
+    "windows-x86_64": "obscura-worker.exe",
+    "windows-arm64": "obscura-worker.exe",
+    "linux-x86_64": "obscura-worker",
+    "linux-arm64": "obscura-worker",
+    "macos-x86_64": "obscura-worker",
+    "macos-arm64": "obscura-worker",
+}
 ARCHIVE_LIMIT = 150 * 1024 * 1024
 BINARY_LIMIT = 350 * 1024 * 1024
 _CHUNK = 1024 * 1024
@@ -120,7 +127,7 @@ class ArtifactSpec:
             raise ValueError("unsupported archive format")
         if self.platform.startswith("windows") and self.archive_format != "zip":
             raise ValueError("Windows package must be ZIP")
-        if self.platform.startswith("linux") and self.archive_format != "tar.gz":
+        if self.platform.startswith(("linux", "macos")) and self.archive_format != "tar.gz":
             raise ValueError("Linux package must be tar.gz")
         if not isinstance(self.archive_name, str) or _TOKEN.fullmatch(self.archive_name) is None:
             raise ValueError("invalid package filename")

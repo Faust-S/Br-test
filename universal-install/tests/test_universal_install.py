@@ -30,7 +30,7 @@ class PortableInstallTest(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
+        self.root = Path(self.tmp.name).resolve()
         self.staging = self.root / "staging"
         self.destination = self.root / "isolated-product-software"
         self.backend = ObscuraManagedBackend()
@@ -178,6 +178,100 @@ class PortableInstallTest(unittest.TestCase):
                                self.approval(spec, installation_root="relative/root"))
         self.assertFalse(self.destination.exists())
 
+
+
+    def test_nested_staging_and_installation_roots_are_rejected(self):
+        for nested_stage in (True, False):
+            with self.subTest(nested_stage=nested_stage):
+                root = self.root / ("nested-stage" if nested_stage else "nested-install")
+                destination = root / "product"
+                stage = destination / "staging" if nested_stage else root / "staging"
+                if not nested_stage:
+                    destination = stage / "product"
+                archive, spec = self.package()
+                self.backend.prepare(spec, str(stage), archive_path=str(archive))
+                with self.assertRaisesRegex(InstallError, "INSTALL_STAGING_EQUALS_TARGET"):
+                    self.backend.apply(spec, str(stage),
+                                       self.approval(spec, installation_root=destination))
+                self.assertFalse(
+                    (destination / "obscura-worker" / spec.release_id / spec.platform).exists()
+                )
+
+    def test_missing_prepared_payload_does_not_write_to_product(self):
+        _, spec = self.package()
+        with self.assertRaisesRegex(InstallError, "INSTALL_PREPARED_UNAVAILABLE"):
+            self.backend.apply(spec, str(self.staging), self.approval(spec))
+        self.assertFalse(self.destination.exists())
+
+    def test_unwritable_destination_is_stable_install_error(self):
+        from unittest import mock
+        archive, spec = self.package()
+        self.backend.prepare(spec, str(self.staging), archive_path=str(archive))
+        with mock.patch("iwxa_universal_install.obscura.Path.mkdir",
+                        side_effect=PermissionError("fixture denied")):
+            with self.assertRaisesRegex(InstallError, "INSTALL_DESTINATION_UNAVAILABLE"):
+                self.backend.apply(spec, str(self.staging), self.approval(spec))
+        self.assertEqual(self.backend.recover(spec, str(self.destination)).status,
+                         "NOT_INSTALLED")
+
+    def test_symlink_in_installed_path_is_rejected(self):
+        archive, spec = self.package()
+        self.backend.prepare(spec, str(self.staging), archive_path=str(archive))
+        destination = self.destination / "obscura-worker"
+        destination.parent.mkdir(parents=True)
+        try:
+            destination.symlink_to(self.root, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("directory symlink unavailable on this runner")
+        with self.assertRaisesRegex(InstallError, "ARTIFACT_PATH_REPARSE_DENIED"):
+            self.backend.recover(spec, str(self.destination))
+        with self.assertRaisesRegex(InstallError, "ARTIFACT_PATH_REPARSE_DENIED"):
+            self.backend.apply(spec, str(self.staging), self.approval(spec))
+
+    def test_all_six_platform_artifact_shapes(self):
+        cases = (("windows-x86_64", ".zip"), ("windows-arm64", ".zip"),
+                 ("linux-x86_64", ".tar.gz"), ("linux-arm64", ".tar.gz"),
+                 ("macos-x86_64", ".tar.gz"), ("macos-arm64", ".tar.gz"))
+        for platform, suffix in cases:
+            with self.subTest(platform=platform):
+                archive, spec = self.package(platform)
+                self.assertTrue(archive.name.endswith(suffix))
+                prepared = self.backend.prepare(
+                    spec, str(self.staging / platform), archive_path=str(archive))
+                installed = self.backend.apply(
+                    spec, str(self.staging / platform),
+                    self.approval(spec, installation_root=self.destination / platform))
+                self.assertEqual(installed.sha256, prepared.executable_sha256)
+                self.assertTrue(self.backend.recover(spec, str(self.destination / platform)).installed)
+
+    def test_reject_mismatched_os_archive_format(self):
+        archive, spec = self.package("linux-x86_64")
+        for candidate in ("linux-x86_64", "linux-arm64", "macos-x86_64", "macos-arm64"):
+            mapping = {**spec.as_dict(), "platform": candidate, "archive_format": "zip"}
+            with self.subTest(platform=candidate), self.assertRaises(ValueError):
+                ArtifactSpec(**mapping)
+        for candidate in ("windows-x86_64", "windows-arm64"):
+            mapping = {**spec.as_dict(), "platform": candidate, "archive_format": "tar.gz"}
+            with self.subTest(platform=candidate), self.assertRaises(ValueError):
+                ArtifactSpec(**mapping)
+
+    def test_unicode_and_spaces_in_product_folder(self):
+        archive, spec = self.package()
+        self.backend.prepare(spec, str(self.staging), archive_path=str(archive))
+        destination = self.root / "User Programs" / "Тест установки IWXA"
+        installed = self.backend.apply(
+            spec, str(self.staging), self.approval(spec, installation_root=destination))
+        self.assertTrue(installed.installed)
+        self.assertEqual(self.backend.recover(spec, str(destination)), installed)
+
+    def test_recheck_after_deleted_binary_does_not_claim_installed(self):
+        spec, _, installed = self.install_fixture()
+        os.chmod(installed.executable, 0o600)
+        Path(installed.executable).unlink()
+        self.assertEqual(self.backend.recover(spec, str(self.destination)).status,
+                         "INSTALL_INCOMPLETE")
+        with self.assertRaisesRegex(InstallError, "INSTALL_TARGET_CONFLICT"):
+            self.backend.apply(spec, str(self.staging), self.approval(spec))
 
 if __name__ == "__main__":
     unittest.main()

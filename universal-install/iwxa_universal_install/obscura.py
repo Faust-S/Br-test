@@ -27,7 +27,7 @@ def _root(value: str) -> Path:
     if not isinstance(value, str) or not value or len(value) > 4096:
         raise InstallError("INSTALL_ROOT_INVALID")
     root = Path(value)
-    if not root.is_absolute() or root == Path(root.anchor):
+    if not root.is_absolute() or root == Path(root.anchor) or ".." in root.parts:
         raise InstallError("INSTALL_ROOT_INVALID")
     try:
         _check_parent_chain(root)
@@ -67,7 +67,10 @@ class ObscuraManagedBackend:
         """Read-only disk verification; no implicit repair or activation."""
         directory = self._target(spec, installation_root)
         executable = directory / spec.executable_name
-        _check_parent_chain(directory)
+        try:
+            _check_parent_chain(directory)
+        except ArtifactPreparationError as exc:
+            raise InstallError(exc.code) from None
         if not directory.exists():
             return InstallObservation("NOT_INSTALLED", PROGRAM_ID)
         if not directory.is_dir() or not executable.is_file():
@@ -103,8 +106,15 @@ class ObscuraManagedBackend:
             raise InstallError("INSTALL_APPROVAL_MISMATCH")
         stage_root = _root(staging_root)
         installation_root = _root(approval.installation_root)
-        if stage_root == installation_root:
+        # Prevent nested software/staging roots and partial releases in a
+        # user's product directory. The owning application selects both.
+        stage_path = stage_root.resolve()
+        install_path = installation_root.resolve()
+        if (stage_path == install_path or stage_path in install_path.parents
+                or install_path in stage_path.parents):
             raise InstallError("INSTALL_STAGING_EQUALS_TARGET")
+        if not stage_root.is_dir():
+            raise InstallError("INSTALL_PREPARED_UNAVAILABLE")
         target = self._target(spec, str(installation_root))
         if target.exists() or target.is_symlink():
             existing = self.verify(spec, approval.installation_root)
@@ -126,8 +136,10 @@ class ObscuraManagedBackend:
             raise
         except FileExistsError:
             raise InstallError("INSTALL_TARGET_CONFLICT") from None
-        except (ArtifactPreparationError, OSError) as exc:
-            raise InstallError(getattr(exc, "code", "INSTALL_PREPARED_UNAVAILABLE")) from None
+        except ArtifactPreparationError as exc:
+            raise InstallError(exc.code) from None
+        except OSError:
+            raise InstallError("INSTALL_DESTINATION_UNAVAILABLE") from None
         destination = target / spec.executable_name
         try:
             sha = hashlib.sha256()

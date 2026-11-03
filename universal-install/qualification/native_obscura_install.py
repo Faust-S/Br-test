@@ -6,10 +6,12 @@ does not connect a provider, and never claims this artifact is a released build.
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import hashlib
 import io
 import json
 import os
+import platform as host_platform
 from pathlib import Path
 import subprocess
 import sys
@@ -23,7 +25,7 @@ sys.path.insert(0, str(HERE / "universal-install"))
 sys.path.insert(0, str(HERE / "agent-headless"))
 from iwxa_obscura.handshake import GUARD_GREETING, require_worker_greeting
 from iwxa_obscura.preparer import ArtifactSpec, GUARD_PROTOCOL, UPSTREAM_COMMIT
-from iwxa_universal_install import ApprovedInstall, ObscuraManagedBackend
+from iwxa_universal_install import ApprovedInstall, InstallError, ObscuraManagedBackend
 
 
 def hash_file(path: Path) -> str:
@@ -43,7 +45,25 @@ def main() -> int:
     start = time.monotonic()
     source = args.binary.resolve(strict=True)
     patch = args.patch.resolve(strict=True)
-    platform = ("windows-x86_64" if os.name == "nt" else "linux-x86_64")
+    arch = host_platform.machine().lower()
+    if arch in ("amd64", "x86_64"):
+        arch = "x86_64"
+    elif arch in ("aarch64", "arm64"):
+        arch = "arm64"
+    else:
+        raise RuntimeError("UNSUPPORTED_NATIVE_ARCH")
+    if os.name == "nt":
+        platform = "windows-" + arch
+    elif sys.platform == "linux":
+        platform = "linux-" + arch
+    elif sys.platform == "darwin":
+        platform = "macos-" + arch
+    else:
+        raise RuntimeError("UNSUPPORTED_NATIVE_OS")
+    if platform not in ("windows-x86_64", "windows-arm64",
+                        "linux-x86_64", "linux-arm64",
+                        "macos-x86_64", "macos-arm64"):
+        raise RuntimeError("UNQUALIFIED_NATIVE_PLATFORM")
     exe_name = "obscura-worker.exe" if os.name == "nt" else "obscura-worker"
     assert source.name == exe_name, "actual native compiled worker binary required"
     assert source.stat().st_size > 1024 * 1024, "reject synthetic fixture"
@@ -52,7 +72,7 @@ def main() -> int:
     assert len(patch_sha) == 64
 
     with tempfile.TemporaryDirectory(prefix="iwxa-native-install-") as td:
-        tmp = Path(td)
+        tmp = Path(td).resolve()
         install_root = tmp / "isolated-installed-product"
         staging_root = tmp / "isolated-stage"
         archive_name = "iwxa-obscura-" + platform + (".zip" if os.name == "nt" else ".tar.gz")
@@ -81,6 +101,15 @@ def main() -> int:
         )
         backend = ObscuraManagedBackend()
         assert backend.inspect(spec, str(install_root)).status == "NOT_INSTALLED"
+        try:
+            backend.apply(spec, str(staging_root), ApprovedInstall(
+                "OBSCURA_WORKER_V1", spec.fingerprint, "PINS-no-consent",
+                str(install_root), False,
+            ))
+            raise AssertionError("install without host confirmation was permitted")
+        except InstallError as error:
+            assert error.code == "INSTALL_OWNER_APPROVAL_REQUIRED", error.code
+        assert not install_root.exists()
         prepared = backend.prepare(spec, str(staging_root), archive_path=str(archive))
         assert prepared.status == "STAGED_NOT_ACTIVATED"
         assert backend.verify(spec, str(install_root)).status == "NOT_INSTALLED"
@@ -100,6 +129,23 @@ def main() -> int:
         assert backend.recover(spec, str(install_root)) == installed
         assert ObscuraManagedBackend().verify(spec, str(install_root)) == installed
         assert backend.apply(spec, str(staging_root), approval) == installed
+
+        # An update is a separate pinned release and must not overwrite older
+        # versions or perform provider activation.
+        next_release = "ci-update-" + native_sha[:16]
+        updated = replace(spec, release_id=next_release,
+                          download_url=spec.download_url.replace(
+                              spec.release_id, next_release))
+        backend.prepare(updated, str(staging_root), archive_path=str(archive))
+        updated_approval = ApprovedInstall(
+            program_id=backend.program_id, spec_fingerprint=updated.fingerprint,
+            receipt_id="PINS-ci-update-" + native_sha[:16],
+            installation_root=str(install_root), confirmed=True,
+        )
+        newer = backend.apply(updated, str(staging_root), updated_approval)
+        assert newer.installed and newer.executable != installed.executable
+        assert backend.recover(spec, str(install_root)) == installed
+        assert backend.recover(updated, str(install_root)) == newer
 
         profile = tmp / "isolated-runtime-profile"
         profile.mkdir()
@@ -140,6 +186,19 @@ def main() -> int:
                 process.kill()
                 process.communicate(timeout=5)
 
+        # Corrupt the newer release and prove that readback fails without
+        # deleting or implicitly rolling back a previously installed version.
+        os.chmod(newer.executable, 0o600)
+        Path(newer.executable).write_bytes(b"damaged CI version")
+        damaged = backend.recover(updated, str(install_root))
+        assert damaged.status == "INSTALL_MISMATCH" and not damaged.installed
+        assert backend.recover(spec, str(install_root)) == installed
+        try:
+            backend.apply(updated, str(staging_root), updated_approval)
+            raise AssertionError("damaged install unexpectedly overwritten")
+        except InstallError as error:
+            assert error.code == "INSTALL_TARGET_CONFLICT", error.code
+
         report = {
             "schema": "IWXA_UNIVERSAL_NATIVE_INSTALL_CI/1.0",
             "platform": platform,
@@ -150,6 +209,10 @@ def main() -> int:
             "installed_binary_sha256": hash_file(target),
             "prepared_status": prepared.status,
             "installed_status": installed.status,
+            "update_status": newer.status,
+            "updated_version_corruption_detected": damaged.status == "INSTALL_MISMATCH",
+            "old_version_unaffected_by_corrupt_update": True,
+            "unauthorized_install_rejected": True,
             "connected": installed.connected,
             "receipt_written_by_module": installed.receipt_written,
             "fresh_process_greeting": GUARD_GREETING.decode("ascii").strip(),
