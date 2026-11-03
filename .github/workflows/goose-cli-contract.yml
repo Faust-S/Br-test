@@ -1,0 +1,47 @@
+name: IWXA Agent Platforms - Goose 1.55.0 CLI integration fixture
+on:
+  push:
+    branches:
+      - research/2026-11-03-agent-platforms-goose
+    paths:
+      - research/agent-platforms/goose/**
+      - .github/workflows/goose-cli-contract.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-research-goose-cli
+  cancel-in-progress: true
+jobs:
+  goose-cli:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch exact upstream Goose 1.55.0 CLI release and verify release digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/goose-release"
+          curl -fL --retry 2 --connect-timeout 12 -o "$RUNNER_TEMP/goose.tar.bz2" \
+            https://github.com/aaif-goose/goose/releases/download/v1.55.0/goose-x86_64-unknown-linux-gnu.tar.bz2
+          echo "d9afefe7b8f4e372ebefd8b465ab6eea1f297304d058e8e9379ed627e0329708  $RUNNER_TEMP/goose.tar.bz2" | sha256sum -c -
+          tar -xjf "$RUNNER_TEMP/goose.tar.bz2" -C "$RUNNER_TEMP/goose-release"
+          find "$RUNNER_TEMP/goose-release" -maxdepth 3 -type f -name goose -print
+          command_path="$(find "$RUNNER_TEMP/goose-release" -maxdepth 3 -type f -name goose -print -quit)"
+          test -n "$command_path"
+          chmod +x "$command_path"
+          echo "$(dirname "$command_path")" >> "$GITHUB_PATH"
+      - name: Real CLI with local synthetic OpenAI-compatible endpoint
+        run: python research/agent-platforms/goose/probe.py
+      - name: Store exact CLI observations
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-goose-cli-contract
+          path: artifacts/agent-platforms/goose-cli-contract.json
+          if-no-files-found: warn
+          retention-days: 5
