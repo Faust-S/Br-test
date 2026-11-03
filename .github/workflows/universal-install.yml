@@ -5,7 +5,7 @@ on:
     paths:
       - 'universal-install/**'
       - 'agent-headless/iwxa_obscura/preparer.py'
-      - 'agent-headless/tests/test_preparer.py'
+      - 'agent-headless/tests/**'
       - '.github/workflows/universal-install.yml'
   workflow_dispatch:
 permissions:
