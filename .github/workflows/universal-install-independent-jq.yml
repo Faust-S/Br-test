@@ -1,0 +1,34 @@
+name: IWXA Managed Install - Independent jq Program
+on:
+  push:
+    branches: [work/2026-11-03-universal-install-module]
+    paths:
+      - 'universal-install/iwxa_universal_install/**'
+      - 'universal-install/qualification/independent_jq.py'
+      - 'universal-install/tests/test_managed_backend.py'
+      - '.github/workflows/universal-install-independent-jq.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-jq-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  second-real-program:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2022, macos-15-intel, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generic-manifest two-program regressions
+        shell: bash
+        run: python -m unittest discover -s universal-install/tests -p test_managed_backend.py -v
+      - name: Qualify real official jq 1.8.1 without a new installer adapter
+        shell: bash
+        run: python universal-install/qualification/independent_jq.py
