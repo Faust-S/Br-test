@@ -61,7 +61,8 @@ jobs:
             --source-run "$SOURCE_NATIVE_RUN" \
             --source-sha "$SOURCE_NATIVE_SHA" \
             --tag "$CI_TEST_TAG" \
-            --patch agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch
+            --patch agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch \
+            --windows-patch-sha c254fd09afe85e195957c778a3f2255518a4aee22d95ff73633a7d297c4a0c07
           test "$(find artifacts/test-release -maxdepth 1 -type f -name 'obscura-*' | wc -l | xargs)" = 6
       - name: Checkout the pinned public Obscura license
         uses: actions/checkout@v4

@@ -149,13 +149,15 @@ def main() -> int:
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--tag", required=True)
     parser.add_argument("--patch", type=Path, required=True)
+    parser.add_argument("--windows-patch-sha", required=True, help="Pinned Windows patch digest from the qualified native run")
     args = parser.parse_args()
     patch_bytes = args.patch.read_bytes()
     if b"\\r\\n" in patch_bytes:
         raise ValueError("PACKAGING_PATCH_MUST_USE_CANONICAL_LF")
     sha = hashlib.sha256(patch_bytes).hexdigest()
-    windows_patch_sha = hashlib.sha256(
-        patch_bytes.replace(b"\\n", b"\\r\\n")).hexdigest()
+    windows_patch_sha = args.windows_patch_sha
+    if len(windows_patch_sha) != 64 or any(x not in "0123456789abcdef" for x in windows_patch_sha):
+        raise ValueError("WINDOWS_PATCH_DIGEST_INVALID")
     info = package(args.artifacts, args.output, args.tag, args.source_run,
                    args.source_sha, sha, windows_patch_sha)
     print(json.dumps({
