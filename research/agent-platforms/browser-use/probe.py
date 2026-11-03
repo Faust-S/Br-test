@@ -95,7 +95,7 @@ async def exercise() -> dict:
     evidence = {"fixture_origin": "localhost", "model_calls": 0, "vendor_agent_inference": "NOT_TESTED"}
     try:
         with tempfile.TemporaryDirectory(prefix="iwxa-public-browser-use-") as profile:
-            browser = Browser(headless=True, user_data_dir=profile)
+            browser = Browser(\n                headless=True,\n                user_data_dir=profile,\n                chromium_sandbox=False,\n                enable_default_extensions=False,\n            )
             await browser.start()
             page = await browser.new_page()
             await page.goto(f"http://127.0.0.1:{server.server_port}/")
