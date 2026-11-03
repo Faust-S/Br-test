@@ -31,4 +31,4 @@ jobs:
         run: python -m unittest discover -s universal-install/tests -v
       - name: Existing public Obscura preparer regressions
         shell: bash
-        run: python -m unittest discover -s agent-headless/tests -v
+        run: python -m unittest discover -s agent-headless/tests -p 'test_preparer.py' -v

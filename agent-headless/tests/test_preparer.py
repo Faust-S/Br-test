@@ -87,6 +87,9 @@ class TestArtifactPreparation(unittest.TestCase):
     def test_installed_binary_tampered(self):
         spec=self.spec()
         artifact=self.preparer.prepare_local(self.archive,spec)
+        # Staged Linux binaries are intentionally read/execute-only. Grant write
+        # permission only to this disposable fixture before testing tampering.
+        os.chmod(artifact.executable, 0o600)
         Path(artifact.executable).write_bytes(b'tampered')
         self.rejected('ARTIFACT_PREPARED_DIGEST_MISMATCH',
                       lambda:self.preparer.verify_prepared(spec))
