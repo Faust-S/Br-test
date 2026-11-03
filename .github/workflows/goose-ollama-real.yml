@@ -51,7 +51,7 @@ jobs:
           done
           curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
           docker exec iwxa-ollama ollama --version
-          docker exec iwxa-ollama ollama pull qwen2.5:0.5b
+          docker exec iwxa-ollama ollama pull qwen2.5:1.5b
       - name: Execute real LLM task and verify on-disk effect
         run: python research/agent-platforms/goose-ollama/probe.py
       - name: Save real-model evidence

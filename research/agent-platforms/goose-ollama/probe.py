@@ -15,7 +15,7 @@ import traceback
 from urllib.request import urlopen
 
 REPORT = Path("artifacts/agent-platforms/goose-ollama-real.json")
-MODEL = "qwen2.5:0.5b"
+MODEL = "qwen2.5:1.5b"
 
 
 def run(args, env, cwd, timeout=165):
