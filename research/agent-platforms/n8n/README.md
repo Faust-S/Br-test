@@ -9,9 +9,12 @@ Two scenarios: manual-trigger workflow with two sequential real HTTP POST nodes 
 
 The real n8n run has a JSON evidence artifact. There are also four standard-library unit tests for the public test fixture, but those are **not** a claim that n8n works. No installed Personal Agent adapter, model inference, remote cloud, Windows GUI, and user private files are exercised. CI uses one Ubuntu 24.04 runner, Node 24, Python 3.12, 16-minute maximum.
 
-To run on an n8n-supported local environment with n8n@2.46.4 on PATH:
+To run on an n8n-supported local environment with the version-pinned n8n 2.46.4 CLI on PATH:
 
 ```sh
 python -m unittest discover -s research/agent-platforms/n8n -p 'test_*.py' -v
 python research/agent-platforms/n8n/probe.py
 ```
+
+## Runner installation decision
+Two independent npm installation attempts failed with EBADPLATFORM for @napi-rs/canvas-linux-arm64-musl@1.0.11 on Ubuntu x64, even with --omit=optional/--legacy-peer-deps. This is a dependency/packaging blocker of that npm method, not evidence of workflow correctness. To avoid altering n8n, the public test uses the upstream published Docker image 2.46.4 and isolated temporary profile. Host-networking is limited to this disposable Linux CI trial to communicate with the loopback HTTP fixture. Not an IWXA deployment recipe.

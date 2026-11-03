@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Adapter only for the disposable Linux CI fixture: same pinned n8n server CLI.
+set -euo pipefail
+: "${RUNNER_TEMP:?expected GitHub Runner temp directory}"
+exec docker run --rm --network host \
+  --user "$(id -u):$(id -g)" \
+  --volume "$RUNNER_TEMP:$RUNNER_TEMP" \
+  --env HOME="$RUNNER_TEMP" \
+  --env N8N_USER_FOLDER \
+  --env N8N_ENCRYPTION_KEY \
+  --env N8N_DIAGNOSTICS_ENABLED \
+  --env N8N_VERSION_NOTIFICATIONS_ENABLED \
+  --env N8N_TEMPLATES_ENABLED \
+  --env N8N_PERSONALIZATION_ENABLED \
+  --env N8N_RUNNERS_ENABLED \
+  --env N8N_HIRING_BANNER_ENABLED \
+  --env N8N_LOG_LEVEL \
+  docker.n8n.io/n8nio/n8n:2.46.4 "$@"

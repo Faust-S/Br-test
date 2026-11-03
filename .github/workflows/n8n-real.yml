@@ -15,7 +15,7 @@ concurrency:
 jobs:
   real-n8n:
     runs-on: ubuntu-24.04
-    timeout-minutes: 16
+    timeout-minutes: 18
     env:
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
@@ -30,12 +30,14 @@ jobs:
           python-version: '3.12'
       - name: Check public test fixture
         run: python -m unittest discover -s research/agent-platforms/n8n -p 'test_*.py' -v
-      - name: Install exact self-hosted n8n
-        run: npm install --no-audit --no-fund --omit=optional --legacy-peer-deps --prefix "$RUNNER_TEMP/iwxa-n8n" "n8n@2.46.4"
+      - name: Pull exact upstream self-hosted n8n image
+        run: docker pull docker.n8n.io/n8nio/n8n:2.46.4
       - name: Execute two real n8n workflow scenarios
+        env:
+          TMPDIR: ${{ runner.temp }}
         run: |
-          echo "$RUNNER_TEMP/iwxa-n8n/node_modules/.bin" >> "$GITHUB_PATH"
-          export PATH="$RUNNER_TEMP/iwxa-n8n/node_modules/.bin:$PATH"
+          chmod +x research/agent-platforms/n8n/n8n
+          export PATH="$GITHUB_WORKSPACE/research/agent-platforms/n8n:$PATH"
           python research/agent-platforms/n8n/probe.py
       - name: Save n8n evidence
         if: always()
