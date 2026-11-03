@@ -148,7 +148,7 @@ def exercise(r):
         if r["version"]["exit"] or AIDER_VERSION not in r["version"]["stdout_tail"]:
             raise RuntimeError("wrong Aider version")
         r["aider"] = cmd([
-            "aider", "--model", "ollama_chat/"+MODEL, "--edit-format", "whole",
+            "aider", "--model", "ollama_chat/"+MODEL, "--edit-format", "diff",
             "--no-auto-commits", "--no-auto-lint", "--no-stream",
             "--no-analytics", "--no-check-update", "--no-show-model-warnings",
             "--no-fancy-input", "--no-suggest-shell-commands", "--map-tokens", "0",
