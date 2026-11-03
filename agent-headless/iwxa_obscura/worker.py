@@ -21,6 +21,9 @@ from .controller import ObscuraController, ObscuraControllerError, _drain_limite
 from .trust import CertificateTrustError
 
 _WAIT_UNTIL = frozenset({"load", "domcontentloaded", "networkidle0", "networkidle2"})
+# Printed only by the IWXA-patched, no-render Obscura worker before starting V8.
+# A plain upstream v0.2.6 binary cannot produce this protocol marker.
+_IWXA_ORIGIN_GUARD_ATTESTATION = b"IWXA_ORIGIN_NET_GUARD_V1_NO_RENDER\n"
 
 
 @dataclass(frozen=True)
@@ -37,6 +40,7 @@ class WorkerObservation:
     elapsed_ms: int
     certificate_trust_mode: str
     ca_bundle_sha256: str | None
+    origin_guard_required: bool
 
     def as_data(self) -> dict:
         return {
@@ -58,7 +62,8 @@ class WorkerObservation:
             },
             "evidence_status": "WORKER_DOCUMENT_OBSERVED_NOT_U1_VERIFIED",
             "origin_check": "REQUESTED_AND_REPORTED_FINAL_ORIGIN_ONLY",
-            "network_isolation": "NOT_ESTABLISHED",
+            "network_isolation": "IWXA_GUARD_BUILD_MARKER_CONFIRMED_NO_OS_SANDBOX"
+                                 if self.origin_guard_required else "NOT_ESTABLISHED",
         }
 
 
@@ -69,11 +74,36 @@ class ObscuraWorkerController(ObscuraController):
     metadata is more useful than CLI fetch but is not a cryptographic attestation.
     """
 
-    def __init__(self, *, wait_until: str = "networkidle2", **kwargs):
+    def __init__(self, *, wait_until: str = "networkidle2",
+                 unsafe_allow_unpatched_worker: bool = False, **kwargs):
         super().__init__(**kwargs)
         if wait_until not in _WAIT_UNTIL:
             raise ValueError("unsupported worker navigation readiness")
+        if type(unsafe_allow_unpatched_worker) is not bool:
+            raise ValueError("unsafe_allow_unpatched_worker must be a boolean")
         self.wait_until = wait_until
+        self.unsafe_allow_unpatched_worker = unsafe_allow_unpatched_worker
+
+    def _verify_origin_guard(self, env: dict, workdir: str) -> None:
+        """Never navigate with an unpatched engine in the default Agent mode.
+
+        This is a build compatibility probe, not an OS security attestation.
+        SHA-256 pins the configured binary, and the Agent owns approval.
+        """
+        if self.unsafe_allow_unpatched_worker:
+            return
+        launch = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
+                  else {"start_new_session": True})
+        try:
+            result = subprocess.run(
+                [str(self.binary), "--iwxa-attest-origin-guard"],
+                input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                cwd=workdir, env=env, close_fds=True,
+                timeout=min(self.timeout_seconds, 3), check=False, **launch)
+        except (OSError, subprocess.TimeoutExpired):
+            raise ObscuraControllerError("ENGINE_ORIGIN_GUARD_UNAVAILABLE") from None
+        if result.returncode != 0 or result.stdout != _IWXA_ORIGIN_GUARD_ATTESTATION:
+            raise ObscuraControllerError("ENGINE_ORIGIN_GUARD_UNAVAILABLE")
 
     def observe(self, url: str, *, format: str = "text") -> WorkerObservation:
         if format not in ("text", "html"):
@@ -87,6 +117,10 @@ class ObscuraWorkerController(ObscuraController):
         env = {k: os.environ[k] for k in env_names if k in os.environ}
         env["NO_COLOR"] = "1"
         env["OBSCURA_OBEY_ROBOTS"] = "1"
+        # The patched obscura-net URL gate reads this before every transport
+        # request, including redirects and JS/iframe requests. This is NOT an
+        # operating-system network sandbox and remains build-specific.
+        env["IWXA_OBSCURA_ALLOWED_ORIGIN"] = origin
         commands = (
             {"cmd": "navigate", "url": requested_url, "waitUntil": self.wait_until},
             {"cmd": "dump_text" if format == "text" else "dump_html"},
@@ -107,6 +141,7 @@ class ObscuraWorkerController(ObscuraController):
                 env["SSL_CERT_FILE"] = str(cert_file)
                 trust_mode = "PINNED_ADDITIONAL_CA"
                 ca_sha = selected_ca.sha256
+            self._verify_origin_guard(env, workdir)
             launch = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
                       else {"start_new_session": True})
             try:
@@ -196,4 +231,5 @@ class ObscuraWorkerController(ObscuraController):
             retrieved_at=datetime.now(timezone.utc).isoformat(),
             elapsed_ms=max(0, round((time.monotonic() - started) * 1000)),
             certificate_trust_mode=trust_mode, ca_bundle_sha256=ca_sha,
+            origin_guard_required=not self.unsafe_allow_unpatched_worker,
         )
