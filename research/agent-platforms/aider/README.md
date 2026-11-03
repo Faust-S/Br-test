@@ -2,7 +2,7 @@
 
 Independent public trial of a **specialized coding program** rather than a
 general agent. Versions are pinned: Aider **0.86.0** and Ollama Docker engine
-**0.40.14**; model **qwen2.5-coder:1.5b**, with resolved model digest recorded
+**0.40.14**; model **qwen2.5-coder:3b**, with resolved model digest recorded
 from the Ollama API.
 
 A disposable miniature Python Git project has a real regression: a percentage
@@ -28,4 +28,8 @@ Official sources:
 - https://github.com/Aider-AI/aider/releases/tag/v0.86.0
 - https://aider.chat/docs/scripting.html
 - https://aider.chat/docs/llms/ollama.html
-- https://ollama.com/library/qwen2.5-coder:1.5b
+- https://ollama.com/library/qwen2.5-coder:3b
+
+## Comparative continuation
+
+Initial 1.5b run: https://github.com/Faust-S/Br-test/actions/runs/41679462681 — Aider returned exit 0 and printed 'Applied edit', but source Git diff was empty; original four test failures remained. The 3b test uses the same task and acceptance rules with only the local model changed. This is a separately measured model-specific experiment, not retry that erases a failure.

@@ -44,7 +44,7 @@ jobs:
           done
           curl -fsS --max-time 5 http://127.0.0.1:11434/api/tags > /dev/null
           docker exec iwxa-aider-ollama ollama --version
-          docker exec iwxa-aider-ollama ollama pull qwen2.5-coder:1.5b
+          docker exec iwxa-aider-ollama ollama pull qwen2.5-coder:3b
       - name: Run actual Aider CLI and independent regression suite
         run: python research/agent-platforms/aider/probe.py
       - name: Preserve real Git patch and test evidence

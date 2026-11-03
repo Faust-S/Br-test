@@ -20,7 +20,7 @@ import time
 import traceback
 from urllib.request import urlopen
 
-MODEL = "qwen2.5-coder:1.5b"
+MODEL = "qwen2.5-coder:3b"
 AIDER_VERSION = "0.86.0"
 OUT = Path("artifacts/agent-platforms/aider-real-git-edit.json")
 
