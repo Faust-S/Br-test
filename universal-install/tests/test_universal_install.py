@@ -307,7 +307,7 @@ class PortableInstallTest(unittest.TestCase):
         with self.assertRaisesRegex(InstallError, "INSTALL_ROOT_INVALID"):
             self.backend.apply(
                 spec, str(self.staging),
-                self.approval(spec, installation_root=root_with_dot))
+                self.approval(spec, installation_root=root_with_dotdot))
         self.assertFalse(self.destination.exists())
 
 if __name__ == "__main__":
