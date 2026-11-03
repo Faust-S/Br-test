@@ -20,6 +20,7 @@ from iwxa_obscura.controller import ObscuraControllerError
 
 FAKE_WORKER = '''#!/usr/bin/env python3
 import json,os,sys,time
+print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER',flush=True)
 commands=[json.loads(x) for x in sys.stdin if x.strip()]
 assert [x['cmd'] for x in commands] in (
     ['navigate','dump_text','shutdown'],['navigate','dump_html','shutdown'])
@@ -55,7 +56,7 @@ class WorkerTests(unittest.TestCase):
             binary_sha256=hashlib.sha256(self.binary.read_bytes()).hexdigest(),
             allowed_origins=frozenset({"https://example.org"}),
             timeout_seconds=2, max_output_bytes=8192,
-            unsafe_allow_unpatched_worker=True)
+            )
 
     def test_status_final_url_hash_and_evidence(self):
         o = self.controller.observe("https://example.org/a?x=1#fragment")

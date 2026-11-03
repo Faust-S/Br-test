@@ -18,12 +18,10 @@ import time
 from urllib.parse import urlsplit
 
 from .controller import ObscuraController, ObscuraControllerError, _drain_limited, approved_url
+from .handshake import require_worker_greeting, WorkerNotQualified
 from .trust import CertificateTrustError
 
 _WAIT_UNTIL = frozenset({"load", "domcontentloaded", "networkidle0", "networkidle2"})
-# Printed only by the IWXA-patched, no-render Obscura worker before starting V8.
-# A plain upstream v0.2.6 binary cannot produce this protocol marker.
-_IWXA_ORIGIN_GUARD_ATTESTATION = b"IWXA_ORIGIN_NET_GUARD_V1_NO_RENDER\n"
 
 
 @dataclass(frozen=True)
@@ -62,8 +60,7 @@ class WorkerObservation:
             },
             "evidence_status": "WORKER_DOCUMENT_OBSERVED_NOT_U1_VERIFIED",
             "origin_check": "REQUESTED_AND_REPORTED_FINAL_ORIGIN_ONLY",
-            "network_isolation": "IWXA_GUARD_BUILD_MARKER_CONFIRMED_NO_OS_SANDBOX"
-                                 if self.origin_guard_required else "NOT_ESTABLISHED",
+            "network_isolation": "IWXA_GUARD_V2_GREETING_CONFIRMED_NO_OS_SANDBOX",
         }
 
 
@@ -74,36 +71,11 @@ class ObscuraWorkerController(ObscuraController):
     metadata is more useful than CLI fetch but is not a cryptographic attestation.
     """
 
-    def __init__(self, *, wait_until: str = "networkidle2",
-                 unsafe_allow_unpatched_worker: bool = False, **kwargs):
+    def __init__(self, *, wait_until: str = "networkidle2", **kwargs):
         super().__init__(**kwargs)
         if wait_until not in _WAIT_UNTIL:
             raise ValueError("unsupported worker navigation readiness")
-        if type(unsafe_allow_unpatched_worker) is not bool:
-            raise ValueError("unsafe_allow_unpatched_worker must be a boolean")
         self.wait_until = wait_until
-        self.unsafe_allow_unpatched_worker = unsafe_allow_unpatched_worker
-
-    def _verify_origin_guard(self, env: dict, workdir: str) -> None:
-        """Never navigate with an unpatched engine in the default Agent mode.
-
-        This is a build compatibility probe, not an OS security attestation.
-        SHA-256 pins the configured binary, and the Agent owns approval.
-        """
-        if self.unsafe_allow_unpatched_worker:
-            return
-        launch = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
-                  else {"start_new_session": True})
-        try:
-            result = subprocess.run(
-                [str(self.binary), "--iwxa-attest-origin-guard"],
-                input=b"", stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                cwd=workdir, env=env, close_fds=True,
-                timeout=min(self.timeout_seconds, 3), check=False, **launch)
-        except (OSError, subprocess.TimeoutExpired):
-            raise ObscuraControllerError("ENGINE_ORIGIN_GUARD_UNAVAILABLE") from None
-        if result.returncode != 0 or result.stdout != _IWXA_ORIGIN_GUARD_ATTESTATION:
-            raise ObscuraControllerError("ENGINE_ORIGIN_GUARD_UNAVAILABLE")
 
     def observe(self, url: str, *, format: str = "text") -> WorkerObservation:
         if format not in ("text", "html"):
@@ -141,7 +113,6 @@ class ObscuraWorkerController(ObscuraController):
                 env["SSL_CERT_FILE"] = str(cert_file)
                 trust_mode = "PINNED_ADDITIONAL_CA"
                 ca_sha = selected_ca.sha256
-            self._verify_origin_guard(env, workdir)
             launch = ({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt"
                       else {"start_new_session": True})
             try:
@@ -152,30 +123,42 @@ class ObscuraWorkerController(ObscuraController):
                 raise ObscuraControllerError("ENGINE_LAUNCH_FAILED") from None
             out, err = bytearray(), bytearray()
             overflow = threading.Event()
-            readers = [
-                threading.Thread(target=_drain_limited,
-                                 args=(proc.stdout, self.max_output_bytes, out, overflow),
-                                 daemon=True),
-                threading.Thread(target=_drain_limited,
-                                 args=(proc.stderr, 16_384, err, overflow),
-                                 daemon=True),
-            ]
-            for reader in readers:
-                reader.start()
+            stderr_reader = threading.Thread(
+                target=_drain_limited,
+                args=(proc.stderr, 16_384, err, overflow), daemon=True)
+            stderr_reader.start()
+            readers = [stderr_reader]
             timed_out = False
+            failure = None
             try:
-                proc.stdin.write(payload)
-                proc.stdin.close()
-                deadline = started + self.timeout_seconds
-                while proc.poll() is None and not overflow.is_set():
-                    if time.monotonic() >= deadline:
-                        timed_out = True
-                        break
-                    time.sleep(0.015)
-            except (OSError, BrokenPipeError):
-                pass  # A failed worker is reported after status inspection.
+                # Only our pinned, native-guarded binary emits this greeting.
+                # Never send a navigation before it is read and verified.
+                try:
+                    require_worker_greeting(
+                        proc.stdout, deadline=started + self.timeout_seconds)
+                except WorkerNotQualified as exc:
+                    failure = ObscuraControllerError(exc.code)
+                if failure is None and not overflow.is_set():
+                    stdout_reader = threading.Thread(
+                        target=_drain_limited,
+                        args=(proc.stdout, self.max_output_bytes, out, overflow),
+                        daemon=True)
+                    stdout_reader.start()
+                    readers.append(stdout_reader)
+                    try:
+                        proc.stdin.write(payload)
+                        proc.stdin.close()
+                    except (OSError, BrokenPipeError):
+                        failure = ObscuraControllerError("ENGINE_WORKER_FAILED")
+                    if failure is None:
+                        deadline = started + self.timeout_seconds
+                        while proc.poll() is None and not overflow.is_set():
+                            if time.monotonic() >= deadline:
+                                timed_out = True
+                                break
+                            time.sleep(0.015)
             finally:
-                if proc.poll() is None and (timed_out or overflow.is_set()):
+                if proc.poll() is None and (failure is not None or timed_out or overflow.is_set()):
                     if os.name == "posix":
                         try:
                             os.killpg(proc.pid, signal.SIGKILL)
@@ -184,8 +167,12 @@ class ObscuraWorkerController(ObscuraController):
                     else:
                         proc.kill()
                 proc.wait()
+                if proc.stdin is not None and not proc.stdin.closed:
+                    proc.stdin.close()
                 for reader in readers:
                     reader.join(timeout=2)
+            if failure is not None:
+                raise failure
             if timed_out:
                 raise ObscuraControllerError("ENGINE_TIMEOUT")
             if overflow.is_set() or len(out) > self.max_output_bytes:
@@ -231,5 +218,5 @@ class ObscuraWorkerController(ObscuraController):
             retrieved_at=datetime.now(timezone.utc).isoformat(),
             elapsed_ms=max(0, round((time.monotonic() - started) * 1000)),
             certificate_trust_mode=trust_mode, ca_bundle_sha256=ca_sha,
-            origin_guard_required=not self.unsafe_allow_unpatched_worker,
+            origin_guard_required=True,
         )

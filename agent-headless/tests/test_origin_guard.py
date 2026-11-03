@@ -11,10 +11,8 @@ from iwxa_obscura.controller import ObscuraControllerError
 
 FAKE = r'''#!/usr/bin/env python3
 import json, os, sys
-if '--iwxa-attest-origin-guard' in sys.argv:
-    assert os.environ.get('IWXA_OBSCURA_ALLOWED_ORIGIN') == 'https://example.org'
-    print('IWXA_ORIGIN_NET_GUARD_V1_NO_RENDER')
-    sys.exit(0)
+assert os.environ.get('IWXA_OBSCURA_ALLOWED_ORIGIN') == 'https://example.org'
+print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER',flush=True)
 commands=[json.loads(x) for x in sys.stdin if x.strip()]
 assert [x['cmd'] for x in commands] == ['navigate','dump_text','shutdown']
 assert os.environ['IWXA_OBSCURA_ALLOWED_ORIGIN'] == 'https://example.org'
@@ -46,28 +44,29 @@ class TestOriginGuard(unittest.TestCase):
         self.assertEqual(item.http_status,200)
         self.assertTrue(item.origin_guard_required)
         self.assertEqual(item.as_data()['network_isolation'],
-                         'IWXA_GUARD_BUILD_MARKER_CONFIRMED_NO_OS_SANDBOX')
+                         'IWXA_GUARD_V2_GREETING_CONFIRMED_NO_OS_SANDBOX')
 
     def test_unpatched_worker_rejected(self):
-        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V1_NO_RENDER')",
+        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER')",
                                             "print('wrong-marker')"))
         with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_ORIGIN_GUARD_UNAVAILABLE'):
             self.make().observe('https://example.org')
 
     def test_guard_probe_failure_rejects_navigation(self):
-        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V1_NO_RENDER')",
+        self.binary.write_text(FAKE.replace("print('IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER')",
                                             "sys.exit(77)"))
         with self.assertRaisesRegex(ObscuraControllerError,'ENGINE_ORIGIN_GUARD_UNAVAILABLE'):
             self.make().observe('https://example.org')
 
-    def test_unpatched_opt_out_is_explicitly_unqualified(self):
-        result=self.make(unsafe_allow_unpatched_worker=True).observe('https://example.org')
-        self.assertFalse(result.origin_guard_required)
-        self.assertEqual(result.as_data()['network_isolation'],'NOT_ESTABLISHED')
+    def test_bypass_is_not_exposed(self):
+        with self.assertRaises(TypeError):
+            self.make(unsafe_allow_unpatched_worker=True)
 
-    def test_unsafe_flag_must_be_bool(self):
-        with self.assertRaises(ValueError):
-            self.make(unsafe_allow_unpatched_worker='false')
+    def test_worker_silent_until_stdin_is_never_navigated(self):
+        self.binary.write_text("#!/usr/bin/env python3\nimport sys\n"
+                               "sys.stdin.readline()\n")
+        with self.assertRaisesRegex(ObscuraControllerError, "WORKER_READY_TIMEOUT"):
+            self.make(timeout_seconds=1).observe('https://example.org')
 
     def test_external_origin_denied_before_running(self):
         with self.assertRaisesRegex(ObscuraControllerError,'ORIGIN_DENIED'):

@@ -79,3 +79,12 @@ diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
 +    }
      tracing_subscriber::fmt()
          .with_env_filter("warn")
+@@ -99,3 +99,8 @@
+     let stdin = tokio::io::stdin();
+     let mut stdout = tokio::io::stdout();
++    // Agent must verify the guard before sending the first navigation.
++    if stdout.write_all(b"IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER\n").await.is_err()
++        || stdout.flush().await.is_err() {
++        return;
++    }
+     let mut reader = BufReader::new(stdin);
