@@ -46,7 +46,7 @@ def experiment(out: dict):
     with tempfile.TemporaryDirectory(prefix="iwxa-real-goose-task-") as td:
         workspace = Path(td)/"workspace"
         workspace.mkdir()
-        (workspace/"task_input.txt").write_text("alpha=7\nbeta=5\n",encoding="utf-8")
+        (workspace/"task_input.txt").write_text("alpha=27\nbeta=14\n",encoding="utf-8")
         env = dict(os.environ)
         env.update({
             "HOME":str(Path(td)/"home"),
@@ -70,22 +70,59 @@ def experiment(out: dict):
             raise RuntimeError("Goose version mismatch")
         prompt=(
             "This is a bounded offline file task. Working directory contains task_input.txt. "
-            "Use your file-reading tool to read task_input.txt, add the two integer values, "
-            "then use your file-writing tool to create result.txt in the current working "
-            "directory. result.txt must contain exactly the integer 12 and a newline, "
-            "no other text. Do not run shell commands or access the network. "
+             "Use the shell tool ONLY to run cat task_input.txt and read the two values, "
+             "then use the write tool to create result.txt in the current working "
+             "directory. result.txt must contain exactly their computed sum and a newline, "
+             "no other text. Do not use shell for any action except reading task_input.txt; do not access the network. "
             "After the file exists, briefly say completed."
         )
         out["task"] = run(["goose","run","--no-session","--provider","ollama",
                            "--model",MODEL,"--max-turns","5",
                            "--output-format","json","-t",prompt],env,workspace,165)
         file = workspace/"result.txt"
+        # Parse vendor JSON after Goose's banner. Confirm a real shell read
+        # happened and the corresponding toolResponse contained both source values.
+        text_output = out["task"].get("stdout_tail", "")
+        json_begin = text_output.find('{\n  "messages":')
+        tool_requests = []
+        tool_responses = []
+        if json_begin >= 0:
+            try:
+                conversation = json.loads(text_output[json_begin:])
+                for message in conversation.get("messages", []):
+                    for item in message.get("content", []):
+                        if item.get("type") == "toolRequest":
+                            tool_requests.append(item)
+                        if item.get("type") == "toolResponse":
+                            tool_responses.append(item)
+            except (ValueError, TypeError) as exc:
+                out["conversation_parse_error"] = str(exc)
+        shell_ids = set()
+        for item in tool_requests:
+            details = item.get("toolCall", {}).get("value", {})
+            if details.get("name") == "shell":
+                shell_ids.add(item.get("id"))
+        out["actual_tool_calls"] = [x.get("toolCall", {}).get("value", {}).get("name")
+                                     for x in tool_requests]
+        out["shell_read_request_seen"] = bool(shell_ids)
+        out["shell_read_result_seen"] = False
+        for item in tool_responses:
+            if item.get("id") not in shell_ids:
+                continue
+            value = item.get("toolResult", {}).get("value", {})
+            lines = "\n".join(str(p.get("text", "")) for p in value.get("content", []))
+            if "alpha=27" in lines and "beta=14" in lines and not value.get("isError", False):
+                out["shell_read_result_seen"] = True
+        out["write_call_seen"] = any(
+            x.get("toolCall", {}).get("value", {}).get("name") == "write"
+            for x in tool_requests
+        )
         out["file_created"] = file.is_file()
         out["file_value"] = file.read_text(encoding="utf-8")[:100] if file.is_file() else None
-        out["expected_file_value"]="12\n"
-        out["verified_file_effect"]=out["file_value"]=="12\n"
-        out["input_unchanged"]=(workspace/"task_input.txt").read_text(encoding="utf-8")=="alpha=7\nbeta=5\n"
-        out["status"]="PASS" if (out["task"]["returncode"]==0 and out["verified_file_effect"]
+        out["expected_file_value"]="41\n"
+        out["verified_file_effect"]=out["file_value"]=="41\n"
+        out["input_unchanged"]=(workspace/"task_input.txt").read_text(encoding="utf-8")=="alpha=27\nbeta=14\n"
+        out["status"]="PASS" if (out["task"]["returncode"]==0 and out["shell_read_result_seen"] and out["write_call_seen"] and out["verified_file_effect"]
                                   and out["input_unchanged"]) else "FAIL"
 
 
