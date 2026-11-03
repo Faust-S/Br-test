@@ -275,6 +275,14 @@ class ObscuraManagedBackend:
             raise InstallError("INSTALL_DESTINATION_UNAVAILABLE") from None
         destination = target / spec.executable_name
         try:
+            # Persist the version owner BEFORE copying potentially large
+            # executable bytes. A hard crash during the copy must leave a
+            # recognizable, removable partial IWXA-managed installation.
+            # This is local ownership metadata, not a lifecycle receipt.
+            with (target / _INSTALL_MARKER).open("x", encoding="utf-8") as sink:
+                json.dump(_marker_contents(spec), sink, sort_keys=True, separators=(",", ":"))
+                sink.flush()
+                os.fsync(sink.fileno())
             sha = hashlib.sha256()
             size = 0
             with source.open("rb") as inp, destination.open("xb") as out:
@@ -293,13 +301,6 @@ class ObscuraManagedBackend:
                 raise InstallError("INSTALL_INPUT_CHANGED")
             if os.name != "nt":
                 destination.chmod(0o500)
-            # One small version-local ownership marker; not a registry,
-            # receipt, user approval or application Store. The marker lets
-            # removal distinguish IWXA-managed bytes from arbitrary files.
-            with (target / _INSTALL_MARKER).open("x", encoding="utf-8") as sink:
-                json.dump(_marker_contents(spec), sink, sort_keys=True, separators=(",", ":"))
-                sink.flush()
-                os.fsync(sink.fileno())
             observation = self.verify(spec, approval.installation_root)
             if not observation.installed:
                 raise InstallError("INSTALL_VERIFY_FAILED")

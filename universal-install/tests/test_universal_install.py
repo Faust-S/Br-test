@@ -452,6 +452,24 @@ class PortableInstallTest(unittest.TestCase):
         self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
         self.assertEqual(self.backend.verify(spec, str(self.destination)).status, "NOT_INSTALLED")
 
+    def test_remove_interrupted_managed_install_with_partial_binary(self):
+        import json
+        _, spec = self.package()
+        folder = self.destination / "obscura-worker" / spec.release_id / spec.platform
+        folder.mkdir(parents=True)
+        (folder / ".iwxa-installed.json").write_text(
+            json.dumps({
+                "schema": "IWXA_MANAGED_BINARY/1",
+                "program_id": self.backend.program_id,
+                "spec_fingerprint": spec.fingerprint,
+            }), encoding="utf-8")
+        partial = folder / spec.executable_name
+        partial.write_bytes(b"incomplete interrupted copy")
+        self.assertEqual(self.backend.recover(spec, str(self.destination)).status,
+                         "INSTALL_MISMATCH")
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
+        self.assertFalse(folder.exists())
+
     def test_remove_interrupted_managed_install_with_only_marker(self):
         spec, _, installed = self.install_fixture()
         Path(installed.executable).unlink()
