@@ -1,0 +1,81 @@
+diff --git a/crates/obscura-net/src/client.rs b/crates/obscura-net/src/client.rs
+--- a/crates/obscura-net/src/client.rs
++++ b/crates/obscura-net/src/client.rs
+@@ -643,4 +643,52 @@
+-pub(crate) fn validate_url(url: &Url, allow_private_network: bool) -> Result<(), ObscuraNetError> {
++/// Additional allow-origin gate for the IWXA agent's no-render worker.
++/// THIS IS NOT AN OPERATING-SYSTEM NETWORK SANDBOX.
++fn iwxa_origin_guard_allows(request: &Url, configured_origin: &str) -> bool {
++    let Ok(allowed) = Url::parse(configured_origin) else { return false };
++    allowed.scheme() == "https"
++        && !allowed.cannot_be_a_base()
++        && allowed.username().is_empty()
++        && allowed.password().is_none()
++        && allowed.port_or_known_default() == Some(443)
++        && allowed.path() == "/"
++        && allowed.query().is_none()
++        && allowed.fragment().is_none()
++        && request.scheme() == "https"
++        && request.origin() == allowed.origin()
++}
++
++#[cfg(test)]
++mod iwxa_agent_origin_guard_tests {
++    use super::*;
++
++    #[test]
++    fn permits_same_origin_pages() {
++        assert!(iwxa_origin_guard_allows(&Url::parse("https://example.org/a?q=1").unwrap(), "https://example.org"));
++        assert!(iwxa_origin_guard_allows(&Url::parse("https://example.org:443/").unwrap(), "https://example.org"));
++    }
++
++    #[test]
++    fn denies_different_origin_or_protocol() {
++        for value in ["https://other.org/", "https://sub.example.org/", "http://example.org/", "https://example.org:444/", "file:///tmp/a"] {
++            assert!(!iwxa_origin_guard_allows(&Url::parse(value).unwrap(), "https://example.org"));
++        }
++    }
++
++    #[test]
++    fn denies_invalid_configuration() {
++        let requested = Url::parse("https://example.org/").unwrap();
++        for value in ["", "http://example.org", "https://example.org/path", "https://user@example.org", "https://example.org:444", "https://example.org?x=1"] {
++            assert!(!iwxa_origin_guard_allows(&requested, value));
++        }
++    }
++}
++
++pub(crate) fn validate_url(url: &Url, allow_private_network: bool) -> Result<(), ObscuraNetError> {
++    if let Some(raw) = std::env::var_os("IWXA_OBSCURA_ALLOWED_ORIGIN") {
++        let origin = raw.to_str().unwrap_or("");
++        if !iwxa_origin_guard_allows(url, origin) {
++            return Err(ObscuraNetError::Network("IWXA_ORIGIN_GUARD_DENIED".to_string()));
++        }
++    }
+     let allow_private_network = allow_private_network || env_allows_private_network();
+     let scheme = url.scheme();
+     if scheme != "http" && scheme != "https" && scheme != "file" {
+diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
+--- a/crates/obscura-cli/src/worker.rs
++++ b/crates/obscura-cli/src/worker.rs
+@@ -72,4 +72,20 @@
+ #[tokio::main(flavor = "current_thread")]
+ async fn main() {
++    // Probe the pinned IWXA no-render build, before creating V8/network context.
++    if std::env::args().nth(1).as_deref() == Some("--iwxa-attest-origin-guard") {
++        if cfg!(feature = "render") {
++            std::process::exit(78);
++        }
++        println!("IWXA_ORIGIN_NET_GUARD_V1_NO_RENDER");
++        return;
++    }
++    if cfg!(feature = "render")
++        || !std::env::var("IWXA_OBSCURA_ALLOWED_ORIGIN")
++            .ok()
++            .is_some_and(|origin| origin.starts_with("https://") && origin.len() < 1024)
++    {
++        eprintln!("IWXA_ORIGIN_GUARD_NOT_CONFIGURED");
++        std::process::exit(78);
++    }
+     tracing_subscriber::fmt()
+         .with_env_filter("warn")
