@@ -25,7 +25,7 @@ sys.path.insert(0, str(HERE / "universal-install"))
 sys.path.insert(0, str(HERE / "agent-headless"))
 from iwxa_obscura.handshake import GUARD_GREETING, require_worker_greeting
 from iwxa_obscura.preparer import ArtifactSpec, GUARD_PROTOCOL, UPSTREAM_COMMIT
-from iwxa_universal_install import ApprovedInstall, InstallError, ObscuraManagedBackend
+from iwxa_universal_install import ApprovedInstall, ApprovedRemoval, InstallError, ObscuraManagedBackend
 
 
 def hash_file(path: Path) -> str:
@@ -199,6 +199,32 @@ def main() -> int:
         except InstallError as error:
             assert error.code == "INSTALL_TARGET_CONFLICT", error.code
 
+        # Removal happens only after the native Worker has shut down.
+        # A broken update can be removed independently of the working version.
+        removal = ApprovedRemoval(
+            program_id=backend.program_id,
+            spec_fingerprint=updated.fingerprint,
+            receipt_id="PINS-ci-remove-" + native_sha[:16],
+            installation_root=str(install_root), confirmed=True,
+        )
+        removed = backend.remove(updated, removal)
+        assert removed.status == "REMOVED" and not removed.installed
+        assert backend.recover(updated, str(install_root)).status == "NOT_INSTALLED"
+        assert backend.recover(spec, str(install_root)) == installed
+        assert backend.remove(updated, removal).status == "NOT_INSTALLED"
+        # Then remove the previously running native version, without deleting
+        # the owning application directory or the staged executable.
+        old_removal = ApprovedRemoval(
+            program_id=backend.program_id,
+            spec_fingerprint=spec.fingerprint,
+            receipt_id="PINS-ci-remove-old-" + native_sha[:16],
+            installation_root=str(install_root), confirmed=True,
+        )
+        assert backend.remove(spec, old_removal).status == "REMOVED"
+        assert backend.recover(spec, str(install_root)).status == "NOT_INSTALLED"
+        assert Path(prepared.executable).exists()
+        assert install_root.exists()
+
         report = {
             "schema": "IWXA_UNIVERSAL_NATIVE_INSTALL_CI/1.0",
             "platform": platform,
@@ -206,7 +232,10 @@ def main() -> int:
             "patch_sha256": patch_sha,
             "build_binary_sha256": native_sha,
             "archive_sha256": archive_sha,
-            "installed_binary_sha256": hash_file(target),
+            "installed_binary_sha256": native_sha,
+            "new_version_removed_after_corruption": removed.status == "REMOVED",
+            "old_version_survived_new_version_removal": True,
+            "old_version_removed_after_worker_shutdown": True,
             "prepared_status": prepared.status,
             "installed_status": installed.status,
             "update_status": newer.status,

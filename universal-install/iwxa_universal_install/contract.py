@@ -33,6 +33,21 @@ class ApprovedInstall:
 
 
 @dataclass(frozen=True)
+class ApprovedRemoval:
+    """Owner-authorized removal of exactly one pinned installed version.
+
+    The embedding product MUST obtain explicit consent, record its removal
+    receipt and stop the Worker before calling the backend. This object is an
+    input contract, not a new authority or a proof of user identity.
+    """
+    program_id: str
+    spec_fingerprint: str
+    receipt_id: str
+    installation_root: str
+    confirmed: bool
+
+
+@dataclass(frozen=True)
 class InstallObservation:
     """Readback of actual files, not provider readiness or a durable receipt."""
     status: str
@@ -52,5 +67,6 @@ class ProgramInstallBackend(Protocol):
     def inspect(self, spec: Any, installation_root: str) -> InstallObservation: ...
     def prepare(self, spec: Any, staging_root: str, *, archive_path: str | None = None) -> Any: ...
     def apply(self, spec: Any, staging_root: str, approval: ApprovedInstall) -> InstallObservation: ...
+    def remove(self, spec: Any, approval: ApprovedRemoval) -> InstallObservation: ...
     def verify(self, spec: Any, installation_root: str) -> InstallObservation: ...
     def recover(self, spec: Any, installation_root: str) -> InstallObservation: ...

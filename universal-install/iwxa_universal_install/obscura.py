@@ -12,8 +12,9 @@ import platform as host_platform
 from pathlib import Path
 import sys
 import re
+import stat
 
-from .contract import ApprovedInstall, InstallError, InstallObservation
+from .contract import ApprovedInstall, ApprovedRemoval, InstallError, InstallObservation
 from iwxa_obscura.preparer import (
     ArtifactPreparationError, ArtifactSpec, ObscuraArtifactPreparer,
     _check_parent_chain, _sha_file, BINARY_LIMIT,
@@ -128,6 +129,54 @@ class ObscuraManagedBackend:
     def recover(self, spec: ArtifactSpec, installation_root: str) -> InstallObservation:
         """After a crash only observe; never download, copy or rerun apply."""
         return self.verify(spec, installation_root)
+
+    def remove(self, spec: ArtifactSpec, approval: ApprovedRemoval) -> InstallObservation:
+        """Remove only the pinned Worker version after the host stops its use.
+
+        Never remove parent roots, staged files, adjacent releases, receipts, or
+        foreign files. Interrupted and hash-mismatched versions may be removed,
+        but unexpected contents and reparse points are never recursively erased.
+        The host must serialize install/remove and persist its own lifecycle.
+        """
+        if not isinstance(approval, ApprovedRemoval) or approval.confirmed is not True:
+            raise InstallError("REMOVE_OWNER_APPROVAL_REQUIRED")
+        if (approval.program_id != PROGRAM_ID or
+                approval.spec_fingerprint != getattr(spec, "fingerprint", None) or
+                not isinstance(approval.receipt_id, str) or
+                re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", approval.receipt_id) is None):
+            raise InstallError("REMOVE_APPROVAL_MISMATCH")
+        _require_host_platform(spec)
+        directory = self._target(spec, approval.installation_root)
+        executable = directory / spec.executable_name
+        try:
+            _check_parent_chain(directory)
+            _check_parent_chain(executable)
+        except ArtifactPreparationError as exc:
+            raise InstallError(exc.code) from None
+        if not directory.exists():
+            return InstallObservation("NOT_INSTALLED", PROGRAM_ID)
+        if not directory.is_dir():
+            raise InstallError("REMOVE_TARGET_INVALID")
+        try:
+            entries = list(directory.iterdir())
+            if any(entry.name != spec.executable_name for entry in entries):
+                raise InstallError("REMOVE_FOREIGN_FILES_PRESENT")
+            if entries:
+                info = executable.lstat()
+                if not stat.S_ISREG(info.st_mode):
+                    raise InstallError("REMOVE_TARGET_INVALID")
+                # A corrupt binary is still owned by this exact release path.
+                # Do not rely on its checksum to decide whether removal works.
+                executable.unlink()
+            directory.rmdir()
+        except InstallError:
+            raise
+        except FileNotFoundError:
+            # A concurrent remover or filesystem race is not proof of success.
+            raise InstallError("REMOVE_OUTCOME_UNKNOWN") from None
+        except OSError:
+            raise InstallError("REMOVE_BLOCKED_RECHECK_REQUIRED") from None
+        return InstallObservation("REMOVED", PROGRAM_ID)
 
     def apply(self, spec: ArtifactSpec, staging_root: str,
               approval: ApprovedInstall) -> InstallObservation:

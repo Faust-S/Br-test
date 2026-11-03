@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT / "universal-install"))
 sys.path.insert(0, str(ROOT / "agent-headless"))
 
 from iwxa_obscura.preparer import ArtifactSpec, GUARD_PROTOCOL, UPSTREAM_COMMIT
-from iwxa_universal_install import ApprovedInstall, InstallError, ObscuraManagedBackend
+from iwxa_universal_install import ApprovedInstall, ApprovedRemoval, InstallError, ObscuraManagedBackend
 from iwxa_universal_install.obscura import _native_platform
 
 PAYLOAD = b"MZ - synthetic integration fixture, NOT native Obscura"
@@ -69,6 +69,16 @@ class PortableInstallTest(unittest.TestCase):
             receipt_id="PINS-test-0001",
             installation_root=str(installation_root or self.destination),
             confirmed=allowed,
+        )
+
+    def removal(self, spec, *, confirmed=True, fingerprint=None,
+                installation_root=None, program_id="OBSCURA_WORKER_V1"):
+        return ApprovedRemoval(
+            program_id=program_id,
+            spec_fingerprint=fingerprint or spec.fingerprint,
+            receipt_id="PINS-remove-0001",
+            installation_root=str(installation_root or self.destination),
+            confirmed=confirmed,
         )
 
     def install_fixture(self, platform=None):
@@ -327,6 +337,101 @@ class PortableInstallTest(unittest.TestCase):
                 spec, str(self.staging),
                 self.approval(spec, installation_root=root_with_dotdot))
         self.assertFalse(self.destination.exists())
+
+
+    def test_remove_exact_version_and_preserve_other_release_and_stage(self):
+        spec, prepared, installed = self.install_fixture()
+        archive, other = self.package(release="v0.2.6-iwxa.2-test")
+        self.backend.prepare(other, str(self.staging), archive_path=str(archive))
+        neighbor = self.backend.apply(other, str(self.staging), self.approval(other))
+        foreign = self.destination / "unrelated-user-data.txt"
+        foreign.write_text("keep me", encoding="utf-8")
+        deleted = self.backend.remove(spec, self.removal(spec))
+        self.assertEqual(deleted.status, "REMOVED")
+        self.assertFalse(deleted.installed)
+        self.assertFalse(deleted.connected)
+        self.assertFalse(deleted.receipt_written)
+        self.assertFalse(Path(installed.executable).exists())
+        self.assertEqual(self.backend.verify(spec, str(self.destination)).status, "NOT_INSTALLED")
+        self.assertEqual(self.backend.verify(other, str(self.destination)), neighbor)
+        self.assertTrue(Path(prepared.executable).is_file())
+        self.assertEqual(foreign.read_text(), "keep me")
+        self.assertTrue(self.destination.is_dir())
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "NOT_INSTALLED")
+
+    def test_removal_requires_current_explicit_owner_decision(self):
+        spec, _, original = self.install_fixture()
+        rejected = (
+            (self.removal(spec, confirmed=False), "REMOVE_OWNER_APPROVAL_REQUIRED"),
+            (self.removal(spec, fingerprint="f" * 64), "REMOVE_APPROVAL_MISMATCH"),
+            (self.removal(spec, program_id="ANOTHER_PROGRAM"), "REMOVE_APPROVAL_MISMATCH"),
+            (ApprovedRemoval("OBSCURA_WORKER_V1", spec.fingerprint, "../bad",
+                             str(self.destination), True), "REMOVE_APPROVAL_MISMATCH"),
+        )
+        for approval, reason in rejected:
+            with self.subTest(reason=reason), self.assertRaisesRegex(InstallError, reason):
+                self.backend.remove(spec, approval)
+        self.assertEqual(self.backend.verify(spec, str(self.destination)), original)
+
+    def test_remove_corrupted_binary_without_touching_other_versions(self):
+        spec, _, installed = self.install_fixture()
+        path = Path(installed.executable)
+        os.chmod(path, 0o600)
+        path.write_bytes(b"damaged-by-user")
+        self.assertEqual(self.backend.verify(spec, str(self.destination)).status, "INSTALL_MISMATCH")
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
+        self.assertEqual(self.backend.recover(spec, str(self.destination)).status, "NOT_INSTALLED")
+
+    def test_remove_empty_interrupted_install_directory(self):
+        _, spec = self.package()
+        target = self.destination / "obscura-worker" / spec.release_id / spec.platform
+        target.mkdir(parents=True)
+        self.assertEqual(self.backend.verify(spec, str(self.destination)).status, "INSTALL_INCOMPLETE")
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
+        self.assertFalse(target.exists())
+        self.assertTrue(self.destination.exists())
+
+    def test_remove_rejects_foreign_files_before_writing(self):
+        spec, _, installed = self.install_fixture()
+        directory = Path(installed.executable).parent
+        (directory / "notes.txt").write_text("user data")
+        with self.assertRaisesRegex(InstallError, "REMOVE_FOREIGN_FILES_PRESENT"):
+            self.backend.remove(spec, self.removal(spec))
+        self.assertTrue(Path(installed.executable).exists())
+        self.assertEqual((directory / "notes.txt").read_text(), "user data")
+
+    def test_remove_rejects_symlinked_binary_and_does_not_touch_target(self):
+        spec, _, installed = self.install_fixture()
+        path = Path(installed.executable)
+        path.unlink()
+        external = self.root / "outside-worker.bin"
+        external.write_bytes(PAYLOAD)
+        try:
+            path.symlink_to(external)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks unavailable for this runner")
+        with self.assertRaisesRegex(InstallError, "ARTIFACT_PATH_REPARSE_DENIED"):
+            self.backend.remove(spec, self.removal(spec))
+        self.assertEqual(external.read_bytes(), PAYLOAD)
+        self.assertTrue(path.is_symlink())
+
+    def test_remove_blocked_by_os_does_not_claim_success(self):
+        from unittest import mock
+        spec, _, installed = self.install_fixture()
+        path = Path(installed.executable)
+        with mock.patch.object(Path, "unlink", side_effect=PermissionError("file in use")):
+            with self.assertRaisesRegex(InstallError, "REMOVE_BLOCKED_RECHECK_REQUIRED"):
+                self.backend.remove(spec, self.removal(spec))
+        self.assertTrue(path.exists())
+        self.assertTrue(self.backend.recover(spec, str(self.destination)).installed)
+
+    def test_remove_recheck_does_not_automatically_retry(self):
+        spec, _, installed = self.install_fixture()
+        with self.assertRaisesRegex(InstallError, "REMOVE_OWNER_APPROVAL_REQUIRED"):
+            self.backend.remove(spec, self.removal(spec, confirmed=False))
+        self.assertEqual(ObscuraManagedBackend().recover(spec, str(self.destination)), installed)
+        self.assertTrue(Path(installed.executable).exists())
+
 
 if __name__ == "__main__":
     unittest.main()
