@@ -180,5 +180,66 @@ class TestArtifactPreparation(unittest.TestCase):
                           lambda:handler.redirect_request(None,None,302,'',{},url))
 
 
+    def test_network_timeout_is_stable_error_without_automatic_retry(self):
+        class TimeoutOpener:
+            calls = 0
+            def open(self, *_args, **_kwargs):
+                self.calls += 1
+                raise TimeoutError("simulated network timeout")
+        opener = TimeoutOpener()
+        with mock.patch("iwxa_obscura.preparer.build_opener", return_value=opener):
+            self.rejected("ARTIFACT_DOWNLOAD_FAILED",
+                          lambda: self.preparer.download_and_prepare(self.spec()))
+        self.assertEqual(opener.calls, 1)
+        self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")), [])
+        self.assertFalse(self.preparer._target(self.spec()).exists())
+
+    def test_interrupted_stream_does_not_leave_a_partial_download(self):
+        class BrokenStream(io.BytesIO):
+            reads = 0
+            def read(self, count=-1):
+                self.reads += 1
+                if self.reads > 1:
+                    raise OSError("connection terminated during transfer")
+                return super().read(8)
+        class BrokenOpener:
+            calls = 0
+            def open(self, *_args, **_kwargs):
+                self.calls += 1
+                return BrokenStream(b"partial-archive-data")
+        opener = BrokenOpener()
+        with mock.patch("iwxa_obscura.preparer.build_opener", return_value=opener):
+            self.rejected("ARTIFACT_DOWNLOAD_FAILED",
+                          lambda: self.preparer.download_and_prepare(self.spec()))
+        self.assertEqual(opener.calls, 1)
+        self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")), [])
+        self.assertFalse(self.preparer._target(self.spec()).exists())
+
+    def test_oversized_download_fails_without_partial_installed_file(self):
+        class FakeOpener:
+            def open(self, *_args, **_kwargs):
+                return io.BytesIO(b"12345678901234567890")
+        with mock.patch("iwxa_obscura.preparer.build_opener", return_value=FakeOpener()), \
+             mock.patch("iwxa_obscura.preparer.ARCHIVE_LIMIT", 12):
+            self.rejected("ARTIFACT_DOWNLOAD_TOO_LARGE",
+                          lambda: self.preparer.download_and_prepare(self.spec()))
+        self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")), [])
+        self.assertFalse(self.preparer._target(self.spec()).exists())
+
+    def test_failed_new_download_preserves_existing_staged_release(self):
+        original = self.spec()
+        existing = self.preparer.prepare_local(self.archive, original)
+        before = Path(existing.executable).read_bytes()
+        class FakeOpener:
+            def open(self, *_args, **_kwargs):
+                return io.BytesIO(b"corrupted retry bytes")
+        with mock.patch("iwxa_obscura.preparer.build_opener", return_value=FakeOpener()):
+            self.rejected("ARTIFACT_ARCHIVE_DIGEST_MISMATCH",
+                          lambda: self.preparer.download_and_prepare(original))
+        self.assertEqual(self.preparer.verify_prepared(original), existing)
+        self.assertEqual(Path(existing.executable).read_bytes(), before)
+        self.assertEqual(list(self.preparer.root.glob(".obscura-download-*")), [])
+
+
 if __name__=='__main__':
     unittest.main()
