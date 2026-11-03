@@ -425,6 +425,54 @@ class PortableInstallTest(unittest.TestCase):
         self.assertTrue(path.exists())
         self.assertTrue(self.backend.recover(spec, str(self.destination)).installed)
 
+    def test_remove_unknown_binary_in_unmarked_directory_is_rejected(self):
+        _, spec = self.package()
+        folder = self.destination / "obscura-worker" / spec.release_id / spec.platform
+        folder.mkdir(parents=True)
+        file = folder / spec.executable_name
+        file.write_bytes(b"someone else's binary")
+        with self.assertRaisesRegex(InstallError, "REMOVE_OWNERSHIP_UNKNOWN"):
+            self.backend.remove(spec, self.removal(spec))
+        self.assertEqual(file.read_bytes(), b"someone else's binary")
+
+    def test_remove_managed_marker_mismatch_refuses_file_deletion(self):
+        spec, _, installed = self.install_fixture()
+        marker = Path(installed.executable).parent / ".iwxa-installed.json"
+        marker.write_text('{"schema":"wrong"}', encoding="utf-8")
+        with self.assertRaisesRegex(InstallError, "REMOVE_OWNERSHIP_UNKNOWN"):
+            self.backend.remove(spec, self.removal(spec))
+        self.assertTrue(Path(installed.executable).exists())
+        self.assertEqual(self.backend.recover(spec, str(self.destination)).status,
+                         "INSTALL_MISMATCH")
+
+    def test_remove_legacy_verified_binary_without_marker(self):
+        spec, _, installed = self.install_fixture()
+        (Path(installed.executable).parent / ".iwxa-installed.json").unlink()
+        self.assertTrue(self.backend.verify(spec, str(self.destination)).installed)
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
+        self.assertEqual(self.backend.verify(spec, str(self.destination)).status, "NOT_INSTALLED")
+
+    def test_remove_interrupted_managed_install_with_only_marker(self):
+        spec, _, installed = self.install_fixture()
+        Path(installed.executable).unlink()
+        self.assertEqual(self.backend.verify(spec, str(self.destination)).status,
+                         "INSTALL_INCOMPLETE")
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
+        self.assertEqual(self.backend.verify(spec, str(self.destination)).status, "NOT_INSTALLED")
+
+    def test_remove_marker_is_created_only_for_managed_install(self):
+        spec, prepared, installed = self.install_fixture()
+        marker = Path(installed.executable).parent / ".iwxa-installed.json"
+        import json
+        self.assertEqual(json.loads(marker.read_text(encoding="utf-8")), {
+            "schema": "IWXA_MANAGED_BINARY/1",
+            "program_id": "OBSCURA_WORKER_V1",
+            "spec_fingerprint": spec.fingerprint,
+        })
+        self.assertTrue(Path(prepared.executable).exists())
+        self.assertEqual(self.backend.remove(spec, self.removal(spec)).status, "REMOVED")
+        self.assertFalse(marker.exists())
+
     def test_remove_recheck_does_not_automatically_retry(self):
         spec, _, installed = self.install_fixture()
         with self.assertRaisesRegex(InstallError, "REMOVE_OWNER_APPROVAL_REQUIRED"):

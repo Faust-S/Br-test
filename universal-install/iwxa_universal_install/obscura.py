@@ -7,6 +7,7 @@ another installed version. Host authorization is REQUIRED before apply().
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import platform as host_platform
 from pathlib import Path
@@ -24,6 +25,33 @@ from iwxa_obscura.preparer import (
 PROGRAM_ID = "OBSCURA_WORKER_V1"
 FAMILY = "IWXA_MANAGED_ARTIFACT_V1"
 _CHUNK = 1024 * 1024
+_INSTALL_MARKER = ".iwxa-installed.json"
+_INSTALL_MARKER_SCHEMA = "IWXA_MANAGED_BINARY/1"
+
+
+def _marker_contents(spec: ArtifactSpec) -> dict:
+    return {
+        "schema": _INSTALL_MARKER_SCHEMA,
+        "program_id": PROGRAM_ID,
+        "spec_fingerprint": spec.fingerprint,
+    }
+
+
+def _owned_marker(directory: Path, spec: ArtifactSpec) -> bool | None:
+    """True=matching owner, False=invalid owner, None=legacy/no marker."""
+    marker = directory / _INSTALL_MARKER
+    try:
+        _check_parent_chain(marker)
+    except ArtifactPreparationError as exc:
+        raise InstallError(exc.code) from None
+    if not marker.exists():
+        return None
+    try:
+        if not marker.is_file() or marker.stat().st_size > 8192:
+            return False
+        return json.loads(marker.read_text(encoding="utf-8")) == _marker_contents(spec)
+    except (OSError, UnicodeError, ValueError):
+        return False
 
 
 def _native_platform() -> str:
@@ -105,6 +133,8 @@ class ObscuraManagedBackend:
             return InstallObservation("NOT_INSTALLED", PROGRAM_ID)
         if not directory.is_dir() or not executable.is_file():
             return InstallObservation("INSTALL_INCOMPLETE", PROGRAM_ID)
+        if _owned_marker(directory, spec) is False:
+            return InstallObservation("INSTALL_MISMATCH", PROGRAM_ID)
         try:
             digest = _sha_file(executable, BINARY_LIMIT)
         except (ArtifactPreparationError, OSError):
@@ -159,15 +189,29 @@ class ObscuraManagedBackend:
             raise InstallError("REMOVE_TARGET_INVALID")
         try:
             entries = list(directory.iterdir())
-            if any(entry.name != spec.executable_name for entry in entries):
+            names = {entry.name for entry in entries}
+            if names - {spec.executable_name, _INSTALL_MARKER}:
                 raise InstallError("REMOVE_FOREIGN_FILES_PRESENT")
-            if entries:
+            ownership = _owned_marker(directory, spec)
+            if ownership is False:
+                raise InstallError("REMOVE_OWNERSHIP_UNKNOWN")
+            if spec.executable_name in names:
                 info = executable.lstat()
                 if not stat.S_ISREG(info.st_mode):
                     raise InstallError("REMOVE_TARGET_INVALID")
-                # A corrupt binary is still owned by this exact release path.
-                # Do not rely on its checksum to decide whether removal works.
+                if ownership is None:
+                    # Pre-marker installs are compatible only when their
+                    # binary still matches the pinned release. An unknown
+                    # damaged file must not be deleted as if it were ours.
+                    try:
+                        legacy_digest = _sha_file(executable, BINARY_LIMIT)
+                    except ArtifactPreparationError:
+                        raise InstallError("REMOVE_OWNERSHIP_UNKNOWN") from None
+                    if legacy_digest != spec.executable_sha256:
+                        raise InstallError("REMOVE_OWNERSHIP_UNKNOWN")
                 executable.unlink()
+            if ownership is True:
+                (directory / _INSTALL_MARKER).unlink()
             directory.rmdir()
         except InstallError:
             raise
@@ -249,12 +293,20 @@ class ObscuraManagedBackend:
                 raise InstallError("INSTALL_INPUT_CHANGED")
             if os.name != "nt":
                 destination.chmod(0o500)
+            # One small version-local ownership marker; not a registry,
+            # receipt, user approval or application Store. The marker lets
+            # removal distinguish IWXA-managed bytes from arbitrary files.
+            with (target / _INSTALL_MARKER).open("x", encoding="utf-8") as sink:
+                json.dump(_marker_contents(spec), sink, sort_keys=True, separators=(",", ":"))
+                sink.flush()
+                os.fsync(sink.fileno())
             observation = self.verify(spec, approval.installation_root)
             if not observation.installed:
                 raise InstallError("INSTALL_VERIFY_FAILED")
             return observation
         except (OSError, InstallError) as exc:
             try:
+                (target / _INSTALL_MARKER).unlink(missing_ok=True)
                 destination.unlink(missing_ok=True)
                 target.rmdir()
             except OSError:
