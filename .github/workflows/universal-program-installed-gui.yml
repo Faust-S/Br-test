@@ -1,0 +1,92 @@
+name: IWXA Universal Program - Installed Windows GUI
+on:
+  push:
+    branches: [work/2026-11-04-universal-program-integration]
+    paths:
+      - 'universal-install/qualification/desktop-host/**'
+      - 'universal-install/host-bindings/rust-port/**'
+      - 'universal-install/iwxa_universal_install/**'
+      - 'universal-install/catalog/cli-connectors-1.json'
+      - 'universal-install/catalog/jq-1.8.1.json'
+      - '.github/workflows/universal-program-installed-gui.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: universal-program-installed-gui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  installed-windows-gui:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build isolated public NSIS Tauri desktop
+        shell: pwsh
+        working-directory: universal-install/qualification/desktop-host
+        run: |
+          npm install --no-audit --no-fund
+          npx tauri build
+      - name: Install exact NSIS candidate into hosted user profile
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Get-ChildItem universal-install/qualification/desktop-host/src-tauri/target/release/bundle/nsis -Filter '*.exe' | Select-Object -First 1
+          if (!$build) { throw 'GUI_INSTALLER_NOT_BUILT' }
+          $p = Start-Process -FilePath $build.FullName -ArgumentList '/S' -PassThru
+          $p | Wait-Process -Timeout 90
+          $p.Refresh()
+          if ($p.ExitCode -ne 0) { throw "GUI_INSTALLER_EXIT_$($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'IWXA Universal Program CI\iwxa-universal-program-ci.exe'
+          if (!(Test-Path $exe)) { throw "GUI_INSTALLED_EXE_ABSENT: $exe" }
+          "IWXA_INSTALLED_GUI_EXE=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "IWXA_GUI_RECEIPT=$env:RUNNER_TEMP\iwxa-gui-proof.json" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Install pinned real jq 1.8.1 via generic backend
+        shell: pwsh
+        run: |
+          @'
+          import json,os,sys
+          from pathlib import Path
+          sys.path.insert(0,'universal-install')
+          from iwxa_universal_install import ManagedArtifactBackend,ManagedArtifactSpec,ApprovedInstall
+          from iwxa_universal_install.managed import _native_platform
+          c=json.loads(Path('universal-install/catalog/jq-1.8.1.json').read_text(encoding='utf8'))
+          selected=c['platforms'][_native_platform()]
+          spec=ManagedArtifactSpec(program_id='JQ_CLI_V1',slug=c['slug'],release_id=c['upstream_tag'],
+            platform=_native_platform(),executable_name=selected['executable'],
+            archive_name=selected['asset'],archive_format='binary',archive_sha256=selected['sha256'],
+            executable_sha256=selected['sha256'],download_url='https://github.com/jqlang/jq/releases/download/'+c['upstream_tag']+'/'+selected['asset'])
+          destination=Path(os.environ['RUNNER_TEMP'])/'iwxa-gui-test-programs'
+          destination.mkdir(exist_ok=True)
+          stage=Path(os.environ['RUNNER_TEMP'])/'iwxa-gui-test-stage'
+          backend=ManagedArtifactBackend()
+          backend.prepare(spec,str(stage))
+          approved=ApprovedInstall(spec.program_id,spec.fingerprint,'PINS-real-gui-qualification',str(destination),True)
+          installed=backend.apply(spec,str(stage),approved)
+          if not installed.installed:raise RuntimeError('GUI_JQ_INSTALL_FAILED')
+          with open(os.environ['GITHUB_ENV'],'a',encoding='utf8') as out:
+            out.write('IWXA_CLI_EXECUTABLE='+str(installed.executable)+'\n')
+            out.write('IWXA_CLI_CATALOG='+str(Path('universal-install/catalog/cli-connectors-1.json').resolve())+'\n')
+          print('GUI_PINNED_JQ_INSTALL_PASS')
+          '@ | python -
+      - name: Install native Windows UI automation tools
+        shell: pwsh
+        run: python -m pip install pywinauto==0.6.9 pillow==11.3.0 psutil==7.0.0
+      - name: Real installed Windows GUI click, IPC, jq and restart acceptance
+        shell: pwsh
+        timeout-minutes: 5
+        run: python universal-install/qualification/desktop-host/tests/installed_gui.py
+      - name: Upload real GUI evidence and runtime measurements
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-universal-program-real-windows-gui
+          path: artifacts/universal-program/windows-gui/
+          retention-days: 7
+          if-no-files-found: ignore

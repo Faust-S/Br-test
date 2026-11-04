@@ -1,258 +1,229 @@
-"""Installed real Windows Tauri/WebView GUI: actual click -> native Rust -> jq.
+"""Actual Windows NSIS -> installed Tauri/WebView2 -> OS click -> Rust -> jq.
 
-Run on a fresh hosted profile. Do not treat a backend fixture or DOM simulation
-as an installed GUI PASS. Preserve screenshots and measurements on failure.
+A visible native HWND is not a loaded web page. Wait for a JS-armed, visually
+blue button before clicking. Never dispatch browser JS or mock native IPC.
 """
 import json
-import ctypes
-from ctypes import wintypes
 import os
 from pathlib import Path
 import subprocess
-import sys
-import tempfile
 import time
 from datetime import datetime, timezone
 
 import psutil
-from pywinauto import Application, mouse, keyboard
+from pywinauto import Application, mouse
 
-ROOT=Path(__file__).resolve().parents[4]
-OUT=ROOT/"artifacts"/"universal-program"/"windows-gui"
-OUT.mkdir(parents=True,exist_ok=True)
-REPORT=OUT/"report.json"
-RUNS=[]
+ROOT = Path(__file__).resolve().parents[4]
+OUT = ROOT / "artifacts" / "universal-program" / "windows-gui"
+OUT.mkdir(parents=True, exist_ok=True)
+REPORT = OUT / "report.json"
+RUNS = []
+BLUE_READY = (35, 78, 138)       # button.ready:not(:disabled)
+GREEN_VERIFIED = (225, 245, 232) # #result.verified
+FRONTEND_TIMEOUT_S = 90
+RECEIPT_TIMEOUT_S = 20
+VISUAL_RESULT_TIMEOUT_S = 12
 
-def check(condition,code):
+
+def check(condition, code):
     if not condition:
         raise RuntimeError(code)
 
-def native_input_probe(window,receipt,attempt,entry):
-    """Real Win32 input then OS-window routing; never invoke application JS/IPC."""
-    user32=ctypes.WinDLL("user32",use_last_error=True)
-    owner=int(window.handle)
-    rect=window.rectangle()
-    x,y=rect.left+165,rect.top+185
-    user32.ShowWindow(owner,9)  # SW_RESTORE
-    user32.SetForegroundWindow(owner)
-    entry["foreground_hwnd"]=int(user32.GetForegroundWindow() or 0)
-    entry["owner_hwnd"]=owner
 
-    class POINT(ctypes.Structure):
-        _fields_=[("x",wintypes.LONG),("y",wintypes.LONG)]
-    class MOUSEINPUT(ctypes.Structure):
-        _fields_=[("dx",wintypes.LONG),("dy",wintypes.LONG),
-                  ("mouseData",wintypes.DWORD),("dwFlags",wintypes.DWORD),
-                  ("time",wintypes.DWORD),("dwExtraInfo",ctypes.c_void_p)]
-    class KEYBDINPUT(ctypes.Structure):
-        _fields_=[("wVk",wintypes.WORD),("wScan",wintypes.WORD),
-                  ("dwFlags",wintypes.DWORD),("time",wintypes.DWORD),
-                  ("dwExtraInfo",ctypes.c_void_p)]
-    class HARDWAREINPUT(ctypes.Structure):
-        _fields_=[("uMsg",wintypes.DWORD),("wParamL",wintypes.WORD),
-                  ("wParamH",wintypes.WORD)]
-    class INPUTUNION(ctypes.Union):
-        _fields_=[("mi",MOUSEINPUT),("ki",KEYBDINPUT),("hi",HARDWAREINPUT)]
-    class INPUT(ctypes.Structure):
-        _fields_=[("type",wintypes.DWORD),("union",INPUTUNION)]
-    def event(flag):
-        data=INPUT()
-        data.type=0
-        data.union.mi=MOUSEINPUT(0,0,0,flag,0,None)
-        return user32.SendInput(1,ctypes.byref(data),ctypes.sizeof(data))
-    user32.SetCursorPos(x,y)
-    entry["sendinput_click"]={
-        "x":x,"y":y,"down":int(event(0x0002)), "up":int(event(0x0004))}
-    time.sleep(1.0)
-    window.capture_as_image().save(str(OUT/f"after-sendinput-{attempt}.png"))
+def color_region(image, target):
+    """Find a sizable solid-color UI region in real window pixels, not DOM."""
+    pixels = image.convert("RGB").load()
+    width, height = image.size
+    xs, ys = [], []
+    for y in range(int(height * 0.22), int(height * 0.78), 4):
+        for x in range(16, min(int(width * 0.62), 430), 4):
+            actual = pixels[x, y]
+            if all(abs(actual[i] - target[i]) <= 11 for i in range(3)):
+                xs.append(x)
+                ys.append(y)
+    if len(xs) < 110:
+        return None
+    left, right, top, bottom = min(xs), max(xs), min(ys), max(ys)
+    if right - left < 110 or bottom - top < 22:
+        return None
+    return {"left": left, "right": right, "top": top, "bottom": bottom,
+            "samples": len(xs), "center_x": (left + right) // 2,
+            "center_y": (top + bottom) // 2}
+
+
+def wait_for_visual(window, process, target, timeout_s, stage, attempt):
+    started = time.perf_counter()
+    stable = 0
+    last = None
+    while time.perf_counter() - started < timeout_s:
+        check(process.poll() is None, "GUI_PROCESS_EXITED_DURING_" + stage)
+        try:
+            frame = window.capture_as_image()
+            last = frame
+            bounds = color_region(frame, target)
+        except Exception:
+            bounds = None
+        if bounds:
+            stable += 1
+            if stable >= 2:
+                frame.save(str(OUT / f"{stage}-{attempt}.png"))
+                return bounds
+        else:
+            stable = 0
+        time.sleep(0.5)
+    if last is not None:
+        last.save(str(OUT / f"{stage}-timeout-{attempt}.png"))
+    raise RuntimeError(f"GUI_{stage.upper()}_NOT_VISIBLE_WITHIN_{timeout_s}S")
+
+
+def tree_resources(process):
+    processes = [process]
+    try:
+        processes += process.children(recursive=True)
+    except psutil.Error:
+        pass
+    rss, cpu_ms, counted = 0, 0.0, 0
+    for item in processes:
+        try:
+            rss += item.memory_info().rss
+            cpu = item.cpu_times()
+            cpu_ms += (cpu.user + cpu.system) * 1000
+            counted += 1
+        except psutil.Error:
+            pass
+    return {"tree_rss_bytes": rss, "tree_cpu_ms": round(cpu_ms, 3),
+            "tree_processes": counted}
+
+
+def launch_and_click(executable, receipt, attempt):
     if receipt.exists():
-        entry["native_input_route"]="SendInput"
-        return
-
-    children=[]
-    enum=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
-    @enum
-    def visitor(hwnd,ignored):
-        buffer=ctypes.create_unicode_buffer(180)
-        user32.GetClassNameW(hwnd,buffer,180)
-        r=wintypes.RECT()
-        user32.GetWindowRect(hwnd,ctypes.byref(r))
-        children.append({"hwnd":int(hwnd),"class":buffer.value,
-            "left":r.left,"top":r.top,"right":r.right,"bottom":r.bottom,
-            "visible":bool(user32.IsWindowVisible(hwnd))})
-        return True
-    user32.EnumChildWindows(owner,visitor,0)
-    entry["native_child_windows"]=children
-    print("GUI_NATIVE_CHILDREN: "+json.dumps(children),flush=True)
-
-    # WebView2 can own a separate child HWND. Test native Windows messages
-    # against actual visible child HWNDs; a response still requires REAL
-    # Rust execution and written native receipt, not simulated success.
-    candidates=[c for c in children if c["visible"] and
-                c["left"]<=x<c["right"] and c["top"]<=y<c["bottom"]]
-    candidates.sort(key=lambda c:
-        (c["right"]-c["left"])*(c["bottom"]-c["top"]))
-    for child in candidates[:12]:
-        hwnd=child["hwnd"]
-        point=POINT(x,y)
-        user32.ScreenToClient(hwnd,ctypes.byref(point))
-        packed=((point.y & 0xffff)<<16)|(point.x & 0xffff)
-        user32.PostMessageW(hwnd,0x0200,0,packed)  # WM_MOUSEMOVE
-        user32.PostMessageW(hwnd,0x0201,1,packed)  # WM_LBUTTONDOWN
-        user32.PostMessageW(hwnd,0x0202,0,packed)  # WM_LBUTTONUP
-        time.sleep(0.45)
-        if receipt.exists():
-            entry["native_input_route"]="WM_LBUTTON_to_"+child["class"]
-            break
-    window.capture_as_image().save(str(OUT/f"after-native-child-{attempt}.png"))
-
-
-def launch_and_click(executable,receipt,attempt):
-    if receipt.exists():
-        receipt.unlink()
-    process=subprocess.Popen([str(executable)],stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL,env=os.environ.copy())
-    started=time.perf_counter()
-    entry={"attempt":attempt,"pid":process.pid,"receipt":str(receipt)}
+        receipt.unlink()  # Previous process cannot prove a new session.
+    started = time.perf_counter()
+    process = subprocess.Popen([str(executable)], stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, env=os.environ.copy())
+    entry = {"attempt": attempt, "pid": process.pid, "receipt": str(receipt)}
     RUNS.append(entry)
     try:
-        window=None
+        window = None
         for _ in range(100):
-            if process.poll() is not None:
-                raise RuntimeError("GUI_PROCESS_EXITED_BEFORE_WINDOW")
+            check(process.poll() is None, "GUI_PROCESS_EXITED_BEFORE_WINDOW")
             try:
-                app=Application(backend="uia").connect(process=process.pid,timeout=1)
-                win=app.window(title_re=".*IWXA Universal Program CI.*")
-                if win.exists(timeout=0.25) and win.is_visible():
-                    window=win
+                app = Application(backend="uia").connect(process=process.pid, timeout=1)
+                candidate = app.window(title_re=".*IWXA Universal Program CI.*")
+                if candidate.exists(timeout=0.25) and candidate.is_visible():
+                    window = candidate
                     break
             except Exception:
                 pass
             time.sleep(0.2)
-        check(window is not None,"INSTALLED_GUI_WINDOW_NOT_FOUND")
-        entry["cold_window_ms"]=round((time.perf_counter()-started)*1000,3)
-        measured=psutil.Process(process.pid)
-        entry["idle_rss_bytes"]=measured.memory_info().rss
-        before=measured.cpu_times()
+        check(window is not None, "INSTALLED_GUI_WINDOW_NOT_FOUND")
+        entry["native_window_ms"] = round((time.perf_counter() - started) * 1000, 3)
+        measured = psutil.Process(process.pid)
+
+        # The old test clicked a blank white WebView before its JS had loaded.
+        # In the fixture the button is disabled and gray until JS registers
+        # its click listener; only then does it become the target blue.
+        ready_button = wait_for_visual(
+            window, process, BLUE_READY, FRONTEND_TIMEOUT_S, "frontend-ready", attempt)
+        entry["frontend_ready_ms"] = round((time.perf_counter() - started) * 1000, 3)
+        entry["ready_button_pixels"] = ready_button
+        idle_before = tree_resources(measured)
         time.sleep(0.3)
-        after=measured.cpu_times()
-        entry["idle_cpu_ms_over_300ms"]=round(
-            ((after.user+after.system)-(before.user+before.system))*1000,3)
+        idle_after = tree_resources(measured)
+        entry["idle_tree_rss_bytes"] = idle_after["tree_rss_bytes"]
+        entry["idle_tree_processes"] = idle_after["tree_processes"]
+        entry["idle_tree_cpu_ms_over_300ms"] = round(
+            idle_after["tree_cpu_ms"] - idle_before["tree_cpu_ms"], 3)
+        entry["native_process_rss_bytes"] = measured.memory_info().rss
+
         window.set_focus()
-        window.capture_as_image().save(str(OUT/f"before-click-{attempt}.png"))
-        controls=[]
-        try:
-            controls=[{"type":c.element_info.control_type,"name":c.window_text()[:160]}
-                      for c in window.descendants()[:80]]
-        except Exception as error:
-            controls=[{"error":str(error)}]
-        entry["controls_before_click"]=controls
-        print("GUI_CONTROLS_BEFORE_CLICK: "+json.dumps(controls,ensure_ascii=False),flush=True)
-        # Prefer the actual HTML button exposed through WebView2 UI Automation.
-        button=None
-        try:
-            button=window.child_window(title_re=".*Execute jq.*",control_type="Button")
-            if not button.exists(timeout=1):
-                button=None
-        except Exception:
-            button=None
-        rect=window.rectangle()
-        entry["window_rect"]={"left":rect.left,"top":rect.top,
-                              "right":rect.right,"bottom":rect.bottom}
-        if button is not None:
-            button.click_input()
-            entry["click_method"]="uia_button"
-        else:
-            # pywinauto.mouse.click explicitly accepts ABSOLUTE desktop pixels.
-            # The fixture button occupies x=40..290, y=157..213 in screenshot.
-            x,y=rect.left+165,rect.top+185
-            entry["absolute_click"]={"x":x,"y":y}
-            mouse.click(button="left",coords=(x,y))
-            entry["click_method"]="absolute_win32_mouse"
-        entry["clicked"]=True
-        time.sleep(1.0)
-        if not receipt.exists():
-            # Genuine keyboard events, not JS dispatch or synthetic IPC.
-            window.set_focus()
-            keyboard.send_keys("{TAB}{ENTER}",pause=0.15)
-            entry["keyboard_fallback"]=True
-            time.sleep(1.0)
-        if not receipt.exists():
-            native_input_probe(window,receipt,attempt,entry)
-        window.capture_as_image().save(str(OUT/f"after-click-{attempt}.png"))
-        try:
-            entry["controls_after_click"]=[
-                {"type":c.element_info.control_type,"name":c.window_text()[:160]}
-                for c in window.descendants()[:80]]
-            print("GUI_CONTROLS_AFTER_CLICK: "+
-                  json.dumps(entry["controls_after_click"],ensure_ascii=False),flush=True)
-        except Exception as error:
-            entry["ui_inspection_error"]=str(error)
-        for _ in range(120):
+        rect = window.rectangle()
+        x = rect.left + ready_button["center_x"]
+        y = rect.top + ready_button["center_y"]
+        entry["physical_click"] = {"x": x, "y": y, "method": "pywinauto.mouse.click"}
+        click_started = time.perf_counter()
+        mouse.click(button="left", coords=(x, y))
+        entry["clicked"] = True
+
+        body = None
+        deadline = time.perf_counter() + RECEIPT_TIMEOUT_S
+        while time.perf_counter() < deadline:
+            check(process.poll() is None, "GUI_PROCESS_EXITED_BEFORE_PROOF")
             if receipt.exists():
                 try:
-                    body=json.loads(receipt.read_text(encoding="utf-8"))
-                except Exception:
-                    body=None
-                if body and body.get("status")=="PASS":
-                    entry["receipt_data"]=body
-                    entry["click_to_verified_ms"]=round((time.perf_counter()-started)*1000,3)
+                    body = json.loads(receipt.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    body = None
+                if body and body.get("status") == "PASS":
                     break
-            if process.poll() is not None:
-                raise RuntimeError("GUI_PROCESS_EXITED_BEFORE_PROOF")
             time.sleep(0.2)
-        if "receipt_data" not in entry:
-            try:
-                window.capture_as_image().save(str(OUT/f"failed-receipt-{attempt}.png"))
-            except Exception:
-                pass
-            details=json.dumps(entry.get("controls_after_click",[]),ensure_ascii=False)
-            raise RuntimeError("REAL_GUI_CLICK_NO_NATIVE_RECEIPT: "+details[:1200])
-        check(entry["receipt_data"]["pid"]==process.pid,"RECEIPT_PID_MISMATCH")
-        check(entry["receipt_data"]["real_cli_output"]=="42","REAL_JQ_RESULT_INVALID")
-        check(entry["receipt_data"]["native_contract"]=="IWXA_PROGRAM_CONNECTION/1.0.0",
+        if not body or body.get("status") != "PASS":
+            window.capture_as_image().save(str(OUT / f"failed-receipt-{attempt}.png"))
+            raise RuntimeError("REAL_OS_CLICK_NO_NATIVE_RECEIPT")
+        entry["receipt_data"] = body
+        entry["click_to_native_receipt_ms"] = round(
+            (time.perf_counter() - click_started) * 1000, 3)
+        check(body.get("pid") == process.pid, "RECEIPT_PID_MISMATCH")
+        check(body.get("real_cli_output") == "42", "REAL_JQ_RESULT_INVALID")
+        check(body.get("native_contract") == "IWXA_PROGRAM_CONNECTION/1.0.0",
               "CONTRACT_MISMATCH")
-        try:
-            window.capture_as_image().save(str(OUT/f"gui-{attempt}.png"))
-        except Exception as error:
-            entry["screenshot_error"]=str(error)
+
+        # A native receipt alone is insufficient: the actual window must
+        # also display success. This rules out backend-only pseudo-GUI PASS.
+        entry["visual_verified_pixels"] = wait_for_visual(
+            window, process, GREEN_VERIFIED, VISUAL_RESULT_TIMEOUT_S,
+            "verified-visible", attempt)
+        entry["click_to_visible_result_ms"] = round(
+            (time.perf_counter() - click_started) * 1000, 3)
+        window.capture_as_image().save(str(OUT / f"gui-{attempt}.png"))
         return entry
     finally:
         if process.poll() is None:
             process.terminate()
-            try:process.wait(timeout=12)
+            try:
+                process.wait(timeout=12)
             except subprocess.TimeoutExpired:
                 process.kill()
                 process.wait(timeout=6)
 
+
 def main():
-    exe=Path(os.environ["IWXA_INSTALLED_GUI_EXE"]).resolve()
-    check(exe.is_file(),"INSTALLED_EXE_NOT_FOUND")
-    check(str(exe).lower().startswith(str(Path(os.environ["LOCALAPPDATA"])).lower()),
+    exe = Path(os.environ["IWXA_INSTALLED_GUI_EXE"]).resolve()
+    check(exe.is_file(), "INSTALLED_EXE_NOT_FOUND")
+    check(str(exe).lower().startswith(
+          str(Path(os.environ["LOCALAPPDATA"]).resolve()).lower() + os.sep),
           "NOT_INSTALLED_IN_ISOLATED_PROFILE")
-    check(Path(os.environ["IWXA_CLI_EXECUTABLE"]).is_file(),"REAL_JQ_MISSING")
-    receipt=Path(os.environ["IWXA_GUI_RECEIPT"]).resolve()
-    check(receipt.parent.is_dir(),"RECEIPT_DIR_NOT_FOUND")
-    user_file=receipt.parent/"persistent-user-file.txt"
-    user_file.write_text("KEEP",encoding="utf-8")
-    result={"schema":"IWXA_INSTALLED_WINDOWS_GUI_QUALIFICATION/1",
-            "status":"FAIL","actual_gui":True,"real_install":True,
-            "timestamp":datetime.now(timezone.utc).isoformat(),
-            "executable":str(exe),"runs":RUNS}
+    check(Path(os.environ["IWXA_CLI_EXECUTABLE"]).is_file(), "REAL_JQ_MISSING")
+    receipt = Path(os.environ["IWXA_GUI_RECEIPT"]).resolve()
+    check(receipt.parent.is_dir(), "RECEIPT_DIR_NOT_FOUND")
+    user_file = receipt.parent / "persistent-user-file.txt"
+    user_file.write_text("KEEP", encoding="utf-8")
+    result = {"schema": "IWXA_INSTALLED_WINDOWS_GUI_QUALIFICATION/1",
+              "status": "FAIL", "actual_gui": True, "real_install": True,
+              "timestamp": datetime.now(timezone.utc).isoformat(),
+              "executable": str(exe), "runs": RUNS}
     try:
-        for attempt in (1,2):
-            launch_and_click(exe,receipt,attempt)
-            check(user_file.read_text(encoding="utf-8")=="KEEP","USER_FILE_CHANGED")
-        result["status"]="PASS"
-        result["cold_window_ms"]=[r["cold_window_ms"] for r in RUNS]
-        result["idle_rss_bytes"]=[r["idle_rss_bytes"] for r in RUNS]
-        result["measurement_note"]="Actual installed host only; no baseline GUI without integration"
-        print(json.dumps(result,ensure_ascii=False,sort_keys=True))
+        for attempt in (1, 2):
+            launch_and_click(exe, receipt, attempt)
+            check(user_file.read_text(encoding="utf-8") == "KEEP",
+                  "USER_FILE_CHANGED")
+        result["status"] = "PASS"
+        result["native_window_ms"] = [r["native_window_ms"] for r in RUNS]
+        result["frontend_ready_ms"] = [r["frontend_ready_ms"] for r in RUNS]
+        result["click_to_visible_result_ms"] = [
+            r["click_to_visible_result_ms"] for r in RUNS]
+        result["idle_tree_rss_bytes"] = [r["idle_tree_rss_bytes"] for r in RUNS]
+        result["measurement_note"] = (
+            "Installed host incl. child processes; no baseline without SDK")
+        print("INSTALLED_WINDOWS_GUI_TWO_RUNS_PASS", flush=True)
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
     except Exception as error:
-        result["error"]=str(error)
+        result["error"] = str(error)
         raise
     finally:
-        REPORT.write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding="utf-8")
+        REPORT.write_text(json.dumps(result, indent=2, ensure_ascii=False),
+                          encoding="utf-8")
 
-if __name__=="__main__":
+
+if __name__ == "__main__":
     main()

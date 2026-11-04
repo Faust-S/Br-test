@@ -6,15 +6,18 @@ body{font-family:Segoe UI,Arial,sans-serif;margin:26px;background:#f5f7fa;color:
 h1{font-size:23px;margin:6px 0 8px}
 p{font-size:14px;color:#55627c;max-width:510px}
 button{position:absolute;top:126px;left:32px;width:250px;height:56px;border:0;border-radius:8px;
-background:#234e8a;color:white;font-size:17px;cursor:pointer}
+background:#a7b1bf;color:white;font-size:17px;cursor:not-allowed}
+button.ready:not(:disabled){background:#234e8a;cursor:pointer}
 button:focus{outline:3px solid #a9c9fd}
-#result{position:absolute;top:207px;left:32px;font-size:16px;font-weight:600}
+#result{position:absolute;top:207px;left:32px;font-size:16px;font-weight:600;padding:10px 12px;min-width:250px}
+#result.verified{background:#e1f5e8;border-left:5px solid #137a3a}
+#result.failed{background:#ffecec;border-left:5px solid #b72525;color:#992020}
 small{position:absolute;bottom:20px;left:32px;color:#6a7891}
 </style></head>
 <body>
 <h1>Universal Program Integration</h1>
 <p>Real installed Tauri host. The button invokes an approved Rust CLI port.</p>
-<button id="invoke" type="button">Execute jq: 6 × 7</button>
+<button id="invoke" type="button" disabled>Execute jq: 6 × 7</button>
 <div id="result" role="status" aria-live="polite">Ready for an actual click</div>
 <small>Public test fixture • No Agent, Center or Atlas data</small>
 <script>
@@ -25,6 +28,7 @@ const schema="IWXA_PROGRAM_CONNECTION/1.0.0";
 output.textContent="JavaScript ready — click to execute";
 button.addEventListener("click", async () => {
  button.disabled=true;
+ output.classList.remove("verified","failed");
  output.textContent="Checking the installed CLI...";
  try {
    const invoke=window.__TAURI__?.core?.invoke;
@@ -41,10 +45,15 @@ button.addEventListener("click", async () => {
    const receipt=await invoke("qualification_evidence");
    if(receipt.status!=="PASS"||receipt.real_cli_output!=="42")throw Error("RECEIPT_INVALID");
    output.textContent="Verified result: 42";
+   output.classList.add("verified");
  } catch(error) {
    output.textContent="Failure: "+String(error);
+   output.classList.add("failed");
  } finally { button.disabled=false; }
 });
+// Only the registered, operational click handler can reveal the blue ready button.
+button.classList.add("ready");
+button.disabled=false;
 
 </script>
 </body></html>
