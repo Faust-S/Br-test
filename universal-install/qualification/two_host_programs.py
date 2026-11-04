@@ -139,7 +139,10 @@ def qualify():
             if rust_binary.exists():
                 rust = subprocess.run(
                     [str(rust_binary),str(CONNECTORS),name,str(program)],
-                    capture_output=True,text=True,timeout=35,check=True)
+                    capture_output=True,text=True,timeout=35,check=False)
+                if rust.returncode != 0:
+                    raise RuntimeError("RUST_HOST_EXIT_%s: %s" % (
+                        rust.returncode, rust.stderr.strip()[:1200]))
                 rust_report=json.loads(rust.stdout.strip())
                 if rust_report["status"]!="PASS" or rust_report["value"]!="42":
                     raise RuntimeError("NATIVE_RUST_HOST_FAILED")
