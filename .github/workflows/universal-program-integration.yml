@@ -40,6 +40,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: bash
         run: python universal-install/qualification/windows_ui_link.py
+      - name: Cold host startup, optional memory and idle CPU measurements
+        shell: bash
+        run: python universal-install/qualification/host_performance.py
       - name: Real read-only local Git source observation
         shell: bash
         run: node universal-install/qualification/local_git_host.mjs
