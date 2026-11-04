@@ -97,6 +97,8 @@ class ManagedArtifactBackend:
     def _validate_spec(spec) -> None:
         if not isinstance(spec, ManagedArtifactSpec):
             raise InstallError("INSTALL_SPEC_INVALID")
+        if spec.archive_format not in ("zip", "tar.gz", "binary"):
+            raise InstallError("INSTALL_NATIVE_BACKEND_REQUIRED")
 
     @staticmethod
     def _program_id(spec) -> str:
