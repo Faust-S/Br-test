@@ -29,6 +29,12 @@ jobs:
       - name: Universal install contract and actual disk fixture
         shell: bash
         run: python -m unittest discover -s universal-install/tests -v
+      - name: Real disposable DEB install, verify and remove
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo "$(command -v python)" universal-install/qualification/native_deb_smoke.py
       - name: Existing public Obscura preparer regressions
         shell: bash
         run: python -m unittest discover -s agent-headless/tests -p 'test_preparer.py' -v
