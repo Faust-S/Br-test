@@ -130,8 +130,8 @@ def _probe(spec: NativePackageSpec) -> bool:
         try:
             import winreg
             keypaths = [
-                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" + "\\\\" + spec.package_id,
-                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" + "\\\\" + spec.package_id,
+                r"SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" + chr(92) + spec.package_id,
+                r"SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall" + chr(92) + spec.package_id,
             ]
             for key in keypaths:
                 try:
