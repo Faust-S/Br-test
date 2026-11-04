@@ -53,13 +53,16 @@ class NativePackageSpec:
                 for x in args
             ):
                 raise ValueError("NATIVE_SPEC_ARGUMENTS_INVALID")
-        if fmt != "exe-installer" and any(
+        if fmt == "pkg":
+            if self.install_arguments or self.probe_arguments:
+                raise ValueError("NATIVE_SPEC_UNEXPECTED_ARGUMENTS")
+        elif fmt != "exe-installer" and any(
             (self.install_arguments, self.uninstall_arguments, self.probe_arguments)
         ):
             raise ValueError("NATIVE_SPEC_UNEXPECTED_ARGUMENTS")
         if fmt == "exe-installer" and (not self.install_arguments or not self.probe_arguments):
             raise ValueError("NATIVE_SPEC_VENDOR_CONTRACT_REQUIRED")
-        if fmt == "exe-installer":
+        if fmt in ("exe-installer", "pkg"):
             for cmd in (self.probe_arguments, self.uninstall_arguments):
                 if cmd and (not Path(cmd[0]).is_absolute() or ".." in Path(cmd[0]).parts):
                     raise ValueError("NATIVE_SPEC_COMMAND_PATH_INVALID")
@@ -130,6 +133,8 @@ def _command(spec: NativePackageSpec, operation: str, package: Path | None = Non
     if fmt == "pkg":
         if operation == "install":
             return ["installer", "-pkg", str(package), "-target", "/"]
+        if spec.uninstall_arguments:
+            return list(spec.uninstall_arguments)
         raise InstallError("REMOVE_NATIVE_PKG_UNSUPPORTED")
     if fmt == "exe-installer":
         if operation == "install":
