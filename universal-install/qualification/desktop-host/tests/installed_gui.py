@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timezone
 
 import psutil
-from pywinauto import Application
+from pywinauto import Application, mouse, keyboard
 
 ROOT=Path(__file__).resolve().parents[4]
 OUT=ROOT/"artifacts"/"universal-program"/"windows-gui"
@@ -32,6 +32,7 @@ def launch_and_click(executable,receipt,attempt):
                              stderr=subprocess.DEVNULL,env=os.environ.copy())
     started=time.perf_counter()
     entry={"attempt":attempt,"pid":process.pid,"receipt":str(receipt)}
+    RUNS.append(entry)
     try:
         window=None
         for _ in range(100):
@@ -73,15 +74,27 @@ def launch_and_click(executable,receipt,attempt):
                 button=None
         except Exception:
             button=None
+        rect=window.rectangle()
+        entry["window_rect"]={"left":rect.left,"top":rect.top,
+                              "right":rect.right,"bottom":rect.bottom}
         if button is not None:
             button.click_input()
             entry["click_method"]="uia_button"
         else:
-            # Fallback: native Windows click at documented test-fixture position.
-            window.click_input(coords=(145,184))
-            entry["click_method"]="native_coordinate"
+            # pywinauto.mouse.click explicitly accepts ABSOLUTE desktop pixels.
+            # The fixture button occupies x=40..290, y=157..213 in screenshot.
+            x,y=rect.left+165,rect.top+185
+            entry["absolute_click"]={"x":x,"y":y}
+            mouse.click(button="left",coords=(x,y))
+            entry["click_method"]="absolute_win32_mouse"
         entry["clicked"]=True
         time.sleep(1.0)
+        if not receipt.exists():
+            # Genuine keyboard events, not JS dispatch or synthetic IPC.
+            window.set_focus()
+            keyboard.send_keys("{TAB}{ENTER}",pause=0.15)
+            entry["keyboard_fallback"]=True
+            time.sleep(1.0)
         window.capture_as_image().save(str(OUT/f"after-click-{attempt}.png"))
         try:
             entry["controls_after_click"]=[
@@ -144,7 +157,7 @@ def main():
             "executable":str(exe),"runs":RUNS}
     try:
         for attempt in (1,2):
-            RUNS.append(launch_and_click(exe,receipt,attempt))
+            launch_and_click(exe,receipt,attempt)
             check(user_file.read_text(encoding="utf-8")=="KEEP","USER_FILE_CHANGED")
         result["status"]="PASS"
         result["cold_window_ms"]=[r["cold_window_ms"] for r in RUNS]
