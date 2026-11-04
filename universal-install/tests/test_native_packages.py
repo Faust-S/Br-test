@@ -67,6 +67,7 @@ class NativePackageContractTest(unittest.TestCase):
     def test_damaged_package_rejected_before_execution(self):
         self.backend.prepare(self.spec, self.staging, archive_path=str(self.package))
         binary = Path(self.staging) / self.artifact.slug / self.artifact.release_id / self.platform / self.artifact.executable_name
+        binary.chmod(0o700)
         binary.write_bytes(b"changed")
         with mock.patch("iwxa_universal_install.native._run") as runner:
             with self.assertRaises(Exception):
@@ -128,7 +129,8 @@ class NativePackageContractTest(unittest.TestCase):
             with self.subTest(fmt=fmt):
                 mapping = {**self.artifact.as_dict(),
                            "platform":plat, "archive_format":fmt,
-                           "executable_name":filename,"archive_name":filename}
+                           "executable_name":filename,"archive_name":filename,
+                           "download_url":"https://github.com/Faust-S/Br-test/releases/download/v1/" + filename}
                 artifact = ManagedArtifactSpec.from_mapping(mapping)
                 if fmt == "exe-installer":
                     obj = NativePackageSpec(artifact, package_id,
