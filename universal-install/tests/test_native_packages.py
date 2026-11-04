@@ -201,6 +201,24 @@ class NativePackageContractTest(unittest.TestCase):
                 else:
                     self.assertTrue(_command(obj, "remove"))
 
+    def test_pkg_uninstall_requires_explicit_vendor_command(self):
+        pkg = {**self.artifact.as_dict(), "platform": "macos-arm64",
+               "archive_format": "pkg", "archive_name": "vendor.pkg",
+               "executable_name": "vendor.pkg",
+               "download_url": "https://github.com/Faust-S/Br-test/releases/download/v1/vendor.pkg"}
+        artifact = ManagedArtifactSpec.from_mapping(pkg)
+        legacy = NativePackageSpec(artifact, "org.example.vendor")
+        with self.assertRaisesRegex(InstallError, "REMOVE_NATIVE_PKG_UNSUPPORTED"):
+            _command(legacy, "remove")
+        vendor = NativePackageSpec(
+            artifact, "org.example.vendor",
+            uninstall_arguments=(str(Path(sys.executable).resolve()), "vendor-uninstall.py"))
+        self.assertEqual(_command(vendor, "remove"), list(vendor.uninstall_arguments))
+        self.assertEqual(NativePackageSpec.from_mapping(vendor.as_dict()), vendor)
+        with self.assertRaisesRegex(ValueError, "NATIVE_SPEC_COMMAND_PATH_INVALID"):
+            NativePackageSpec(artifact, "org.example.vendor",
+                              uninstall_arguments=("relative/vendor-uninstall.sh",))
+
     def test_generic_native_adapter_has_no_obscura_dependency(self):
         self.assertIsNotNone(NativePackageBackend)
         self.assertNotIn("iwxa_obscura", NativePackageBackend.__module__)
