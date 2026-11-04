@@ -25,7 +25,9 @@ class CliProcessHostTest(unittest.TestCase):
             "version_contains": version,
             "operations": {"compute": ["-c", "print(6 * 7)"]}
         }
-        connection = CliConnection(spec, sys.executable)
+        # Python supplied by setup-python may expose sys.executable as a
+        # symlink on Unix. CLI discovery intentionally rejects symlinks.
+        connection = CliConnection(spec, str(Path(sys.executable).resolve()))
         self.assertEqual(connection.inspect()["status"], "DISCOVERED")
         self.assertEqual(connection.connect()["status"], "CONNECTED")
         self.assertEqual(connection.capabilities()["operations"][0]["verified"], False)
