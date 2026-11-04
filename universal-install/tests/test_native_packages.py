@@ -93,6 +93,17 @@ class NativePackageContractTest(unittest.TestCase):
             self.backend.remove(self.spec,
                 ApprovedRemoval(self.spec.program_id,self.spec.fingerprint,"PINS-native-remove",self.install,False))
 
+    def test_native_receipt_id_checked_before_install_or_remove(self):
+        for bad in ("", "../unsafe", "x" * 129):
+            bad_install = ApprovedInstall(
+                self.spec.program_id, self.spec.fingerprint, bad, self.install, True)
+            with self.subTest(bad=bad), self.assertRaisesRegex(InstallError, "INSTALL_APPROVAL_MISMATCH"):
+                self.backend.apply(self.spec, self.staging, bad_install)
+            bad_remove = ApprovedRemoval(
+                self.spec.program_id, self.spec.fingerprint, bad, self.install, True)
+            with self.subTest(bad=bad), self.assertRaisesRegex(InstallError, "REMOVE_APPROVAL_MISMATCH"):
+                self.backend.remove(self.spec, bad_remove)
+
     def test_native_install_requires_post_install_probe(self):
         self.backend.prepare(self.spec, self.staging, archive_path=str(self.package))
         with mock.patch("iwxa_universal_install.native._run") as runner, mock.patch(
