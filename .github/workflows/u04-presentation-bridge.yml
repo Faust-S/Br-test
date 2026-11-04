@@ -46,7 +46,7 @@ jobs:
         shell: bash
         run: |
           swiftc -framework AppKit u04-presentation/native/appkit_process.swift -o /tmp/iwxa-u04-appkit-process
-          /tmp/iwxa-u04-appkit-process inspect "$"
+          /tmp/iwxa-u04-appkit-process inspect "1"
           python3 -m unittest discover -s u04-presentation/tests -p 'test_macos_appkit.py' -v
       - name: Native U04 Rust port negative contract
         if: runner.os == 'Windows'

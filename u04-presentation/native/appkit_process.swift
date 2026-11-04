@@ -29,7 +29,7 @@ let fields: [String: Any] = [
 if CommandLine.arguments[1] == "inspect" {
     output("PROCESS_OBSERVED",fields)
 } else {
-    _ = running.activate(options:[.activateIgnoringOtherApps])
+    _ = running.activate(options:[])
     Thread.sleep(forTimeInterval:0.2)
     let refreshed = NSRunningApplication(processIdentifier:pidValue)
     output(refreshed?.isActive == true ? "PROCESS_FOCUSED" : "PROCESS_FOCUS_DENIED",
