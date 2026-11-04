@@ -11,11 +11,11 @@ export function createGitHubSourcePort({repository, branch, relativePath,
   now = () => new Date().toISOString()} = {}) {
   if (typeof repository !== 'string' || !REPO.test(repository) || repository.includes('..') ||
       typeof branch !== 'string' || !branch || branch.length > 250 ||
-      !/^[a-zA-Z0-9._/-]+$/.test(branch) || branch.includes('..') || branch.startsWith('/') ||
+      !/^[a-zA-Z0-9._/+\-]+$/.test(branch) || branch.includes('..') || branch.startsWith('/') ||
       branch.endsWith('/') ||
       typeof relativePath !== 'string' || !relativePath || relativePath.length > 1024 ||
       relativePath.split('/').some(s => !s || s === '.' || s === '..' ||
-        !/^[a-zA-Z0-9._-]+$/.test(s)) ||
+        /[\x00-\x1f\x7f\\]/.test(s) || Buffer.byteLength(s) > 255) ||
       !['public', 'authorized'].includes(access) ||
       typeof observeRepository !== 'function' || typeof fetcher !== 'function' ||
       !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES ||

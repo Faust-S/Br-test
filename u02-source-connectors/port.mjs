@@ -16,7 +16,10 @@ export function sourceDescriptor({providerId, sourceRef, revision = null, observ
       /[\x00-\x1f\x7f]/.test(sourceRef) ||
       !['file', 'repository', 'program'].includes(observationType) ||
       (revision !== null && !validRevision(revision)) ||
-      !Array.isArray(capabilities)) throw Error('SOURCE_DESCRIPTOR_INVALID');
+      !Array.isArray(capabilities) || capabilities.length > 128 ||
+      capabilities.some(c => !c || typeof c.id !== 'string' ||
+        !/^[a-z][a-z0-9._-]{1,79}$/.test(c.id) ||
+        typeof c.available !== 'boolean')) throw Error('SOURCE_DESCRIPTOR_INVALID');
   return Object.freeze({schema: SOURCE_SCHEMA, providerId, sourceRef, revision,
     observationType, capabilities: capabilities.map(c => ({...c})), authority: OBSERVATION_AUTHORITY});
 }
@@ -39,7 +42,9 @@ export function sourceObservation(descriptor, {status, revision = null, observed
 export function pinSource(descriptor, observation) {
   if (!descriptor || descriptor.schema !== SOURCE_SCHEMA ||
       !observation || observation.schema !== SOURCE_SCHEMA || observation.status !== 'OK' ||
+      descriptor.authority !== OBSERVATION_AUTHORITY || observation.authority !== OBSERVATION_AUTHORITY ||
       descriptor.providerId !== observation.providerId || descriptor.sourceRef !== observation.sourceRef ||
+      descriptor.observationType !== observation.observationType ||
       !validRevision(observation.revision)) throw Error('SOURCE_PIN_UNAVAILABLE');
   return sourceDescriptor({...descriptor, revision: observation.revision});
 }
@@ -47,6 +52,8 @@ export function pinSource(descriptor, observation) {
 export function requirePinnedSource(expected, pinned) {
   if (!pinned || pinned.schema !== SOURCE_SCHEMA ||
       pinned.providerId !== expected.providerId || pinned.sourceRef !== expected.sourceRef ||
+      pinned.observationType !== expected.observationType ||
+      pinned.authority !== OBSERVATION_AUTHORITY ||
       !validRevision(pinned.revision)) return false;
   return true;
 }
@@ -55,6 +62,7 @@ export function sourceChange(previous, next) {
   if (!previous || !next || previous.schema !== SOURCE_SCHEMA || next.schema !== SOURCE_SCHEMA ||
       previous.status !== 'OK' || next.status !== 'OK' ||
       previous.providerId !== next.providerId || previous.sourceRef !== next.sourceRef ||
+      previous.observationType !== next.observationType ||
       !validRevision(previous.revision) || !validRevision(next.revision))
     return {status: 'NOT_COMPARABLE'};
   return {status: previous.revision === next.revision ? 'UNCHANGED' : 'CHANGED',

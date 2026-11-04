@@ -140,7 +140,7 @@ test('host-supplied authorized GitHub observation and SHA read have no token own
      sha:createHash('sha1').update('blob '+bytes.length+String.fromCharCode(0)).update(bytes).digest('hex')});
  };
  const p=createAuthorizedGitHubSourcePort({repository:'Private/Example',branch:'main',relativePath:'LICENSE',
-   observeAuthorizedRepo:observer,authorizedFetcher:fetcher,now:fixedNow});
+   observeAuthorizedRepo:observer,authorizedFetcher:fetcher,now:t});
  const a=await p.refresh(),old=pinSource(p.describe(),a);
  const read=await p.read(old);assert.equal(read.status,'OK');
  assert.equal(Buffer.from(read.content.data,'base64').toString(),'private one');
@@ -150,17 +150,28 @@ test('host-supplied authorized GitHub observation and SHA read have no token own
  assert.equal(requests,2);
  assert.ok(!JSON.stringify({a,next,read}).includes(secret));
  const unknown=createAuthorizedGitHubSourcePort({repository:'Private/Example',branch:'main',relativePath:'LICENSE',
-   observeAuthorizedRepo:observer,authorizedFetcher:async()=>reply(404,{}),now:fixedNow});
+   observeAuthorizedRepo:observer,authorizedFetcher:async()=>reply(404,{}),now:t});
  assert.equal((await unknown.read(pinSource(unknown.describe(),await unknown.refresh()))).status,'ACCESS_UNKNOWN');
  const denied=createAuthorizedGitHubSourcePort({repository:'Private/Example',branch:'main',relativePath:'LICENSE',
-   observeAuthorizedRepo:async()=>({status:'AUTHORIZATION_REQUIRED'}),authorizedFetcher:async()=>{throw Error('SHOULD_NOT_FETCH')},now:fixedNow});
+   observeAuthorizedRepo:async()=>({status:'AUTHORIZATION_REQUIRED'}),authorizedFetcher:async()=>{throw Error('SHOULD_NOT_FETCH')},now:t});
  assert.equal((await denied.refresh()).status,'AUTHORIZATION_REQUIRED');
 });
 test('provider-specific extension cannot overwrite contract authority',()=>{
  const d=sourceDescriptor({providerId:'file.local',sourceRef:'file://root/example'});
- const o=sourceObservation(d,{status:'OK',revision:hash('safe'),observedAt:fixedNow(),
+ const o=sourceObservation(d,{status:'OK',revision:digest('safe'),observedAt:t(),
    provenance:{provider:'test'},authority:'WRITE_GRANTED',schema:'INCOMPATIBLE',providerId:'evil',
    sourceRef:'file://other/file'});
  assert.equal(o.authority,'OBSERVATION_ONLY');assert.equal(o.schema,d.schema);
  assert.equal(o.providerId,d.providerId);assert.equal(o.sourceRef,d.sourceRef);
+});
+
+
+test('pin requires observation-only authority and matching source kind',()=>{
+ const d=sourceDescriptor({providerId:'git.local',sourceRef:'git://repository',observationType:'repository'});
+ const o=sourceObservation(d,{status:'OK',revision:sha('a'),observedAt:t(),provenance:{provider:'git'}});
+ assert.throws(()=>pinSource(d,{...o,authority:'WRITE_GRANTED'}),/SOURCE_PIN_UNAVAILABLE/);
+ assert.throws(()=>pinSource(d,{...o,observationType:'file'}),/SOURCE_PIN_UNAVAILABLE/);
+ assert.equal(sourceChange(o,{...o,observationType:'file'}).status,'NOT_COMPARABLE');
+ assert.throws(()=>sourceDescriptor({providerId:'git.local',sourceRef:'git://r',
+  capabilities:[{id:'source.read',available:'yes'}]}),/SOURCE_DESCRIPTOR_INVALID/);
 });
