@@ -6,8 +6,8 @@ import {empty,createProject,createItem,editItem,serialize,deserialize} from '../
 import {projectReference,workReference,observeWorkReference,requireCurrentWorkReference,
   personalWorkProjection} from '../../atlas-public/src/project-reference.mjs';
 import {readAtlasPortfolio,linkableAtlasWork,atlasWorkReadback} from '../../center-public/src/atlas-integration.mjs';
-import {createLocalFileSourcePort} from '../local-file.mjs';
-import {pinSource,sourceChange} from '../port.mjs';
+import {createLocalFileSourcePort} from '../../u02-source-connectors/local-file.mjs';
+import {pinSource,sourceChange} from '../../u02-source-connectors/port.mjs';
 
 const root=await mkdtemp(join(tmpdir(),'iwxa-u05-contract-'));
 try {
