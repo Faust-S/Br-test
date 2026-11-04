@@ -114,9 +114,13 @@ export class CliConnection {
     }
     return this.connect();
   }
-  capabilities(){return this.observation(this.path?"DECLARED":"NOT_CONNECTED",{
-    connected:!!this.path,operations:Object.keys(this.spec.operations).sort()
-     .map(name=>({name,declared:true,verified:this.verified.has(name)}))});}
+  capabilities(){
+    const lost=!!this.path && executableIdentity(this.path)!==this.identity;
+    if(lost)this.disconnect();
+    return this.observation(lost?"CONNECTION_LOST":this.path?"DECLARED":"NOT_CONNECTED",{
+      connected:!!this.path,operations:Object.keys(this.spec.operations).sort()
+       .map(name=>({name,declared:true,verified:this.verified.has(name)}))});
+  }
   invoke(operation,params={}) {
     if(!this.path) return this.observation("NOT_CONNECTED",{executed:false});
     if(executableIdentity(this.path)!==this.identity){

@@ -108,10 +108,12 @@ def qualify():
                 raise RuntimeError("SHADOW_INVOKE_FAILED")
             st=shadow.stat()
             os.utime(shadow,ns=(st.st_atime_ns,st.st_mtime_ns+10_000_000_000))
-            if shadow_connection.verify()["status"]!="CONNECTION_LOST":
-                raise RuntimeError("SHADOW_IDENTITY_CHANGE_UNDETECTED")
+            if shadow_connection.capabilities()["status"]!="CONNECTION_LOST":
+                raise RuntimeError("SHADOW_CAPABILITY_IDENTITY_CHANGE_UNDETECTED")
             if shadow_connection.capabilities()["operations"][0]["verified"]:
                 raise RuntimeError("SHADOW_STALE_CAPABILITY")
+            if shadow_connection.verify()["status"]!="NOT_CONNECTED":
+                raise RuntimeError("SHADOW_VERIFY_AFTER_DISCONNECT_FAILED")
             if shadow_connection.recover()["status"]!="CONNECTED":
                 raise RuntimeError("SHADOW_RECOVER_FAILED")
             if shadow_connection.capabilities()["operations"][0]["verified"]:

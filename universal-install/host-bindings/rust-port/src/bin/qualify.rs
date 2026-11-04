@@ -79,11 +79,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut changed = fs::OpenOptions::new().append(true).open(&shadow)?;
         changed.write_all(b"\n")?;
         drop(changed);
-        if status(&shadow_port.verify()) != "CONNECTION_LOST" {
-            return Err("RUST_BINARY_CHANGE_NOT_DETECTED".into());
+        if status(&shadow_port.capabilities()) != "CONNECTION_LOST" {
+            return Err("RUST_BINARY_CHANGE_NOT_DETECTED_IN_CAPABILITIES".into());
         }
         if shadow_port.capabilities()["operations"][0]["verified"] != false {
             return Err("RUST_BINARY_STALE_CAPABILITY".into());
+        }
+        if status(&shadow_port.verify()) != "NOT_CONNECTED" {
+            return Err("RUST_VERIFY_AFTER_DISCONNECT_FAILED".into());
         }
         Ok(())
     })();

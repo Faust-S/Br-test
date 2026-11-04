@@ -30,9 +30,12 @@ export class HttpProgramConnection {
  }
  async connect(){
   const r=await this.request(this.spec.health_path);
-  if(!r||!r.ok){this.connected=false;
+  if(!r||!r.ok){this.disconnect();
    return this.observation(r?.status===401||r?.status===403?"AUTHORIZATION_REQUIRED":"HTTP_UNAVAILABLE",
      {connected:false});}
+  // A successful health request does not establish a stable remote identity.
+  // Revalidate previously executed capabilities after an explicit reconnect.
+  this.verified.clear();
   this.connected=true;return this.observation("CONNECTED",{connected:true});
  }
  verify(){return this.connected?this.connect():this.observation("NOT_CONNECTED",{connected:false});}
@@ -44,9 +47,12 @@ export class HttpProgramConnection {
   const op=this.spec.operations[name];
   if(!op)return this.observation("OPERATION_UNSUPPORTED",{executed:false});
   const r=await this.request(op.path,op.method,op.method==="POST"?payload:undefined);
-  if(!r)return this.observation("HTTP_UNAVAILABLE",{executed:false});
-  if(r.status===401||r.status===403)
+  if(!r){this.disconnect();
+   return this.observation("HTTP_UNAVAILABLE",{executed:false});}
+  if(r.status===401||r.status===403){
+   this.disconnect();
    return this.observation("AUTHORIZATION_REQUIRED",{executed:false});
+  }
   if(!r.ok)return this.observation("HTTP_EXECUTION_FAILED",
    {executed:false,http_status:r.status});
   const body=await r.text();

@@ -228,8 +228,13 @@ impl CliPort {
         }
         self.connect()
     }
-    pub fn capabilities(&self) -> Value {
-        self.observation(if self.identity.is_some() {"DECLARED"} else {"NOT_CONNECTED"}, json!({
+    pub fn capabilities(&mut self) -> Value {
+        let lost = self.identity.is_some()
+            && file_identity(&self.executable) != self.identity;
+        if lost { self.disconnect_state(); }
+        self.observation(if lost {"CONNECTION_LOST"} else if self.identity.is_some() {
+            "DECLARED"
+        } else {"NOT_CONNECTED"}, json!({
             "connected": self.identity.is_some(),
             "operations": self.operations.keys().map(|name| json!({
                 "name":name, "declared":true, "verified":self.verified.contains(name)

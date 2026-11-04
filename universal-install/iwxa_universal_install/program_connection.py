@@ -138,7 +138,11 @@ class CliConnection:
         return self.connect()
 
     def capabilities(self):
-        return self.observation("DECLARED" if self.path else "NOT_CONNECTED",
+        lost = bool(self.path) and executable_identity(self.path) != self._identity
+        if lost:
+            self.disconnect()
+        return self.observation(
+            "CONNECTION_LOST" if lost else ("DECLARED" if self.path else "NOT_CONNECTED"),
             connected=bool(self.path),
             operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])

@@ -39,10 +39,12 @@ try {
   throw Error("NODE_IDENTITY_COPY_INVOKE");
  const st=statSync(copy);
  utimesSync(copy,st.atime,new Date(st.mtimeMs+10_000));
- if(test.verify().status!=="CONNECTION_LOST")
-  throw Error("NODE_IDENTITY_CHANGE_NOT_DETECTED");
+ if(test.capabilities().status!=="CONNECTION_LOST")
+  throw Error("NODE_IDENTITY_CHANGE_NOT_DETECTED_ON_CAPABILITIES");
  if(test.capabilities().operations[0].verified)
   throw Error("NODE_IDENTITY_STALE_CAPABILITY");
+ if(test.verify().status!=="NOT_CONNECTED")
+  throw Error("NODE_IDENTITY_VERIFY_AFTER_DISCONNECT");
  if(test.recover().status!=="CONNECTED")
   throw Error("NODE_IDENTITY_RECOVER_FAILED");
  if(test.capabilities().operations[0].verified)
