@@ -18,7 +18,8 @@ export function createHttpSourcePort({endpoint,sourceId,fetcher=globalThis.fetch
       !Number.isInteger(maxBytes) || maxBytes<1 || maxBytes>64*1024*1024 ||
       !Number.isInteger(timeoutMs) || timeoutMs<100 || timeoutMs>60000 ||
       typeof now!=='function') throw Error('HTTP_SOURCE_CONFIG_INVALID');
-  const descriptor=sourceDescriptor({providerId:'http.api',sourceRef:'api://'+sourceId,
+  const endpointFingerprint=createHash('sha256').update(url.toString()).digest('hex');
+  const descriptor=sourceDescriptor({providerId:'http.api',sourceRef:'api://'+sourceId+'/'+endpointFingerprint,
     capabilities:[{id:'source.describe',available:true},{id:'source.refresh',available:true},
       {id:'source.read',available:true}]});
   const provenance={provider:'http',access:'host-provided-transport',
