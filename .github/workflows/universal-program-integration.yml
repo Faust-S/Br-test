@@ -33,6 +33,9 @@ jobs:
       - name: Two genuinely installed independent programs, two host runtimes
         shell: bash
         run: python universal-install/qualification/two_host_programs.py
+      - name: Real local HTTP API connection with host-owned authorization
+        shell: bash
+        run: node universal-install/qualification/http_program_host.mjs
       - name: Real read-only local Git source observation
         shell: bash
         run: node universal-install/qualification/local_git_host.mjs
