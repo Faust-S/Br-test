@@ -79,7 +79,7 @@ printf 'verified native rpm fixture\\n' > %{buildroot}/usr/share/iwxa-native-rpm
             executable_sha256=sha,
             download_url="https://github.com/Faust-S/Br-test/releases/download/1.0.0/" + pkg.name
         )
-        spec = NativePackageSpec(archive, PACKAGE_ID)
+        spec = NativePackageSpec(archive, PACKAGE_ID, installed_version="1.0.0-1")
         backend = NativePackageBackend()
         stage = root / "staging"
         owned = root / "owner"

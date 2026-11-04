@@ -40,7 +40,7 @@ class NativePackageContractTest(unittest.TestCase):
         )
         self.spec = NativePackageSpec(
             self.artifact, "{11111111-1111-1111-1111-111111111111}" if self.fmt == "msi"
-            else "iwxa-native-test"
+            else "iwxa-native-test", installed_version="1.0.0"
         )
         self.backend = NativePackageBackend()
         self.staging = str(self.root / "staging")
@@ -188,7 +188,8 @@ class NativePackageContractTest(unittest.TestCase):
                         install_arguments=("/S",),
                         probe_arguments=(str(Path(sys.executable).resolve()), "--version"))
                 else:
-                    obj = NativePackageSpec(artifact, package_id)
+                    obj = NativePackageSpec(artifact, package_id,
+                        installed_version="1.0.0-1" if fmt == "rpm" else "1.0.0")
                 command = _command(obj, "install", Path("/tmp/pinned-package"))
                 self.assertTrue(command)
                 self.assertNotIn("sh", command[0])
@@ -207,16 +208,16 @@ class NativePackageContractTest(unittest.TestCase):
                "executable_name": "vendor.pkg",
                "download_url": "https://github.com/Faust-S/Br-test/releases/download/v1/vendor.pkg"}
         artifact = ManagedArtifactSpec.from_mapping(pkg)
-        legacy = NativePackageSpec(artifact, "org.example.vendor")
+        legacy = NativePackageSpec(artifact, "org.example.vendor", installed_version="1.0.0")
         with self.assertRaisesRegex(InstallError, "REMOVE_NATIVE_PKG_UNSUPPORTED"):
             _command(legacy, "remove")
         vendor = NativePackageSpec(
-            artifact, "org.example.vendor",
+            artifact, "org.example.vendor", installed_version="1.0.0",
             uninstall_arguments=(str(Path(sys.executable).resolve()), "vendor-uninstall.py"))
         self.assertEqual(_command(vendor, "remove"), list(vendor.uninstall_arguments))
         self.assertEqual(NativePackageSpec.from_mapping(vendor.as_dict()), vendor)
         with self.assertRaisesRegex(ValueError, "NATIVE_SPEC_COMMAND_PATH_INVALID"):
-            NativePackageSpec(artifact, "org.example.vendor",
+            NativePackageSpec(artifact, "org.example.vendor", installed_version="1.0.0",
                               uninstall_arguments=("relative/vendor-uninstall.sh",))
 
     def test_generic_native_adapter_has_no_obscura_dependency(self):

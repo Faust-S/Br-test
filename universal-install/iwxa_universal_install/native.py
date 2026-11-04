@@ -25,6 +25,7 @@ NATIVE_FAMILY = "IWXA_NATIVE_PACKAGE_V1"
 _PACKAGE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+:-]{0,199}\Z")
 _GUID = re.compile(r"\{[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\}\Z")
 _ARG_LIMIT = 32
+_VERSION = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+~:-]{0,95}\Z")
 _RECEIPT_ID = re.compile(r"[A-Za-z0-9._:-]{8,128}\Z")
 
 
@@ -32,6 +33,7 @@ _RECEIPT_ID = re.compile(r"[A-Za-z0-9._:-]{8,128}\Z")
 class NativePackageSpec:
     artifact: ManagedArtifactSpec
     package_id: str
+    installed_version: str = ""
     install_arguments: tuple[str, ...] = ()
     uninstall_arguments: tuple[str, ...] = ()
     probe_arguments: tuple[str, ...] = ()
@@ -44,6 +46,11 @@ class NativePackageSpec:
             if self.artifact.archive_format != "msi" or not isinstance(self.package_id, str) or not _GUID.fullmatch(self.package_id):
                 raise ValueError("NATIVE_SPEC_PACKAGE_ID_INVALID")
         fmt = self.artifact.archive_format
+        if fmt != "exe-installer" and (not isinstance(self.installed_version, str) or
+                _VERSION.fullmatch(self.installed_version) is None):
+            raise ValueError("NATIVE_SPEC_INSTALLED_VERSION_REQUIRED")
+        if fmt == "exe-installer" and self.installed_version:
+            raise ValueError("NATIVE_SPEC_EXE_VERSION_USES_VENDOR_PROBE")
         if fmt == "msi" and not _GUID.fullmatch(self.package_id):
             raise ValueError("NATIVE_SPEC_MSI_PRODUCT_CODE_INVALID")
         for name in ("install_arguments", "uninstall_arguments", "probe_arguments"):
@@ -71,7 +78,7 @@ class NativePackageSpec:
     def from_mapping(cls, data: dict) -> "NativePackageSpec":
         """Load a new native package using data only, with no per-app class."""
         if not isinstance(data, dict) or set(data) - {
-            "artifact", "package_id", "install_arguments",
+            "artifact", "package_id", "installed_version", "install_arguments",
             "uninstall_arguments", "probe_arguments"
         } or not {"artifact", "package_id"} <= set(data):
             raise ValueError("NATIVE_SPEC_FIELDS_INVALID")
@@ -82,12 +89,14 @@ class NativePackageSpec:
             if not isinstance(values, list):
                 raise ValueError("NATIVE_SPEC_ARGUMENTS_INVALID")
             arguments[field] = tuple(values)
-        return cls(artifact=artifact, package_id=data["package_id"], **arguments)
+        return cls(artifact=artifact, package_id=data["package_id"],
+                   installed_version=data.get("installed_version", ""), **arguments)
 
     def as_dict(self) -> dict:
         return {
             "artifact": self.artifact.as_dict(),
             "package_id": self.package_id,
+            "installed_version": self.installed_version,
             "install_arguments": list(self.install_arguments),
             "uninstall_arguments": list(self.uninstall_arguments),
             "probe_arguments": list(self.probe_arguments),
@@ -100,6 +109,7 @@ class NativePackageSpec:
         raw = json.dumps({
             "artifact": self.artifact.as_dict(),
             "package_id": self.package_id,
+            "installed_version": self.installed_version,
             "install_arguments": self.install_arguments,
             "uninstall_arguments": self.uninstall_arguments,
             "probe_arguments": self.probe_arguments,
@@ -158,7 +168,13 @@ def _run(args: list[str], timeout: int = 180) -> subprocess.CompletedProcess:
 
 
 def _probe(spec: NativePackageSpec) -> bool:
+    """A package name alone is never proof of the requested version.
+
+    This also prevents an old manifest from removing an upgraded package.
+    Vendor EXE manifests instead supply their own version-aware probe.
+    """
     fmt = spec.artifact.archive_format
+    expected = spec.installed_version
     if fmt == "msi":
         try:
             import winreg
@@ -168,26 +184,29 @@ def _probe(spec: NativePackageSpec) -> bool:
             ]
             for key in keypaths:
                 try:
-                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key):
-                        return True
-                except FileNotFoundError:
+                    with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, key) as handle:
+                        version, _ = winreg.QueryValueEx(handle, "DisplayVersion")
+                        if version == expected:
+                            return True
+                except OSError:
                     continue
             return False
         except ImportError:
             raise InstallError("NATIVE_PLATFORM_MISMATCH") from None
     if fmt == "deb":
-        result = _run(["dpkg-query", "-W", "-f=${Status}", spec.package_id], 20)
-        return result.returncode == 0 and result.stdout.strip() == "install ok installed"
+        result = _run(["dpkg-query", "-W", "-f=${Status}|${Version}", spec.package_id], 20)
+        status, separator, version = result.stdout.strip().partition("|")
+        return result.returncode == 0 and bool(separator) and status == "install ok installed" and version == expected
     if fmt == "rpm":
-        return _run(["rpm", "-q", "--quiet", spec.package_id], 20).returncode == 0
+        result = _run(["rpm", "-q", "--queryformat", "%{VERSION}-%{RELEASE}", spec.package_id], 20)
+        return result.returncode == 0 and result.stdout.strip() == expected
     if fmt == "pkg":
-        return _run(["pkgutil", "--pkg-info", spec.package_id], 20).returncode == 0
+        result = _run(["pkgutil", "--pkg-info", spec.package_id], 20)
+        match = re.search(r"(?m)^version:\s*([^\r\n]+)\s*$", result.stdout)
+        return result.returncode == 0 and match is not None and match.group(1).strip() == expected
     if fmt == "exe-installer":
-        # Vendor-specific readback is compulsory; a successful exit code
-        # from setup alone is never evidence of installation.
         return _run(list(spec.probe_arguments), 20).returncode == 0
     raise InstallError("NATIVE_FORMAT_UNSUPPORTED")
-
 
 class NativePackageBackend:
     """System install adapter; standard package-manager ownership, no local registry."""

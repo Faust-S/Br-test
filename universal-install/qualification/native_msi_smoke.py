@@ -87,7 +87,7 @@ def qualify():
             archive_format="msi", archive_sha256=sha, executable_sha256=sha,
             download_url="https://github.com/Faust-S/Br-test/releases/download/1.0.0/" + package.name
         )
-        spec = NativePackageSpec(artifact, PRODUCT_CODE)
+        spec = NativePackageSpec(artifact, PRODUCT_CODE, installed_version="1.0.0")
         backend = NativePackageBackend()
         stage = root / "staging"
         owned = root / "owner"

@@ -69,9 +69,9 @@ def qualify():
             "],check=True,capture_output=True)\n",
             encoding="utf-8"
         )
-        no_uninstall = NativePackageSpec(artifact, PACKAGE_ID)
+        no_uninstall = NativePackageSpec(artifact, PACKAGE_ID, installed_version="1.0.0")
         spec = NativePackageSpec(
-            artifact, PACKAGE_ID,
+            artifact, PACKAGE_ID, installed_version="1.0.0",
             uninstall_arguments=(str(Path(sys.executable).resolve()), str(vendor_uninstall)))
         stage = root / "staging"
         owned = root / "owner"

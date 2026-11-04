@@ -71,7 +71,7 @@ def qualify() -> dict:
             archive_sha256=pin, executable_sha256=pin,
             download_url="https://github.com/Faust-S/Br-test/releases/download/1.0.0/" + pkg.name
         )
-        spec = NativePackageSpec(artifact, PACKAGE_ID)
+        spec = NativePackageSpec(artifact, PACKAGE_ID, installed_version="1.0.0")
         staging = root / "staging"
         install_root = root / "owner"
         install_root.mkdir()
