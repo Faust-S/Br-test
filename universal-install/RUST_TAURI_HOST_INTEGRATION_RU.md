@@ -45,3 +45,20 @@ This recipe is **not** integrated into the actual Atlas, Center or Agent product
 - No UI embedding I4/I5, arbitrary EXE control, automatic OAuth private-source qualification, new Store/IAM or installation orchestration is claimed.
 
 Integration order: publish and qualify this public component; open independent product integration work for Agent 0.3, Center and Atlas after owner approval; keep release branches and other developers' work untouched.
+
+
+## Завершённая нативная матрица Rust и регрессия подмены файла
+
+Исходный кандидат: `e2f61e0a7e000fe8e9db178d2dedc99631540136`, TREE `87feb14670941dc79d6cd5563afa8dc4d2e41535`. [GitHub Actions 41830997789](https://github.com/Faust-S/Br-test/actions/runs/41830997789) — **6/6 success**, все задания исполнялись на данном исходном SHA.
+
+- Linux x64/ARM64: реальное выполнение jq 1.8.1 и yq 4.54.1 через Rust host PASS.
+- Windows x64: jq и yq через Rust host PASS.
+- Windows ARM64: yq через Rust host PASS. jq 1.8.1 — `UPSTREAM_UNSUPPORTED`, не PASS.
+- macOS Intel/ARM64: jq и yq через Rust host PASS.
+- Обе реализации CLI-коннектора Python/JS теперь сбрасывают состояние при изменении идентичности исполняемого файла. Реальные тесты с отдельной копией бинарника меняют метаданные файла и требуют `CONNECTION_LOST`. После `recover` старая отметка `capabilities[].verified` не сохраняется.
+- Rust native port также проверяет изменение бинарника до вызова; регрессия с изменённой временной копией прошла на всех платформах. Фикстура допускает запись только в собственную временную копию: поставляемые бинарники могут не иметь прав на запись.
+- Распознавание версии в Python/JS теперь учитывает границы токена с обеих сторон, а не принимает близкие строки.
+
+Общая исходная ветка универсального установщика, Agent 0.2, Center 0.1 и выпущенный Atlas 0.2 не изменены. Эти результаты **не** заменяют установленную Tauri GUI-приёмку и замеры overhead внутри реальных продуктов. Размеры отдельных debug test binary зависят от платформы и не означают накладные расходы встроенной Rust-библиотеки.
+
+Документальная фиксация не меняет проверенные исходники и не требует нового запуска CI.
