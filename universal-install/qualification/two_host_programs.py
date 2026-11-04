@@ -61,6 +61,7 @@ def qualify():
             if not installed.installed:
                 raise RuntimeError("INSTALL_FAILED")
             program=Path(installed.executable)
+            installed_binary_bytes=program.stat().st_size
             # A prefix such as jq-1.8 must not qualify jq-1.8.1.
             prefix_spec={**manifest,"version_contains":manifest["version_contains"].rsplit(".",1)[0]}
             if CliConnection(prefix_spec,str(program)).connect()["status"]!="VERSION_UNVERIFIED":
@@ -146,7 +147,7 @@ def qualify():
                            "node_process_with_connection_ms":round(node_ms,3),
                            "rust_host_qualified":rust_qualified,
                            "rust_binary_bytes":rust_binary_bytes,
-                           "download_bytes":package.archive_sha256 is not None})
+                           "installed_binary_bytes":installed_binary_bytes})
     print(json.dumps({"schema":"IWXA_PROGRAM_INTEGRATION_QUALIFICATION/1",
                       "status":"PASS","platform":platform,"results":report},sort_keys=True))
 
