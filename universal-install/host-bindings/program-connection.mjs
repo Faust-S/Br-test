@@ -20,6 +20,17 @@ export function validateCliSpec(spec) {
   }
   return spec;
 }
+function bindArgs(args,params={}) {
+  if(!params || typeof params!=="object" || Array.isArray(params) ||
+     Object.keys(params).length>8)throw Error("CLI_INPUT_INVALID");
+  const names=new Set(args.filter(x=>/^\{[a-z][a-z0-9_]*\}$/.test(x))
+    .map(x=>x.slice(1,-1)));
+  if(Object.keys(params).length!==names.size ||
+     Object.keys(params).some(k=>!names.has(k) || typeof params[k]!=="string" ||
+                              params[k].length>16384 || params[k].includes("\0")))
+    throw Error("CLI_INPUT_INVALID");
+  return args.map(x=>/^\{[a-z][a-z0-9_]*\}$/.test(x)?params[x.slice(1,-1)]:x);
+}
 function run(path,args) {
   const r=spawnSync(path,args,{encoding:"utf8",timeout:20000,maxBuffer:131072,
     shell:false,windowsHide:true});
@@ -77,11 +88,15 @@ export class CliConnection {
   capabilities(){return this.observation(this.path?"DECLARED":"NOT_CONNECTED",{
     connected:!!this.path,operations:Object.keys(this.spec.operations).sort()
      .map(name=>({name,declared:true,verified:this.verified.has(name)}))});}
-  invoke(operation) {
+  invoke(operation,params={}) {
     if(!this.path) return this.observation("NOT_CONNECTED",{executed:false});
     const args=this.spec.operations[operation];
     if(!args) return this.observation("OPERATION_UNSUPPORTED",{executed:false});
-    const begin=performance.now(),r=run(this.path,args);
+    let bound;
+    try{bound=bindArgs(args,params)}catch{
+      return this.observation("CLI_INPUT_INVALID",{executed:false});
+    }
+    const begin=performance.now(),r=run(this.path,bound);
     if(r.status!=="EXECUTED")return this.observation(r.status,{
       executed:false,exit_code:r.code});
     this.verified.add(operation);

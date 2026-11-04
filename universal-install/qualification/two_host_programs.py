@@ -74,13 +74,18 @@ def qualify():
             direct=subprocess.run([str(program),"-n","6 * 7"],capture_output=True,
                                   text=True,timeout=20,check=True)
             direct_ms=(time.perf_counter()-direct_start)*1000
-            first=connection.invoke("evaluate")
+            first=connection.invoke("evaluate",{"expression":"6 * 7"})
             if first["status"]!="EXECUTED" or first["output"].strip()!=direct.stdout.strip() or first["output"].strip()!="42":
                 raise RuntimeError("PYTHON_REAL_INVOKE_FAILED")
+            alternate=connection.invoke("evaluate",{"expression":"7 * 8"})
+            if alternate["status"]!="EXECUTED" or alternate["output"].strip()!="56":
+                raise RuntimeError("DYNAMIC_PARAMETER_NOT_EXECUTED")
+            if not connection.capabilities()["operations"][0]["verified"]:
+                raise RuntimeError("CAPABILITY_NOT_VERIFIED_AFTER_REAL_EXECUTION")
             if connection.invoke("not_declared")["status"]!="OPERATION_UNSUPPORTED":
                 raise RuntimeError("UNDECLARED_OPERATION_ACCEPTED")
             connection.disconnect()
-            if connection.invoke("evaluate")["status"]!="NOT_CONNECTED":
+            if connection.invoke("evaluate",{"expression":"6 * 7"})["status"]!="NOT_CONNECTED":
                 raise RuntimeError("DISCONNECTED_INVOKE_ACCEPTED")
             if connection.recover()["status"]!="CONNECTED":
                 raise RuntimeError("RECONNECT_FAILED")

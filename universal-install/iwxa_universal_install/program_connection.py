@@ -33,6 +33,22 @@ def validate_spec(data):
             raise ValueError("CLI_ARGUMENTS_INVALID")
     return data
 
+def bind_arguments(args, params):
+    """Replace only declared whole-argument placeholders; never use a shell."""
+    if params is None:
+        params = {}
+    if not isinstance(params, dict) or len(params) > 8:
+        raise ProgramError("CLI_INPUT_INVALID")
+    declared = {arg[1:-1] for arg in args if re.fullmatch(r"\{[a-z][a-z0-9_]*\}", arg)}
+    if set(params) != declared or any(
+        not isinstance(value, str) or len(value) > 16384 or "\0" in value
+        for value in params.values()
+    ):
+        raise ProgramError("CLI_INPUT_INVALID")
+    return [params[arg[1:-1]] if arg[1:-1] in declared and
+            re.fullmatch(r"\{[a-z][a-z0-9_]*\}", arg) else arg for arg in args]
+
+
 def run_command(path, args):
     try:
         result = subprocess.run([path, *args], shell=False, capture_output=True,
@@ -101,7 +117,7 @@ class CliConnection:
             operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])
 
-    def invoke(self, operation):
+    def invoke(self, operation, params=None):
         if not self.path:
             return self.observation("NOT_CONNECTED", executed=False)
         args = self.spec["operations"].get(operation)
@@ -109,7 +125,8 @@ class CliConnection:
             return self.observation("OPERATION_UNSUPPORTED", executed=False)
         start = time.perf_counter()
         try:
-            code, output = run_command(self.path, args)
+            bound = bind_arguments(args, params)
+            code, output = run_command(self.path, bound)
         except ProgramError as e:
             return self.observation(e.code, executed=False)
         if code:

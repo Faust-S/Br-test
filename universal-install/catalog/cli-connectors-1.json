@@ -12,7 +12,7 @@
       "operations": {
         "evaluate": [
           "-n",
-          "6 * 7"
+          "{expression}"
         ]
       }
     },
@@ -27,7 +27,7 @@
       "operations": {
         "evaluate": [
           "-n",
-          "6 * 7"
+          "{expression}"
         ]
       }
     }
