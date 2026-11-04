@@ -64,6 +64,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if status(&shadow_port.invoke("evaluate",&json!({"expression":"6 * 7"})))
             != "EXECUTED" { return Err("RUST_SHADOW_INVOKE_FAILED".into()); }
+        // Official binaries can be executable but read-only. Only the
+        // disposable fixture copy is made writable before intentional mutation.
+        let mut permissions = fs::metadata(&shadow)?.permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            permissions.set_mode(permissions.mode() | 0o200);
+        }
+        #[cfg(not(unix))]
+        permissions.set_readonly(false);
+        fs::set_permissions(&shadow,permissions)?;
         use std::io::Write;
         let mut changed = fs::OpenOptions::new().append(true).open(&shadow)?;
         changed.write_all(b"\n")?;
