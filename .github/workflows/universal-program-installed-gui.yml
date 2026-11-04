@@ -82,6 +82,21 @@ jobs:
         shell: pwsh
         timeout-minutes: 5
         run: python universal-install/qualification/desktop-host/tests/installed_gui.py
+      - name: Build identical Tauri/WebView2 baseline without CLI port
+        shell: pwsh
+        working-directory: universal-install/qualification/desktop-host/src-tauri
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --bin iwxa-universal-program-baseline --features qualification-baseline
+          $candidate = Join-Path $PWD 'target/release/iwxa-universal-program-baseline.exe'
+          if (!(Test-Path $candidate)) { throw 'BASELINE_BUILD_NOT_FOUND' }
+          $target = Join-Path (Split-Path $env:IWXA_INSTALLED_GUI_EXE -Parent) 'iwxa-universal-program-baseline.exe'
+          Copy-Item $candidate $target -Force
+          "IWXA_BASELINE_GUI_EXE=$target" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: Paired Windows Tauri SDK overhead benchmark
+        shell: pwsh
+        timeout-minutes: 8
+        run: python universal-install/qualification/desktop-host/tests/runtime_baseline.py
       - name: Upload real GUI evidence and runtime measurements
         if: always()
         uses: actions/upload-artifact@v4
