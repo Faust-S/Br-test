@@ -35,14 +35,23 @@ export function createHttpSourcePort({endpoint,sourceId,fetcher=globalThis.fetch
       redirect:'error',signal:AbortSignal.timeout(timeoutMs)});}
     catch {return {status:'SOURCE_UNAVAILABLE'};}
     if(!response || typeof response.status!=='number')return {status:'SOURCE_INVALID'};
+    // A host-supplied transport must not silently substitute another source.
+    if(response.redirected===true ||
+       (typeof response.url==='string' && response.url && response.url!==url.toString()))
+      return {status:'SOURCE_UNAVAILABLE'};
     if(response.status===401)return {status:'AUTHORIZATION_REQUIRED'};
     if(response.status===403)return {status:'ACCESS_DENIED'};
     if(response.status===404)return {status:'SOURCE_MISSING'};
     if(response.status===429)return {status:'RATE_LIMITED'};
     if(!response.ok)return {status:'SOURCE_UNAVAILABLE'};
-    if(response.status===204 || response.status===205)return {status:'SOURCE_INVALID'};
+    // 202/203/206 or other 2xx responses do not prove a full source snapshot.
+    if(response.status!==200)return {status:'SOURCE_INVALID'};
+    const contentRange=response.headers?.get?.('content-range');
+    if(contentRange!=null)return {status:'SOURCE_INVALID'};
     const sizeHeader=response.headers?.get?.('content-length');
-    if(sizeHeader!=null && /^\d+$/.test(sizeHeader) && Number(sizeHeader)>maxBytes)
+    if(sizeHeader!=null && !/^(0|[1-9]\d*)$/.test(sizeHeader))
+      return {status:'SOURCE_INVALID'};
+    if(sizeHeader!=null && Number(sizeHeader)>maxBytes)
       return {status:'SOURCE_TOO_LARGE'};
     let buffer;
     if(response.body && typeof response.body.getReader==='function'){
@@ -64,6 +73,8 @@ export function createHttpSourcePort({endpoint,sourceId,fetcher=globalThis.fetch
       try {buffer=Buffer.from(await response.arrayBuffer());}catch{return {status:'SOURCE_UNAVAILABLE'};}
       if(buffer.length>maxBytes)return {status:'SOURCE_TOO_LARGE'};
     } else return {status:'SOURCE_INVALID'};
+    if(sizeHeader!=null && Number(sizeHeader)!==buffer.length)
+      return {status:'SOURCE_INVALID'};
     return {status:'OK',revision:hash(buffer),buffer};
   }
   return Object.freeze({

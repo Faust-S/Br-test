@@ -69,3 +69,60 @@ test('bounded streaming response, length header and invalid body',async()=>{
  const invalid=createHttpSourcePort({endpoint,sourceId:'example.api',fetcher:async()=>({ok:true,status:200})});
  assert.equal((await invalid.refresh()).status,'SOURCE_INVALID');
 });
+
+test('partial, alternate and redirected HTTP success responses cannot be pinned',async()=>{
+ const endpoint='https://example.org/data';
+ for (const status of [201,202,203,204,205,206,207,226]) {
+   const port=createHttpSourcePort({endpoint,sourceId:'example.api',fetcher:async()=>
+     ({ok:true,status,url:endpoint,headers:{get:()=>null},arrayBuffer:async()=>Uint8Array.from([65]).buffer})});
+   const observation=await port.refresh();
+   assert.equal(observation.status,'SOURCE_INVALID');
+   assert.equal(observation.content,null);
+   assert.throws(()=>pinSource(port.describe(),observation),/SOURCE_PIN_UNAVAILABLE/);
+ }
+ const badRedirect=createHttpSourcePort({endpoint,sourceId:'example.api',fetcher:async()=>({
+   ok:true,status:200,url:'https://example.net/unapproved',redirected:true,
+   headers:{get:()=>null},arrayBuffer:async()=>Uint8Array.from([65]).buffer})});
+ assert.equal((await badRedirect.refresh()).status,'SOURCE_UNAVAILABLE');
+ const inconsistentUrl=createHttpSourcePort({endpoint,sourceId:'example.api',fetcher:async()=>({
+   ok:true,status:200,url:'https://example.org/other',redirected:false,
+   headers:{get:()=>null},arrayBuffer:async()=>Uint8Array.from([65]).buffer})});
+ assert.equal((await inconsistentUrl.refresh()).status,'SOURCE_UNAVAILABLE');
+});
+test('HTTP pinned descriptor can be serialized and reused with new port instance',async()=>{
+ let body='v1';const endpoint='https://example.org/document';
+ const fetcher=async(url,options)=>({ok:true,status:200,url,
+  headers:{get:()=>null},arrayBuffer:async()=>Buffer.from(body)});
+ const port=createHttpSourcePort({endpoint,sourceId:'document.api',fetcher});
+ const observed=await port.refresh(),json=JSON.stringify(pinSource(port.describe(),observed));
+ const restored=JSON.parse(json);
+ const reopened=createHttpSourcePort({endpoint,sourceId:'document.api',fetcher});
+ const read=await reopened.read(restored);
+ assert.equal(read.status,'OK');
+ assert.equal(Buffer.from(read.content.data,'base64').toString(),'v1');
+ assert.equal(read.revision,observed.revision);
+ body='v2';
+ const stale=await reopened.read(restored);
+ assert.equal(stale.status,'REVISION_MISMATCH');
+ assert.equal(stale.content,null);
+ const other=createHttpSourcePort({endpoint,sourceId:'other.api',fetcher});
+ assert.equal((await other.read(restored)).status,'REVISION_REQUIRED');
+});
+
+test('HTTP partial content hints and incorrect Content-Length fail without source content',async()=>{
+ const endpoint='https://example.org/document';
+ for(const [headers,payload] of [
+   [{ 'content-range':'bytes 0-1/20'},'ab'],
+   [{ 'content-length':'5'},'ab'],
+   [{ 'content-length':'xyz'},'ab'],
+   [{ 'content-length':'02'},'ab']
+ ]){
+   const port=createHttpSourcePort({endpoint,sourceId:'document.api',fetcher:async(url)=>({
+     ok:true,status:200,url,headers:{get:name=>headers[name]??null},
+     arrayBuffer:async()=>Buffer.from(payload)
+   })});
+   const observation=await port.refresh();
+   assert.equal(observation.status,'SOURCE_INVALID');
+   assert.equal(observation.content,null);
+ }
+});
