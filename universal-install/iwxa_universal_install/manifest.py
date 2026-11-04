@@ -20,6 +20,9 @@ _TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}\Z")
 _PROGRAM_ID = re.compile(r"[A-Z][A-Z0-9_]{2,79}\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _REPO = re.compile(r"/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/releases/download/")
+# Native package payloads are *staged* by the same pinned downloader, but
+# must be applied through NativePackageBackend, never the portable backend.
+NATIVE_FORMATS = {"msi": ".msi", "deb": ".deb", "rpm": ".rpm", "pkg": ".pkg", "exe-installer": ".exe"}
 
 
 @dataclass(frozen=True)
@@ -50,13 +53,22 @@ class ManagedArtifactSpec:
                    for d in (self.archive_sha256, self.executable_sha256)):
             raise ValueError("MANAGED_SPEC_DIGEST_INVALID")
         expected = "zip" if self.platform.startswith("windows") else "tar.gz"
-        if self.archive_format not in (expected, "binary"):
+        native_suffix = NATIVE_FORMATS.get(self.archive_format)
+        if self.archive_format not in (expected, "binary") and native_suffix is None:
             raise ValueError("MANAGED_SPEC_FORMAT_INVALID")
         if self.archive_format == expected and not self.archive_name.endswith("." + expected):
             raise ValueError("MANAGED_SPEC_FORMAT_INVALID")
         if self.archive_format == "binary" and self.archive_sha256 != self.executable_sha256:
             raise ValueError("MANAGED_SPEC_BINARY_DIGEST_MISMATCH")
-        if self.platform.startswith("windows") and not self.executable_name.endswith(".exe"):
+        if native_suffix:
+            native_os = ("windows" if self.archive_format in ("msi", "exe-installer") else
+                         "macos" if self.archive_format == "pkg" else "linux")
+            if (not self.platform.startswith(native_os + "-") or
+                    not self.archive_name.lower().endswith(native_suffix) or
+                    not self.executable_name.lower().endswith(native_suffix) or
+                    self.archive_sha256 != self.executable_sha256):
+                raise ValueError("MANAGED_SPEC_NATIVE_FORMAT_INVALID")
+        elif self.platform.startswith("windows") and not self.executable_name.endswith(".exe"):
             raise ValueError("MANAGED_SPEC_WINDOWS_EXECUTABLE_INVALID")
         u = self.download_url
         if not isinstance(u, str) or not 1 <= len(u) <= 2048 or any(
