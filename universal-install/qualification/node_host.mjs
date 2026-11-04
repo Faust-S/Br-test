@@ -7,6 +7,9 @@ const catalog=JSON.parse(readFileSync(catalogPath,"utf8"));
 const spec=catalog.programs.find(p=>p.program_id===programId);
 if(!spec || !executable)throw Error("PROGRAM_HOST_ARGUMENT_INVALID");
 const start=performance.now();
+const shorter={...spec,version_contains:spec.version_contains.replace(/\.\d+$/,"")};
+if(new CliConnection(shorter,executable).connect().status!=="VERSION_UNVERIFIED")
+  throw Error("NODE_VERSION_PREFIX_FALSE_POSITIVE");
 const connection=new CliConnection(spec,executable);
 const discovery=connection.inspect();
 if(discovery.status!=="DISCOVERED")throw Error("NODE_DISCOVERY_NOT_FOUND");

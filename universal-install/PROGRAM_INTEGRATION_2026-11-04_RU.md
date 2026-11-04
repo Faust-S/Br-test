@@ -53,3 +53,11 @@
 5. Остальные transport adapters (MCP, SDK, IPC, file) — только при наличии действительного интерфейса и реального вызывающего host.
 
 Это публичная квалификация технических частей, **не объявление всей системы Universal Program Integration завершённой**. Выпущенные версии и приватные данные не затрагивались.
+
+
+## Incremental verification updates
+
+- Source observation for local Git now reports `complete=false`, `headComplete=true`, `branchScope=WORKTREE_ONLY`: reading only a worktree HEAD must not appear as full remote branch enumeration.
+- CLI version validation now rejects partial version prefixes and converts program startup failures to a stable observation, rather than an unhandled exception. Both Python and Node real-binary harnesses include negative prefix checks.
+- A real Windows I3 bridge was added as an optional OS adapter (`windows_window.py`). It locates a genuine pre-existing Win32 window by process ID, rejects another process's HWND and separately reports `WINDOW_FOCUSED` or `WINDOW_FOCUS_DENIED`. This does not embed a native window and it does not start a second application instance. Both Windows x64 and ARM64 runners previously executed this step successfully; a final single-HEAD matrix remains the release gate.
+- `qualification/host_performance.py` samples cold Python/Node process startup, imports, optional RSS and CPU idle. These are observations only and do not qualify actual Agent, Atlas or Center performance.

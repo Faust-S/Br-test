@@ -61,6 +61,10 @@ def qualify():
             if not installed.installed:
                 raise RuntimeError("INSTALL_FAILED")
             program=Path(installed.executable)
+            # A prefix such as jq-1.8 must not qualify jq-1.8.1.
+            prefix_spec={**manifest,"version_contains":manifest["version_contains"].rsplit(".",1)[0]}
+            if CliConnection(prefix_spec,str(program)).connect()["status"]!="VERSION_UNVERIFIED":
+                raise RuntimeError("VERSION_PREFIX_FALSE_POSITIVE")
             connection=CliConnection(manifest,str(program))
             if connection.inspect()["status"]!="DISCOVERED":
                 raise RuntimeError("DISCOVERY_FAILED")
