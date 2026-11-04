@@ -1,0 +1,88 @@
+// Host-neutral JS/TS CLI binding. No Python core, daemon, network or store.
+import {spawnSync} from "node:child_process";
+import {accessSync, constants, lstatSync, realpathSync} from "node:fs";
+import {delimiter, isAbsolute} from "node:path";
+import {platform} from "node:os";
+
+export const SCHEMA = "IWXA_PROGRAM_CONNECTION/1.0.0";
+export function validateCliSpec(spec) {
+  if (!spec || spec.schema !== "IWXA_CLI_PROGRAM/1" ||
+      !/^[A-Z][A-Z0-9_]{2,79}$/.test(spec.program_id ?? "") ||
+      typeof spec.executable_name !== "string" ||
+      /[/\\]/.test(spec.executable_name) || !spec.executable_name ||
+      typeof spec.version_contains !== "string" || !spec.version_contains ||
+      !spec.operations || !Object.keys(spec.operations).length)
+    throw Error("CLI_SPEC_INVALID");
+  for (const argv of [spec.version_args, ...Object.values(spec.operations)]) {
+    if (!Array.isArray(argv) || argv.length > 24 ||
+        argv.some(a => typeof a !== "string" || a.length > 2048 || a.includes("\0")))
+      throw Error("CLI_ARGUMENTS_INVALID");
+  }
+  return spec;
+}
+function run(path,args) {
+  const r=spawnSync(path,args,{encoding:"utf8",timeout:20000,maxBuffer:131072,
+    shell:false,windowsHide:true});
+  if (r.error?.code === "ETIMEDOUT") return {status:"CLI_TIMED_OUT"};
+  if (r.error) return {status:"CLI_EXECUTION_FAILED"};
+  return {status:r.status===0?"EXECUTED":"EXECUTION_FAILED",
+    code:r.status,output:r.stdout??""};
+}
+function located(name) {
+  const dirs=(process.env.PATH??"").split(delimiter);
+  for (const dir of dirs) {
+    const path=dir+(dir.endsWith("/")||dir.endsWith("\\")?"":platform()==="win32"?"\\":"/")+name;
+    try {const stat=lstatSync(path);if(!stat.isSymbolicLink()&&stat.isFile()) {
+      accessSync(path,platform()==="win32"?constants.F_OK:constants.X_OK);
+      return realpathSync(path);
+    }} catch {}
+  }
+  return null;
+}
+export class CliConnection {
+  constructor(spec,executable=null) {
+    this.spec=validateCliSpec(spec);
+    this.requested=executable;
+    this.path=null;
+  }
+  observation(status,detail={}) {return {schema:SCHEMA,program_id:this.spec.program_id,
+    transport:"cli",status,...detail};}
+  inspect() {
+    let path=this.requested??located(this.spec.executable_name);
+    try {
+      if(path && isAbsolute(path) && !lstatSync(path).isSymbolicLink()) {
+        accessSync(path,platform()==="win32"?constants.F_OK:constants.X_OK);
+        if(lstatSync(path).isFile()) return this.observation("DISCOVERED",{
+          installed:true,path:realpathSync(path),connected:false});
+      }
+    } catch {}
+    return this.observation("NOT_FOUND",{installed:false,connected:false});
+  }
+  connect() {
+    const found=this.inspect();
+    if(!found.installed) {this.path=null;return found;}
+    const r=run(found.path,this.spec.version_args);
+    if(r.status!=="EXECUTED"||!r.output.includes(this.spec.version_contains)){
+      this.path=null;return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
+    }
+    this.path=found.path;
+    return this.observation("CONNECTED",{installed:true,connected:true,
+      path:this.path,version:r.output.trim().slice(0,256)});
+  }
+  verify(){return this.path?this.connect():this.observation("NOT_CONNECTED",{connected:false});}
+  capabilities(){return this.observation(this.path?"DECLARED":"NOT_CONNECTED",{
+    connected:!!this.path,operations:Object.keys(this.spec.operations).sort()
+     .map(name=>({name,declared:true,verified:false}))});}
+  invoke(operation) {
+    if(!this.path) return this.observation("NOT_CONNECTED",{executed:false});
+    const args=this.spec.operations[operation];
+    if(!args) return this.observation("OPERATION_UNSUPPORTED",{executed:false});
+    const begin=performance.now(),r=run(this.path,args);
+    if(r.status!=="EXECUTED")return this.observation(r.status,{
+      executed:false,exit_code:r.code});
+    return this.observation("EXECUTED",{executed:true,operation,
+      output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
+  }
+  disconnect(){this.path=null;return this.observation("DISCONNECTED",{connected:false});}
+  recover(){return this.connect();}
+}
