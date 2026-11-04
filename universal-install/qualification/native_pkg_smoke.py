@@ -60,13 +60,13 @@ def qualify():
         # explicit vendor uninstall program, as a manifest command.
         vendor_uninstall = root / "uninstall_vendor.py"
         vendor_uninstall.write_text(
-            "from pathlib import Path\\n"
-            "import subprocess\\n"
-            "p=Path(" + repr(str(PAYLOAD)) + ")\\n"
-            "p.unlink()\\n"
-            "p.parent.rmdir()\\n"
+            "from pathlib import Path\n"
+            "import subprocess\n"
+            "p=Path(" + repr(str(PAYLOAD)) + ")\n"
+            "p.unlink()\n"
+            "p.parent.rmdir()\n"
             "subprocess.run(['pkgutil','--forget'," + repr(PACKAGE_ID) +
-            "],check=True,capture_output=True)\\n",
+            "],check=True,capture_output=True)\n",
             encoding="utf-8"
         )
         no_uninstall = NativePackageSpec(artifact, PACKAGE_ID)
