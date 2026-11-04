@@ -1,0 +1,45 @@
+name: IWXA U02 Source Connectors
+on:
+  push:
+    branches: [work/2026-11-04-u02-source-connectors]
+    paths:
+      - 'u02-source-connectors/**'
+      - '.github/workflows/u02-source-connectors.yml'
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-u02-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  portable-contracts:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Portable U02 contract and negative tests
+        shell: bash
+        run: node --test u02-source-connectors/tests/*.test.mjs
+  live-public-source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Atlas
+          ref: e5cc6ff593aa12eec3da8e8940ad5af5819b66fd
+          path: atlas-public
+          persist-credentials: false
+      - name: Live public GitHub revision and exact pinned content, no secrets
+        shell: bash
+        run: node u02-source-connectors/qualification/live-atlas.mjs

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:iwxa:u02:source-connector:1.0.0",
+  "$defs": {
+    "SourceDescriptor": {
+      "type": "object",
+      "required": ["schema", "providerId", "sourceRef", "revision", "observationType", "capabilities", "authority"],
+      "properties": {
+        "schema": {"const": "IWXA_SOURCE_CONNECTOR/1.0.0"},
+        "providerId": {"type": "string", "minLength": 2},
+        "sourceRef": {"type": "string", "minLength": 1},
+        "revision": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 40}]},
+        "observationType": {"enum": ["file", "repository", "program"]},
+        "capabilities": {"type": "array", "items": {"type": "object", "required": ["id", "available"]}},
+        "authority": {"const": "OBSERVATION_ONLY"}
+      },
+      "additionalProperties": false
+    },
+    "SourceObservation": {
+      "type": "object",
+      "required": ["schema", "providerId", "sourceRef", "observationType", "revision", "observedAt", "provenance", "status", "authority", "capabilities"],
+      "properties": {
+        "schema": {"const": "IWXA_SOURCE_CONNECTOR/1.0.0"},
+        "providerId": {"type": "string"},
+        "sourceRef": {"type": "string"},
+        "observationType": {"enum": ["file", "repository", "program"]},
+        "revision": {"anyOf": [{"type": "null"}, {"type": "string", "minLength": 40}]},
+        "observedAt": {"type": "string", "format": "date-time"},
+        "provenance": {"type": "object"},
+        "status": {"type": "string"},
+        "contentRef": {"anyOf": [{"type": "null"}, {"type": "string"}]},
+        "bytes": {"anyOf": [{"type": "null"}, {"type": "integer", "minimum": 0}]},
+        "content": {"anyOf": [{"type": "null"}, {"type": "object", "required": ["encoding", "data"], "properties": {"encoding": {"const": "base64"}, "data": {"type": "string"}}, "additionalProperties": false}]},
+        "capabilities": {"type": "array"},
+        "authority": {"const": "OBSERVATION_ONLY"}
+      },
+      "additionalProperties": true
+    }
+  }
+}
