@@ -36,6 +36,10 @@ jobs:
       - name: Real local HTTP API connection with host-owned authorization
         shell: bash
         run: node universal-install/qualification/http_program_host.mjs
+      - name: Native Windows I3 linked-window observation and real OS readback
+        if: runner.os == 'Windows'
+        shell: bash
+        run: python universal-install/qualification/windows_ui_link.py
       - name: Real read-only local Git source observation
         shell: bash
         run: node universal-install/qualification/local_git_host.mjs
