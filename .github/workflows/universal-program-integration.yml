@@ -1,0 +1,35 @@
+name: IWXA Universal Program Connection - Two Hosts
+on:
+  push:
+    branches: [work/2026-11-04-universal-program-integration]
+    paths:
+      - 'universal-install/**'
+      - '.github/workflows/universal-program-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: universal-program-integration-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  two-host-programs:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2022, windows-11-arm, macos-15-intel, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Existing generic install contract
+        shell: bash
+        run: python -m unittest discover -s universal-install/tests -v
+      - name: Two genuinely installed independent programs, two host runtimes
+        shell: bash
+        run: python universal-install/qualification/two_host_programs.py
