@@ -12,6 +12,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import time
 import sys
 from typing import Callable
 
@@ -264,6 +265,12 @@ class NativePackageBackend:
         result = _run(_command(spec, "remove"))
         if result.returncode not in ((0, 3010) if spec.artifact.archive_format == "msi" else (0,)):
             raise InstallError("NATIVE_REMOVE_FAILED")
+        if spec.artifact.archive_format == "exe-installer":
+            # Some vendor uninstallers return after launching a separate
+            # cleanup process. Observe its outcome without re-running setup.
+            deadline = time.monotonic() + 15.0
+            while _probe(spec) and time.monotonic() < deadline:
+                time.sleep(0.25)
         if _probe(spec):
             raise InstallError("NATIVE_REMOVE_NOT_VERIFIED")
         return InstallObservation("REMOVED", spec.program_id, source=NATIVE_FAMILY)
