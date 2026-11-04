@@ -96,9 +96,43 @@ printf 'verified native rpm fixture\\n' > %{buildroot}/usr/share/iwxa-native-rpm
                 raise RuntimeError("RPM_SMOKE_INSTALL_READBACK_INVALID")
             if not backend.recover(spec, str(owned)).installed:
                 raise RuntimeError("RPM_SMOKE_RECOVER_INVALID")
+            # Upgrade the very same system-owned package identity.
+            specfile.write_text(
+                specfile.read_text(encoding="utf-8").replace(
+                    "Version: 1.0.0", "Version: 1.1.0"), encoding="utf-8")
+            run("rpmbuild", "--define", "_topdir " + str(top), "-bb", str(specfile))
+            matches = list((top / "RPMS").rglob("*1.1.0*.rpm"))
+            if len(matches) != 1:
+                raise RuntimeError("RPM_SMOKE_UPGRADE_BUILD_INVALID")
+            second_package = matches[0]
+            next_pin = hashlib.sha256(second_package.read_bytes()).hexdigest()
+            next_artifact = ManagedArtifactSpec(
+                program_id=archive.program_id, slug=archive.slug, release_id="1.1.0",
+                platform=archive.platform, executable_name=second_package.name,
+                archive_name=second_package.name, archive_format="rpm",
+                archive_sha256=next_pin, executable_sha256=next_pin,
+                download_url="https://github.com/Faust-S/Br-test/releases/download/1.1.0/"
+                + second_package.name)
+            next_spec = NativePackageSpec(next_artifact, PACKAGE_ID,
+                                          installed_version="1.1.0-1")
+            backend.prepare(next_spec, str(stage), archive_path=str(second_package))
+            update = ApprovedInstall(
+                next_spec.program_id, next_spec.fingerprint,
+                "PINS-native-rpm-upgrade", str(owned), True)
+            if not backend.apply(next_spec, str(stage), update).installed:
+                raise RuntimeError("RPM_SMOKE_UPGRADE_FAILED")
+            if backend.verify(spec, str(owned)).installed:
+                raise RuntimeError("RPM_SMOKE_OLD_VERSION_FALSE_POSITIVE")
+            old_remove = ApprovedRemoval(spec.program_id, spec.fingerprint,
+                                         "PINS-native-rpm-old-remove", str(owned), True)
+            if backend.remove(spec, old_remove).status != "NOT_INSTALLED":
+                raise RuntimeError("RPM_SMOKE_OLD_VERSION_REMOVE_NOT_BLOCKED")
+            if not backend.verify(next_spec, str(owned)).installed:
+                raise RuntimeError("RPM_SMOKE_NEW_VERSION_NOT_PRESERVED")
             removal = ApprovedRemoval(
-                spec.program_id, spec.fingerprint, "PINS-native-rpm-remove", str(owned), True)
-            if backend.remove(spec, removal).status != "REMOVED":
+                next_spec.program_id, next_spec.fingerprint,
+                "PINS-native-rpm-remove", str(owned), True)
+            if backend.remove(next_spec, removal).status != "REMOVED":
                 raise RuntimeError("RPM_SMOKE_REMOVE_INVALID")
             if installed() or PAYLOAD.exists():
                 raise RuntimeError("RPM_SMOKE_REMOVE_READBACK_INVALID")
@@ -106,7 +140,8 @@ printf 'verified native rpm fixture\\n' > %{buildroot}/usr/share/iwxa-native-rpm
                 raise RuntimeError("RPM_SMOKE_USER_DATA_CHANGED")
             report = {"schema": "IWXA_NATIVE_RPM_SMOKE/1", "status": "PASS",
                       "platform": _native_platform(), "installed": True,
-                      "verified": True, "removed": True, "user_data_preserved": True}
+                      "verified": True, "removed": True, "upgraded": True,
+                      "old_version_protected": True, "user_data_preserved": True}
             print(json.dumps(report, sort_keys=True))
             return report
         finally:
