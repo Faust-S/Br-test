@@ -5,7 +5,8 @@ import {join} from 'node:path';
 import {empty,createProject,createItem,editItem,attach,observe,serialize,deserialize} from '../../atlas-public/src/core.mjs';
 import {readAtlasPortfolio,linkableAtlasWork,atlasWorkReadback,ATLAS_SOURCE_REVISION} from '../../center-public/src/atlas-integration.mjs';
 import {createLocalFileSourcePort} from '../local-file.mjs';
-import {sourceChange,pinSource} from '../port.mjs';
+import {sourceChange} from '../port.mjs';
+import {captureSource,readPinnedSource} from '../source-read.mjs';
 
 assert.equal(ATLAS_SOURCE_REVISION,'e5cc6ff593aa12eec3da8e8940ad5af5819b66fd');
 const root=await mkdtemp(join(tmpdir(),'iwxa-u02-atlas-center-'));
@@ -15,10 +16,9 @@ try {
  const file=join(root,'portfolio.json');
  await writeFile(file,serialize(item.state));
  const port=createLocalFileSourcePort({root,rootId:'selected',relativePath:'portfolio.json'});
- const observed=await port.refresh();
- assert.equal(observed.status,'OK');
- const pinned=pinSource(port.describe(),observed);
- const read=await port.read(pinned);
+ const captured=await captureSource(port);
+ assert.equal(captured.status,'OK');
+ const {observation:observed,pin:pinned,read}=captured;
  assert.equal(read.status,'OK');
  assert.equal(read.revision,pinned.revision);
  const raw=Buffer.from(read.content.data,'base64').toString('utf8');
@@ -45,10 +45,13 @@ try {
  await writeFile(file,serialize(edited));
  const changed=await port.refresh();
  assert.equal(sourceChange(observed,changed).status,'CHANGED');
- const stale=await port.read(pinned);
+ const stale=await readPinnedSource(port,JSON.parse(JSON.stringify(pinned)));
  assert.equal(stale.status,'REVISION_MISMATCH');
  assert.equal(stale.content,null);
- const next=await port.read(pinSource(port.describe(),changed));
+ const current=await captureSource(port);
+ assert.equal(current.status,'OK');
+ assert.equal(current.observation.revision,changed.revision);
+ const next=current.read;
  assert.equal(next.status,'OK');
  const updated=readAtlasPortfolio(Buffer.from(next.content.data,'base64').toString('utf8'));
  assert.equal(atlasWorkReadback(updated,workRef),'SOURCE_REVISION_CHANGED');
@@ -56,7 +59,7 @@ try {
  assert.equal(updated.projects[0].workItems[0].id,item.id);
  assert.equal(updated.projects[0].id,first.id);
  console.log(JSON.stringify({schema:'IWXA_U02_ATLAS_CENTER_ROUTE/1',status:'PASS',
-  actualAtlasCore:true,actualCenterAdapter:true,
+  actualAtlasCore:true,actualCenterAdapter:true,consumerCaptureSource:true,
   oldRevision:observed.revision,newRevision:changed.revision,
   stalePinnedRefused:true,centerStaleLink:'SOURCE_REVISION_CHANGED',
   authoritativeProjectStore:'Atlas',sourceWriteAuthority:false}));
