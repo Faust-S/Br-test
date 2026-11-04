@@ -39,10 +39,8 @@ function validReceipt(x,operation,programId,transport,epoch){
    o.connection_epoch===epoch&&
    typeof x.observationRef==='string'&&x.observationRef.trim().length>0&&x.observationRef.length<=512;
 }
-export function observeU01Capabilities(connection,config){
+export function projectU01Capabilities(observed,config){
  validate(config);
- let observed;
- try{observed=connection.capabilities();}catch{observed=null;}
  const current=live(observed,config.programId);
  const ops=current?new Map(observed.operations.map(o=>[o.name,o])):new Map();
  const receipts=config.receipts??{};
@@ -63,4 +61,20 @@ export function observeU01Capabilities(connection,config){
    else{status.version=binding.version;status.observationRef=receipts[binding.operation].observationRef;}
    return status;
  });
+}
+
+export function observeU01Capabilities(connection,config){
+  validate(config);
+  let observed;
+  try{observed=connection.capabilities();}catch{observed=null;}
+  return projectU01Capabilities(observed,config);
+}
+
+// U01 ProductHostPort (and other host-neutral ports) returns a Promise.
+// Do not interpret the unresolved Promise as an unavailable capability.
+export async function observeU01CapabilitiesAsync(port,config,request={}){
+  validate(config);
+  let observed;
+  try{observed=await port.capabilities(request);}catch{observed=null;}
+  return projectU01Capabilities(observed,config);
 }

@@ -7,6 +7,8 @@ import {readFileSync} from 'node:fs';
 import {CliConnection} from '../../universal-install/host-bindings/program-connection.mjs';
 import {assess} from '../src/capability.mjs';
 import {observeU01Capabilities} from '../src/u01-bridge.mjs';
+import {bindModuleToU01Host} from '../src/host-binding.mjs';
+import {createProductHostPort} from '../../universal-install/host-bindings/product-hosts.mjs';
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'../..');
 const executable=process.argv[2];
 if(!executable)throw Error('U03_JQ_EXECUTABLE_REQUIRED');
@@ -41,5 +43,28 @@ assert.equal(compatible(),false,'old U01 receipt must not survive reconnect and 
 config.receipts={evaluate:{observation:replay,observationRef:'qualification:node:epoch2:'+
  createHash('sha256').update(replay.output).digest('hex')}};
 assert.equal(compatible(),true);
+// Exercise the existing U01 asynchronous product host port with a REAL executable.
+let attached=0,detached=0;
+const productPort=createProductHostPort('admin-center',({operation,request})=>
+  operation==='invoke'?c.invoke(request.operation,request.params):c[operation]());
+const actualHost={hostId:'iwxa.host.admin-center',version:'0.1.0'};
+const hostDescriptor={...descriptor,hostCompatibility:[{hostId:actualHost.hostId,range:'=0.1.0'}]};
+const binding=bindModuleToU01Host({
+  descriptor:hostDescriptor,host:actualHost,port:productPort,getBindings:()=>config,
+  hooks:{
+    attach:async()=>{attached++;return {attached:true,bindingRef:'existing-u01-host:1'};},
+    detach:async ref=>{detached++;return {detached:true,bindingRef:ref};},
+  },
+});
+assert.equal((await binding.assess()).compatible,true);
+const live=await binding.attach();
+assert.equal(live.attached,true);
+assert.equal(live.hostReceipt.bindingRef,'existing-u01-host:1');
+assert.equal((await binding.detach(live.hostReceipt.bindingRef)).detached,true);
+assert.equal(attached,1);
+assert.equal(detached,1);
+assert.equal((await productPort.disconnect({})).status,'DISCONNECTED');
+assert.equal((await binding.attach()).attached,false);
+assert.equal(attached,1,'stale availability must not reconnect host');
 console.log(JSON.stringify({schema:'IWXA_U03_REAL_U01_QUALIFICATION/1',consumer:'node',
  program:'jq',output:'42',status:'PASS'}));
