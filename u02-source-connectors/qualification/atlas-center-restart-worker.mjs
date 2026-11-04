@@ -38,9 +38,9 @@ if (phase === 'create') {
   const {link} = await load(saved);
   const state=deserialize(await readFile(snapshot,'utf8'));
   const next=editItem(state,link.projectId,link.workId,{state:'done'});
-  await writeFile(snapshot,serialize(next.state));
-  assert.equal(next.state.projects[0].items.find(x=>x.id===link.workId).state,'done');
-  console.log(JSON.stringify({phase,status:'PASS',projectRevision:next.state.revision}));
+  await writeFile(snapshot,serialize(next));
+  assert.equal(next.projects[0].items.find(x=>x.id===link.workId).state,'done');
+  console.log(JSON.stringify({phase,status:'PASS',projectRevision:next.revision}));
 } else if (phase === 'relink') {
   const old=await load(saved);
   const stale=await readPinnedSource(port(),old.pin);
