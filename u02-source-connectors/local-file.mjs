@@ -18,8 +18,13 @@ export function createLocalFileSourcePort({root, rootId, relativePath, maxBytes 
   if (segments.some(s => !s || s === '.' || s === '..' || /[\x00-\x1f<>:"|?*]/.test(s) ||
       /[. ]$/.test(s) || /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\.|$)/i.test(s)))
     throw Error('LOCAL_SOURCE_PATH_INVALID');
+  // Bind persisted pins to the host-selected root configuration, not just a reusable label.
+  // Never expose the absolute filesystem path in the descriptor.
+  const boundPath = resolve(root);
+  const rootFingerprint = createHash('sha256')
+    .update(process.platform === 'win32' ? boundPath.toLowerCase() : boundPath).digest('hex');
   const descriptor = sourceDescriptor({providerId: 'file.local',
-    sourceRef: `file://${rootId}/${segments.map(encodeURIComponent).join('/')}`});
+    sourceRef: `file://${rootId}/${rootFingerprint}/${segments.map(encodeURIComponent).join('/')}`});
   const provenance = {provider: 'local-file', access: 'host-selected-root',
     authority: 'local-file-read', rootId, relativePath};
   const observe = (status, extra = {}) => sourceObservation(descriptor,

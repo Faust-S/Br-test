@@ -1,6 +1,6 @@
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {isAbsolute} from 'node:path';
+import {isAbsolute,resolve} from 'node:path';
 import {sourceDescriptor,sourceObservation,requirePinnedSource} from './port.mjs';
 
 const COMMIT=/^[a-f0-9]{40}(?:[a-f0-9]{24})?$/i;
@@ -20,8 +20,11 @@ export function createLocalGitSourcePort({root,rootId,relativePath=null,observeL
    relativePath.length>1024||relativePath.includes('\\')||
    relativePath.split('/').some(s=>!s||s==='.'||s==='..'||/[\x00-\x1f\x7f:]/.test(s))))
    throw Error('GIT_SOURCE_PATH_INVALID');
+ const boundPath=resolve(root);
+ const rootFingerprint=createHash('sha256').update(
+   process.platform==='win32'?boundPath.toLowerCase():boundPath).digest('hex');
  const descriptor=sourceDescriptor({providerId:'git.local',
-   sourceRef:'git://'+rootId+(relativePath?'/'+relativePath.split('/').map(encodeURIComponent).join('/'):''),
+   sourceRef:'git://'+rootId+'/'+rootFingerprint+(relativePath?'/'+relativePath.split('/').map(encodeURIComponent).join('/'):''),
    observationType:'repository',capabilities:[{id:'source.describe',available:true},
      {id:'source.refresh',available:true},{id:'source.read',available:relativePath!==null}]});
  const observe=(status,extra={})=>sourceObservation(descriptor,{status,observedAt:now(),
