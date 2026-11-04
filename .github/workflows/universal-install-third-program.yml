@@ -1,0 +1,43 @@
+name: IWXA Managed Install - Third Manifest-Only Program
+on:
+  push:
+    branches: [work/2026-11-03-universal-install-module]
+    paths:
+      - 'universal-install/catalog/yq-4.54.1.json'
+      - 'universal-install/qualification/independent_manifest.py'
+      - 'universal-install/iwxa_universal_install/**'
+      - '.github/workflows/universal-install-third-program.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-third-manifest-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  third-real-program:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, windows-2022, windows-11-arm, macos-15-intel, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify generic installer without Obscura imports
+        shell: bash
+        run: |
+          python - <<'PY'
+          import sys
+          sys.path.insert(0, 'universal-install')
+          import iwxa_universal_install
+          from iwxa_universal_install import ManagedArtifactBackend, ManagedArtifactSpec
+          assert 'iwxa_obscura' not in sys.modules
+          assert ManagedArtifactBackend and ManagedArtifactSpec
+          print('GENERIC_IMPORT_WITHOUT_OBSCURA_PASS')
+          PY
+      - name: Qualify unchanged generic backend with third data-only manifest
+        shell: bash
+        run: python universal-install/qualification/independent_manifest.py --catalog universal-install/catalog/yq-4.54.1.json
