@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {createProductHostPort} from "../host-bindings/product-hosts.mjs";
 import {integrationObservation} from "../host-bindings/ui-levels.mjs";
 import {CliConnection,SCHEMA} from "../host-bindings/program-connection.mjs";
+import {createTauriProgramPort} from "../host-bindings/tauri-adapter.mjs";
 import {readFileSync} from "node:fs";
 const [catalogPath,programId,executable]=process.argv.slice(2);
 const spec=JSON.parse(readFileSync(catalogPath,"utf8")).programs.find(x=>x.program_id===programId);
@@ -26,6 +27,18 @@ for(const host of ["agent","admin-center","atlas"]){
  assert.equal(ui.highestVerified,"I2");
  assert.equal(ui.levels.find(x=>x.level==="I3").verified,false);
  assert.equal((await port.disconnect({})).status,"DISCONNECTED");
+ const tauriConnection=new CliConnection(spec,executable);
+ const nativeInvoke=async(command,{envelope})=>{
+  assert.equal(command,"iwxa_program_connection");
+  assert.equal(envelope.schema,SCHEMA);
+  return envelope.operation==="invoke"
+    ?tauriConnection.invoke(envelope.request.operation,envelope.request.params)
+    :tauriConnection[envelope.operation]();
+ };
+ const tauri=createTauriProgramPort(nativeInvoke);
+ assert.equal((await tauri.connect({})).status,"CONNECTED");
+ assert.equal((await tauri.invoke({operation:"evaluate",params:{expression:"5 * 5"}})).output.trim(),"25");
+ assert.equal((await tauri.disconnect({})).status,"DISCONNECTED");
 }
 console.log(JSON.stringify({schema:"IWXA_PRODUCT_HOST_QUALIFICATION/1",status:"PASS",
   hosts:["agent","admin-center","atlas"],uses_real_cli:true,
