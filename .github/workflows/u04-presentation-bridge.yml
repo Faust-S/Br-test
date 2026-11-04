@@ -23,6 +23,24 @@ jobs:
         with:
           node-version: '22'
       - run: node --test u04-presentation/tests/*.test.mjs
+      - name: Linux X11 adapter negative contract
+        if: runner.os == 'Linux'
+        run: /usr/bin/python3 -m unittest discover -s u04-presentation/tests -p 'test_linux_x11.py' -v
+      - name: Linux X11 real Tk host/editor GUI qualification
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb xdotool openbox python3-tk
+          xvfb-run -a -s '-screen 0 1280x800x24' bash -c 'openbox >/tmp/u04-openbox.log 2>&1 & sleep 2; /usr/bin/python3 u04-presentation/qualification/linux_x11_gui.py'
+      - name: Upload X11 real GUI report
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: u04-linux-x11-evidence
+          path: artifacts/u04/linux-x11/
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Native U04 Rust port negative contract
         if: runner.os == 'Windows'
         working-directory: universal-install/qualification/desktop-host/src-tauri
