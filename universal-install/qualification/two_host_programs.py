@@ -98,6 +98,12 @@ def qualify():
             node_report=json.loads(node.stdout.strip())
             if node_report["status"]!="PASS" or node_report["output"]!="42":
                 raise RuntimeError("NODE_REAL_INVOKE_FAILED")
+            host_test=subprocess.run(
+                ["node",str(ROOT/"universal-install"/"qualification"/"product_host_ports.mjs"),
+                 str(CONNECTORS),name,str(program)],
+                capture_output=True,text=True,timeout=30,check=True)
+            if json.loads(host_test.stdout.strip())["status"]!="PASS":
+                raise RuntimeError("PRODUCT_HOST_PORT_FAILED")
             if not backend.recover(package,str(install_root)).installed:
                 raise RuntimeError("INSTALL_READBACK_FAILED")
             approved_remove=ApprovedRemoval(name,package.fingerprint,
