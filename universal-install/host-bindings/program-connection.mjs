@@ -57,13 +57,21 @@ function run(path,args) {
     code:r.status,output:r.stdout??""};
 }
 function located(name) {
+  const windows=platform()==="win32";
+  // Windows PATH normally contains program.exe, while manifests often declare
+  // the portable command name without an extension (e.g. jq, yq).
+  const candidates=windows&&!name.toLowerCase().endsWith(".exe")
+    ? [name,name+".exe"] : [name];
   const dirs=(process.env.PATH??"").split(delimiter);
   for (const dir of dirs) {
-    const path=dir+(dir.endsWith("/")||dir.endsWith("\\")?"":platform()==="win32"?"\\":"/")+name;
-    try {const stat=lstatSync(path);if(!stat.isSymbolicLink()&&stat.isFile()) {
-      accessSync(path,platform()==="win32"?constants.F_OK:constants.X_OK);
-      return realpathSync(path);
-    }} catch {}
+    if(!dir)continue;
+    for(const candidate of candidates){
+      const path=dir+(dir.endsWith("/")||dir.endsWith("\\")?"":windows?"\\":"/")+candidate;
+      try {const stat=lstatSync(path);if(!stat.isSymbolicLink()&&stat.isFile()) {
+        accessSync(path,windows?constants.F_OK:constants.X_OK);
+        return realpathSync(path);
+      }} catch {}
+    }
   }
   return null;
 }
@@ -126,8 +134,11 @@ export class CliConnection {
     if(executableIdentity(this.path)!==this.identity){
       this.disconnect();return this.observation("CONNECTION_LOST",{executed:false});
     }
+    // Only own manifest entries are allowed. Inherited Object methods such as
+    // "constructor" or "toString" must never be treated as CLI operations.
+    if(typeof operation!=="string"||!Object.hasOwn(this.spec.operations,operation))
+      return this.observation("OPERATION_UNSUPPORTED",{executed:false});
     const args=this.spec.operations[operation];
-    if(!args) return this.observation("OPERATION_UNSUPPORTED",{executed:false});
     let bound;
     try{bound=bindArgs(args,params)}catch{
       return this.observation("CLI_INPUT_INVALID",{executed:false});

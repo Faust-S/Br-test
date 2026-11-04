@@ -141,11 +141,50 @@ try{
  assert.equal(badStream.capabilities().connected,false);
  const hugePayload=await c.invoke("evaluate",{text:"🌎".repeat(40000)});
  assert.equal(hugePayload.status,"HTTP_INPUT_INVALID");
+
+ // Reject names inherited from Object.prototype: they are not approved
+ // endpoints, even if manifest operations is a regular JavaScript object.
+ for(const inherited of ["constructor","toString","__proto__","valueOf"]){
+   const before=observedRedirectPolicy.length;
+   assert.equal((await c.invoke(inherited)).status,"OPERATION_UNSUPPORTED");
+   assert.equal(observedRedirectPolicy.length,before);
+ }
+ assert.throws(()=>new HttpProgramConnection({...spec,base_url:"not a URL"}),/HTTP_URL_INVALID/);
+ assert.throws(()=>new HttpProgramConnection({...spec,operations:{broken:null}}),/HTTP_OPERATION_INVALID/);
+ const getSpec={...spec,operations:{lookup:{method:"GET",path:"/health"}}};
+ const getPort=new HttpProgramConnection(getSpec,{
+   authHeaders:async()=>({Authorization:"Bearer SYNTHETIC-CI"})});
+ assert.equal((await getPort.connect()).status,"CONNECTED");
+ assert.equal((await getPort.invoke("lookup",{unused:123})).status,"HTTP_INPUT_INVALID");
+
+ // Disconnect while the host credential manager is still resolving a token:
+ // no HTTP request may start after that disconnect.
+ const credentialsWait=deferred(),credentialsEntered=deferred();
+ let credentialsPaused=false,networkCalls=0;
+ const slowCredentials=new HttpProgramConnection(spec,{
+   authHeaders:async()=>{
+     if(credentialsPaused){credentialsEntered.resolve();return credentialsWait.promise;}
+     return {Authorization:"Bearer SYNTHETIC-CI"};
+   },
+   fetcher:async(url,opts)=>{networkCalls++;return fetch(url,opts);}
+ });
+ assert.equal((await slowCredentials.connect()).status,"CONNECTED");
+ credentialsPaused=true;
+ const pendingCredentialInvoke=slowCredentials.invoke("evaluate",{a:9,b:9});
+ await credentialsEntered.promise;
+ const beforeDisconnectCalls=networkCalls;
+ slowCredentials.disconnect();
+ credentialsWait.resolve({Authorization:"Bearer SYNTHETIC-CI"});
+ assert.equal((await pendingCredentialInvoke).status,"CONNECTION_SUPERSEDED");
+ assert.equal(networkCalls,beforeDisconnectCalls);
+ assert.equal(slowCredentials.capabilities().connected,false);
  console.log(JSON.stringify({schema:"IWXA_HTTP_PROGRAM_QUALIFICATION/1",
   status:"PASS",transport:"http",real_local_api:true,answer:42,
   host_owned_authorization:true,unsupported_op_rejected:true,
   uncredentialed_rejected:true,auth_provider_failure_fail_closed:true,
   unsafe_health_url_rejected:true,cross_origin_redirect_blocked:true,
   disconnect_race_prevented:true,stale_read_race_prevented:true,
-  bounded_response:true,broken_stream_fails_closed:true}));
+  bounded_response:true,broken_stream_fails_closed:true,
+  prototype_methods_rejected:true,credentials_disconnect_fence:true,
+  invalid_url_and_get_params_rejected:true}));
 }finally{await new Promise(resolve=>server.close(resolve));}

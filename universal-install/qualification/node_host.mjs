@@ -24,6 +24,10 @@ if(executed.status!=="EXECUTED" || executed.output.trim()!=="42")throw Error("NO
 if(connection.invoke("evaluate",{expression:"7 * 8"}).output.trim()!=="56")throw Error("NODE_DYNAMIC_INPUT_FAILED");
 if(!connection.capabilities().operations[0].verified)throw Error("NODE_CAPABILITY_NOT_VERIFIED");
 if(connection.invoke("unlisted").status!=="OPERATION_UNSUPPORTED")throw Error("NODE_UNLISTED_OPERATION");
+for(const inherited of ["constructor","toString","__proto__","valueOf"]){
+ if(connection.invoke(inherited).status!=="OPERATION_UNSUPPORTED")
+  throw Error("NODE_INHERITED_OPERATION_ACCEPTED_"+inherited);
+}
 if(connection.disconnect().status!=="DISCONNECTED")throw Error("NODE_DISCONNECT_FAILED");
 if(connection.invoke("evaluate",{expression:"6 * 7"}).status!=="NOT_CONNECTED")throw Error("NODE_DISCONNECTED_EXECUTION");
 if(connection.recover().status!=="CONNECTED")throw Error("NODE_RECOVER_FAILED");

@@ -39,13 +39,17 @@ export class HttpProgramConnection {
   if(spec?.schema!=="IWXA_HTTP_PROGRAM/1" ||
      !/^[A-Z][A-Z0-9_]{2,79}$/.test(spec.program_id??"")||
      typeof fetcher!=="function"||typeof authHeaders!=="function"||
-     !spec.operations||!Object.keys(spec.operations).length)throw Error("HTTP_SPEC_INVALID");
-  const url=new URL(spec.base_url);
+     !spec.operations||typeof spec.operations!=="object"||
+     Array.isArray(spec.operations)||!Object.keys(spec.operations).length)
+    throw Error("HTTP_SPEC_INVALID");
+  let url;
+  try{url=new URL(spec.base_url);}catch{throw Error("HTTP_URL_INVALID");}
   if(!["http:","https:"].includes(url.protocol)||url.username||url.password||
      !safePath(spec.health_path))throw Error("HTTP_URL_INVALID");
   for(const [name,op] of Object.entries(spec.operations))
-   if(!/^[a-z][a-z0-9_]*$/.test(name)||!["GET","POST"].includes(op.method)||
-      !safePath(op.path))throw Error("HTTP_OPERATION_INVALID");
+   if(!/^[a-z][a-z0-9_]*$/.test(name)||!op||typeof op!=="object"||
+      !["GET","POST"].includes(op.method)||!safePath(op.path))
+    throw Error("HTTP_OPERATION_INVALID");
   this.spec=spec;this.fetcher=fetcher;this.authHeaders=authHeaders;
   this.connected=false;this.verified=new Set();this.generation=0;
  }
@@ -53,21 +57,24 @@ export class HttpProgramConnection {
   program_id:this.spec.program_id,transport:"http",status,...extra};}
  inspect(){return this.observation("CONFIGURED",{connected:false,installed:false,
   interfaces:["http"],ownership:"EXTERNAL",process:"UNKNOWN"});}
- async request(path,method="GET",payload){
-  // Host secret-store or credential-provider failure is an auth loss, never
-  // a reason to leave previously verified operations in the connected state.
-  let headers;
-  try {headers={...await this.authHeaders(this.spec.program_id)};}
-  catch{return {ok:false,status:401,hostAuthorizationUnavailable:true};}
-  // Reject cross-origin redirects so credentials cannot follow HTTP 3xx.
-  const opts={method,headers,signal:AbortSignal.timeout(10000),redirect:"error"};
+ async request(path,method="GET",payload,epoch=this.generation){
+  // Validate input before resolving host authorization so bad requests cannot
+  // hold a connection open while waiting for the host credential provider.
+  let body;
   if(payload!==undefined){
-   let body;
    try{body=JSON.stringify(payload);}catch{return {ok:false,inputInvalid:true};}
    if(typeof body!=="string"||new TextEncoder().encode(body).byteLength>MAX_BYTES)
     return {ok:false,inputInvalid:true};
-   opts.body=body;opts.headers["Content-Type"]="application/json";
   }
+  let headers;
+  try {headers={...await this.authHeaders(this.spec.program_id)};}
+  catch{return {ok:false,status:401,hostAuthorizationUnavailable:true};}
+  // An explicit disconnect during slow credential resolution must prevent the
+  // native HTTP call from ever starting; checking after fetch is too late.
+  if(epoch!==this.generation)return {superseded:true};
+  // Reject cross-origin redirects so credentials cannot follow HTTP 3xx.
+  const opts={method,headers,signal:AbortSignal.timeout(10000),redirect:"error"};
+  if(body!==undefined){opts.body=body;opts.headers["Content-Type"]="application/json";}
   try{return await this.fetcher(new URL(path,this.spec.base_url).toString(),opts);}
   catch{return null;}
  }
@@ -76,7 +83,7 @@ export class HttpProgramConnection {
   // Late successes from older connect/invoke cannot revive disconnected state.
   const epoch=++this.generation;
   this.connected=false;this.verified.clear();
-  const r=await this.request(this.spec.health_path);
+  const r=await this.request(this.spec.health_path,"GET",undefined,epoch);
   if(epoch!==this.generation)
    return this.observation("CONNECTION_SUPERSEDED",{connected:this.connected});
   if(!r||!r.ok){this.disconnect();
@@ -91,10 +98,16 @@ export class HttpProgramConnection {
    ({name,declared:true,verified:this.connected&&this.verified.has(name)}))});}
  async invoke(name,payload={}){
   if(!this.connected)return this.observation("NOT_CONNECTED",{executed:false});
+  // Object prototypes are not an authority to invoke an operation.
+  if(typeof name!=="string"||!Object.hasOwn(this.spec.operations,name))
+   return this.observation("OPERATION_UNSUPPORTED",{executed:false});
   const op=this.spec.operations[name];
-  if(!op)return this.observation("OPERATION_UNSUPPORTED",{executed:false});
+  // GET parameters have no manifest mapping; never silently discard them.
+  if(op.method==="GET"&&(payload===null||typeof payload!=="object"||
+     Array.isArray(payload)||Object.keys(payload).length>0))
+   return this.observation("HTTP_INPUT_INVALID",{executed:false});
   const epoch=this.generation;
-  const r=await this.request(op.path,op.method,op.method==="POST"?payload:undefined);
+  const r=await this.request(op.path,op.method,op.method==="POST"?payload:undefined,epoch);
   if(epoch!==this.generation)
    return this.observation("CONNECTION_SUPERSEDED",{executionOutcome:"UNKNOWN"});
   if(r?.inputInvalid)return this.observation("HTTP_INPUT_INVALID",{executed:false});
