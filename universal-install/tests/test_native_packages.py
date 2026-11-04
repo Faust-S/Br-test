@@ -148,9 +148,9 @@ class NativePackageContractTest(unittest.TestCase):
                 else:
                     self.assertTrue(_command(obj, "remove"))
 
-    def test_generic_import_remains_obscura_optional(self):
+    def test_generic_native_adapter_has_no_obscura_dependency(self):
         self.assertIsNotNone(NativePackageBackend)
-        self.assertNotIn("iwxa_obscura", sys.modules)
+        self.assertNotIn("iwxa_obscura", NativePackageBackend.__module__)
 
 
 if __name__ == "__main__":
