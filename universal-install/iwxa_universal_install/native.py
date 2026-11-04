@@ -62,6 +62,32 @@ class NativePackageSpec:
                 if cmd and (not Path(cmd[0]).is_absolute() or ".." in Path(cmd[0]).parts):
                     raise ValueError("NATIVE_SPEC_COMMAND_PATH_INVALID")
 
+    @classmethod
+    def from_mapping(cls, data: dict) -> "NativePackageSpec":
+        """Load a new native package using data only, with no per-app class."""
+        if not isinstance(data, dict) or set(data) - {
+            "artifact", "package_id", "install_arguments",
+            "uninstall_arguments", "probe_arguments"
+        } or not {"artifact", "package_id"} <= set(data):
+            raise ValueError("NATIVE_SPEC_FIELDS_INVALID")
+        artifact = ManagedArtifactSpec.from_mapping(data["artifact"])
+        arguments = {}
+        for field in ("install_arguments", "uninstall_arguments", "probe_arguments"):
+            values = data.get(field, [])
+            if not isinstance(values, list):
+                raise ValueError("NATIVE_SPEC_ARGUMENTS_INVALID")
+            arguments[field] = tuple(values)
+        return cls(artifact=artifact, package_id=data["package_id"], **arguments)
+
+    def as_dict(self) -> dict:
+        return {
+            "artifact": self.artifact.as_dict(),
+            "package_id": self.package_id,
+            "install_arguments": list(self.install_arguments),
+            "uninstall_arguments": list(self.uninstall_arguments),
+            "probe_arguments": list(self.probe_arguments),
+        }
+
     @property
     def fingerprint(self) -> str:
         import hashlib
