@@ -108,6 +108,19 @@ def qualify():
                 capture_output=True,text=True,timeout=30,check=True)
             if json.loads(host_test.stdout.strip())["status"]!="PASS":
                 raise RuntimeError("PRODUCT_HOST_PORT_FAILED")
+            rust_binary = (ROOT/"universal-install"/"host-bindings"/"rust-port"/
+                           "target"/"debug"/("iwxa-rust-cli-qualification.exe"
+                                            if sys.platform=="win32"
+                                            else "iwxa-rust-cli-qualification"))
+            if rust_binary.exists():
+                rust = subprocess.run(
+                    [str(rust_binary),str(CONNECTORS),name,str(program)],
+                    capture_output=True,text=True,timeout=35,check=True)
+                rust_report=json.loads(rust.stdout.strip())
+                if rust_report["status"]!="PASS" or rust_report["value"]!="42":
+                    raise RuntimeError("NATIVE_RUST_HOST_FAILED")
+            elif __import__("os").environ.get("IWXA_REQUIRE_RUST_HOST") == "1":
+                raise RuntimeError("NATIVE_RUST_HOST_NOT_BUILT")
             if not backend.recover(package,str(install_root)).installed:
                 raise RuntimeError("INSTALL_READBACK_FAILED")
             approved_remove=ApprovedRemoval(name,package.fingerprint,
