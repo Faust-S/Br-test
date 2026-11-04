@@ -24,6 +24,7 @@ NATIVE_FAMILY = "IWXA_NATIVE_PACKAGE_V1"
 _PACKAGE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+:-]{0,199}\Z")
 _GUID = re.compile(r"\{[0-9a-fA-F]{8}-(?:[0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}\}\Z")
 _ARG_LIMIT = 32
+_RECEIPT_ID = re.compile(r"[A-Za-z0-9._:-]{8,128}\Z")
 
 
 @dataclass(frozen=True)
@@ -225,7 +226,10 @@ class NativePackageBackend:
         _require_native(spec)
         if not isinstance(approval, ApprovedInstall) or approval.confirmed is not True:
             raise InstallError("INSTALL_OWNER_APPROVAL_REQUIRED")
-        if approval.program_id != spec.program_id or approval.spec_fingerprint != spec.fingerprint:
+        if (approval.program_id != spec.program_id or
+                approval.spec_fingerprint != spec.fingerprint or
+                not isinstance(approval.receipt_id, str) or
+                _RECEIPT_ID.fullmatch(approval.receipt_id) is None):
             raise InstallError("INSTALL_APPROVAL_MISMATCH")
         _root(approval.installation_root)
         staged = ManagedArtifactPreparer(managed_root=_root(staging_root)).verify_prepared(spec.artifact)
@@ -249,7 +253,10 @@ class NativePackageBackend:
         _require_native(spec)
         if not isinstance(approval, ApprovedRemoval) or approval.confirmed is not True:
             raise InstallError("REMOVE_OWNER_APPROVAL_REQUIRED")
-        if approval.program_id != spec.program_id or approval.spec_fingerprint != spec.fingerprint:
+        if (approval.program_id != spec.program_id or
+                approval.spec_fingerprint != spec.fingerprint or
+                not isinstance(approval.receipt_id, str) or
+                _RECEIPT_ID.fullmatch(approval.receipt_id) is None):
             raise InstallError("REMOVE_APPROVAL_MISMATCH")
         _root(approval.installation_root)
         if not _probe(spec):
