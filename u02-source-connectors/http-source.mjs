@@ -52,7 +52,11 @@ export function createHttpSourcePort({endpoint,sourceId,fetcher=globalThis.fetch
     const sizeHeader=response.headers?.get?.('content-length');
     if(sizeHeader!=null && !/^(0|[1-9]\d*)$/.test(sizeHeader))
       return {status:'SOURCE_INVALID'};
-    if(sizeHeader!=null && Number(sizeHeader)>maxBytes)
+    const contentCoding=response.headers?.get?.('content-encoding');
+    const compressed=typeof contentCoding==='string' && contentCoding.trim()!=='' &&
+      contentCoding.trim().toLowerCase()!=='identity';
+    // fetch() exposes decoded bytes; Content-Length describes compressed wire bytes.
+    if(!compressed && sizeHeader!=null && Number(sizeHeader)>maxBytes)
       return {status:'SOURCE_TOO_LARGE'};
     let buffer;
     if(response.body && typeof response.body.getReader==='function'){
@@ -74,7 +78,7 @@ export function createHttpSourcePort({endpoint,sourceId,fetcher=globalThis.fetch
       try {buffer=Buffer.from(await response.arrayBuffer());}catch{return {status:'SOURCE_UNAVAILABLE'};}
       if(buffer.length>maxBytes)return {status:'SOURCE_TOO_LARGE'};
     } else return {status:'SOURCE_INVALID'};
-    if(sizeHeader!=null && Number(sizeHeader)!==buffer.length)
+    if(!compressed && sizeHeader!=null && Number(sizeHeader)!==buffer.length)
       return {status:'SOURCE_INVALID'};
     return {status:'OK',revision:hash(buffer),buffer};
   }
