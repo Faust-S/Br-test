@@ -171,3 +171,75 @@ class AttachRaceTests(unittest.TestCase):
                          ['U03_HOST_OBSERVATION_LOST'])
         self.assertEqual(outcome['rollback'],'DETACHED')
         self.assertEqual(removed,['host:lost'])
+
+class ConcurrentAndIncompleteReceiptTests(unittest.TestCase):
+    def test_parallel_attach_is_rejected_without_second_host_call(self):
+        import threading
+        connection=Connection()
+        entered=threading.Event()
+        release=threading.Event()
+        calls=[]
+        outcomes=[]
+        def attach(*_):
+            calls.append(1)
+            entered.set()
+            if not release.wait(3):
+                raise AssertionError('host-test-gate-timeout')
+            return {'attached':True,'bindingRef':'host:concurrent'}
+        bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+            connection,lambda:{**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}},
+            attach,lambda *_:{'detached':True})
+        thread=threading.Thread(target=lambda:outcomes.append(bridge.attach()))
+        try:
+            thread.start()
+            self.assertTrue(entered.wait(2),'first host attach must enter')
+            refused=bridge.attach()
+            self.assertFalse(refused['attached'])
+            self.assertEqual(refused['assessment']['reasons'],['U03_HOST_ATTACH_IN_PROGRESS'])
+            self.assertIsNone(refused['hostReceipt'])
+            self.assertEqual(len(calls),1)
+        finally:
+            release.set()
+            thread.join(3)
+        self.assertFalse(thread.is_alive())
+        self.assertTrue(outcomes[0]['attached'])
+        self.assertTrue(bridge.attach()['attached'])
+        self.assertEqual(len(calls),2)
+
+    def test_positive_receipt_without_binding_ref_is_not_assumed_attached(self):
+        for missing in (None,'','  ',12):
+            with self.subTest(bindingRef=missing):
+                connection=Connection()
+                detached=[]
+                def attach(*_):
+                    return {'attached':True,'bindingRef':missing}
+                bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                    connection,lambda:{**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}},
+                    attach,lambda ref:detached.append(ref) or {'detached':True})
+                result=bridge.attach()
+                self.assertFalse(result['attached'])
+                self.assertEqual(result['assessment']['reasons'],['U03_HOST_BINDING_REF_MISSING'])
+                self.assertEqual(result['rollback'],'UNCONFIRMED')
+                self.assertEqual(result['hostState'],'UNKNOWN')
+                self.assertEqual(connection.calls,1)
+                self.assertEqual(detached,[])
+
+    def test_host_denial_does_not_poison_next_attach(self):
+        connection=Connection()
+        permitted=[False]
+        actions=[]
+        def attach(*_):
+            actions.append(1)
+            if not permitted[0]:
+                return {'attached':False,'reason':'owner-denied'}
+            return {'attached':True,'bindingRef':'host:later'}
+        bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+            connection,lambda:{**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}},
+            attach,lambda *_:{'detached':True})
+        denied=bridge.attach()
+        self.assertFalse(denied['attached'])
+        self.assertEqual(denied['hostReceipt']['reason'],'owner-denied')
+        self.assertNotIn('rollback',denied)
+        permitted[0]=True
+        self.assertTrue(bridge.attach()['attached'])
+        self.assertEqual(len(actions),2)

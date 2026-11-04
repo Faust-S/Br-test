@@ -187,3 +187,78 @@ test('post-attach observation errors trigger host-owned detach, not false succes
  assert.equal(result.rollback,'DETACHED');
  assert.equal(detached,1);
 });
+
+test('concurrent async attaches refuse the second call without a duplicate host action', async()=>{
+  let unblock,entered,attached=0,detached=0;
+  const start=new Promise(resolve=>{entered=resolve;});
+  const gate=new Promise(resolve=>{unblock=resolve;});
+  const bridge=bindModuleToU01Host({
+    descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+    port:{capabilities:async()=>source(epochA)},
+    getBindings:()=>({...cfg,receipts:{evaluate:receipt(epochA)}}),
+    hooks:{
+      attach:async()=>{
+        attached++;
+        entered();
+        await gate;
+        return {attached:true,bindingRef:'host:concurrent'};
+      },
+      detach:async()=>{detached++;return {detached:true};},
+    },
+  });
+  const first=bridge.attach();
+  await start;
+  const second=await bridge.attach();
+  assert.equal(second.attached,false);
+  assert.deepEqual(second.assessment.reasons,['U03_HOST_ATTACH_IN_PROGRESS']);
+  assert.equal(second.hostReceipt,null);
+  assert.equal(attached,1);
+  unblock();
+  assert.equal((await first).attached,true);
+  assert.equal((await bridge.attach()).attached,true);
+  assert.equal(attached,2);
+  assert.equal(detached,0);
+});
+
+test('positive host receipt without a usable bindingRef is never declared attached',async()=>{
+  for(const missingRef of [undefined,null,'','  ',17]){
+    let reads=0,detaches=0;
+    const bridge=bindModuleToU01Host({
+      descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+      port:{capabilities:async()=>{reads++;return source(epochA);}},
+      getBindings:()=>({...cfg,receipts:{evaluate:receipt(epochA)}}),
+      hooks:{
+        attach:async()=>({attached:true,bindingRef:missingRef}),
+        detach:async()=>{detaches++;return {detached:true};},
+      },
+    });
+    const result=await bridge.attach();
+    assert.equal(result.attached,false);
+    assert.deepEqual(result.assessment.reasons,['U03_HOST_BINDING_REF_MISSING']);
+    assert.equal(result.rollback,'UNCONFIRMED');
+    assert.equal(result.hostState,'UNKNOWN');
+    assert.equal(reads,1);
+    assert.equal(detaches,0);
+  }
+});
+
+test('host denial preserves owner decision and leaves in-flight guard reusable',async()=>{
+  let approved=false,attempts=0;
+  const bridge=bindModuleToU01Host({
+    descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+    port:{capabilities:async()=>source(epochA)},
+    getBindings:()=>({...cfg,receipts:{evaluate:receipt(epochA)}}),
+    hooks:{
+      attach:async()=>{attempts++;return approved
+        ?{attached:true,bindingRef:'host:approved'}:{attached:false,reason:'owner-denied'};},
+      detach:async()=>({detached:true}),
+    },
+  });
+  const denied=await bridge.attach();
+  assert.equal(denied.attached,false);
+  assert.equal(denied.hostReceipt.reason,'owner-denied');
+  assert.equal('rollback' in denied,false);
+  approved=true;
+  assert.equal((await bridge.attach()).attached,true);
+  assert.equal(attempts,2);
+});
