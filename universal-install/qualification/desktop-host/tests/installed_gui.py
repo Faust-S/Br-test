@@ -4,6 +4,8 @@ Run on a fresh hosted profile. Do not treat a backend fixture or DOM simulation
 as an installed GUI PASS. Preserve screenshots and measurements on failure.
 """
 import json
+import ctypes
+from ctypes import wintypes
 import os
 from pathlib import Path
 import subprocess
@@ -24,6 +26,86 @@ RUNS=[]
 def check(condition,code):
     if not condition:
         raise RuntimeError(code)
+
+def native_input_probe(window,receipt,attempt,entry):
+    """Real Win32 input then OS-window routing; never invoke application JS/IPC."""
+    user32=ctypes.WinDLL("user32",use_last_error=True)
+    owner=int(window.handle)
+    rect=window.rectangle()
+    x,y=rect.left+165,rect.top+185
+    user32.ShowWindow(owner,9)  # SW_RESTORE
+    user32.SetForegroundWindow(owner)
+    entry["foreground_hwnd"]=int(user32.GetForegroundWindow() or 0)
+    entry["owner_hwnd"]=owner
+
+    class POINT(ctypes.Structure):
+        _fields_=[("x",wintypes.LONG),("y",wintypes.LONG)]
+    class MOUSEINPUT(ctypes.Structure):
+        _fields_=[("dx",wintypes.LONG),("dy",wintypes.LONG),
+                  ("mouseData",wintypes.DWORD),("dwFlags",wintypes.DWORD),
+                  ("time",wintypes.DWORD),("dwExtraInfo",ctypes.c_void_p)]
+    class KEYBDINPUT(ctypes.Structure):
+        _fields_=[("wVk",wintypes.WORD),("wScan",wintypes.WORD),
+                  ("dwFlags",wintypes.DWORD),("time",wintypes.DWORD),
+                  ("dwExtraInfo",ctypes.c_void_p)]
+    class HARDWAREINPUT(ctypes.Structure):
+        _fields_=[("uMsg",wintypes.DWORD),("wParamL",wintypes.WORD),
+                  ("wParamH",wintypes.WORD)]
+    class INPUTUNION(ctypes.Union):
+        _fields_=[("mi",MOUSEINPUT),("ki",KEYBDINPUT),("hi",HARDWAREINPUT)]
+    class INPUT(ctypes.Structure):
+        _fields_=[("type",wintypes.DWORD),("union",INPUTUNION)]
+    def event(flag):
+        data=INPUT()
+        data.type=0
+        data.union.mi=MOUSEINPUT(0,0,0,flag,0,None)
+        return user32.SendInput(1,ctypes.byref(data),ctypes.sizeof(data))
+    user32.SetCursorPos(x,y)
+    entry["sendinput_click"]={
+        "x":x,"y":y,"down":int(event(0x0002)), "up":int(event(0x0004))}
+    time.sleep(1.0)
+    window.capture_as_image().save(str(OUT/f"after-sendinput-{attempt}.png"))
+    if receipt.exists():
+        entry["native_input_route"]="SendInput"
+        return
+
+    children=[]
+    enum=ctypes.WINFUNCTYPE(wintypes.BOOL,wintypes.HWND,wintypes.LPARAM)
+    @enum
+    def visitor(hwnd,ignored):
+        buffer=ctypes.create_unicode_buffer(180)
+        user32.GetClassNameW(hwnd,buffer,180)
+        r=wintypes.RECT()
+        user32.GetWindowRect(hwnd,ctypes.byref(r))
+        children.append({"hwnd":int(hwnd),"class":buffer.value,
+            "left":r.left,"top":r.top,"right":r.right,"bottom":r.bottom,
+            "visible":bool(user32.IsWindowVisible(hwnd))})
+        return True
+    user32.EnumChildWindows(owner,visitor,0)
+    entry["native_child_windows"]=children
+    print("GUI_NATIVE_CHILDREN: "+json.dumps(children),flush=True)
+
+    # WebView2 can own a separate child HWND. Test native Windows messages
+    # against actual visible child HWNDs; a response still requires REAL
+    # Rust execution and written native receipt, not simulated success.
+    candidates=[c for c in children if c["visible"] and
+                c["left"]<=x<c["right"] and c["top"]<=y<c["bottom"]]
+    candidates.sort(key=lambda c:
+        (c["right"]-c["left"])*(c["bottom"]-c["top"]))
+    for child in candidates[:12]:
+        hwnd=child["hwnd"]
+        point=POINT(x,y)
+        user32.ScreenToClient(hwnd,ctypes.byref(point))
+        packed=((point.y & 0xffff)<<16)|(point.x & 0xffff)
+        user32.PostMessageW(hwnd,0x0200,0,packed)  # WM_MOUSEMOVE
+        user32.PostMessageW(hwnd,0x0201,1,packed)  # WM_LBUTTONDOWN
+        user32.PostMessageW(hwnd,0x0202,0,packed)  # WM_LBUTTONUP
+        time.sleep(0.45)
+        if receipt.exists():
+            entry["native_input_route"]="WM_LBUTTON_to_"+child["class"]
+            break
+    window.capture_as_image().save(str(OUT/f"after-native-child-{attempt}.png"))
+
 
 def launch_and_click(executable,receipt,attempt):
     if receipt.exists():
@@ -95,6 +177,8 @@ def launch_and_click(executable,receipt,attempt):
             keyboard.send_keys("{TAB}{ENTER}",pause=0.15)
             entry["keyboard_fallback"]=True
             time.sleep(1.0)
+        if not receipt.exists():
+            native_input_probe(window,receipt,attempt,entry)
         window.capture_as_image().save(str(OUT/f"after-click-{attempt}.png"))
         try:
             entry["controls_after_click"]=[
