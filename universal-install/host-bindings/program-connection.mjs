@@ -44,6 +44,7 @@ export class CliConnection {
     this.spec=validateCliSpec(spec);
     this.requested=executable;
     this.path=null;
+    this.verified=new Set();
   }
   observation(status,detail={}) {return {schema:SCHEMA,program_id:this.spec.program_id,
     transport:"cli",status,...detail};}
@@ -53,17 +54,20 @@ export class CliConnection {
       if(path && isAbsolute(path) && !lstatSync(path).isSymbolicLink()) {
         accessSync(path,platform()==="win32"?constants.F_OK:constants.X_OK);
         if(lstatSync(path).isFile()) return this.observation("DISCOVERED",{
-          installed:true,path:realpathSync(path),connected:false});
+          installed:true,path:realpathSync(path),connected:false,
+          architecture:"UNKNOWN",ownership:"UNKNOWN",interfaces:["cli"],
+          process:"UNKNOWN"});
       }
     } catch {}
-    return this.observation("NOT_FOUND",{installed:false,connected:false});
+    return this.observation("NOT_FOUND",{installed:false,connected:false,
+      architecture:"UNKNOWN",ownership:"UNKNOWN",interfaces:[],process:"UNKNOWN"});
   }
   connect() {
     const found=this.inspect();
-    if(!found.installed) {this.path=null;return found;}
+    if(!found.installed) {this.path=null;this.verified.clear();return found;}
     const r=run(found.path,this.spec.version_args);
     if(r.status!=="EXECUTED"||!r.output.includes(this.spec.version_contains)){
-      this.path=null;return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
+      this.path=null;this.verified.clear();return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
     }
     this.path=found.path;
     return this.observation("CONNECTED",{installed:true,connected:true,
@@ -72,7 +76,7 @@ export class CliConnection {
   verify(){return this.path?this.connect():this.observation("NOT_CONNECTED",{connected:false});}
   capabilities(){return this.observation(this.path?"DECLARED":"NOT_CONNECTED",{
     connected:!!this.path,operations:Object.keys(this.spec.operations).sort()
-     .map(name=>({name,declared:true,verified:false}))});}
+     .map(name=>({name,declared:true,verified:this.verified.has(name)}))});}
   invoke(operation) {
     if(!this.path) return this.observation("NOT_CONNECTED",{executed:false});
     const args=this.spec.operations[operation];
@@ -80,9 +84,10 @@ export class CliConnection {
     const begin=performance.now(),r=run(this.path,args);
     if(r.status!=="EXECUTED")return this.observation(r.status,{
       executed:false,exit_code:r.code});
+    this.verified.add(operation);
     return this.observation("EXECUTED",{executed:true,operation,
       output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
   }
-  disconnect(){this.path=null;return this.observation("DISCONNECTED",{connected:false});}
+  disconnect(){this.path=null;this.verified.clear();return this.observation("DISCONNECTED",{connected:false});}
   recover(){return this.connect();}
 }

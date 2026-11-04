@@ -51,6 +51,7 @@ class CliConnection:
         self.spec = validate_spec(spec)
         self.requested = executable
         self.path = None
+        self._verified = set()
 
     def observation(self, status, **extra):
         return dict(schema=SCHEMA, program_id=self.spec["program_id"],
@@ -65,17 +66,23 @@ class CliConnection:
                 os.name == "nt" or os.access(file, os.X_OK)
             ):
                 return self.observation("DISCOVERED", installed=True,
-                                        path=str(file.resolve()), connected=False)
-        return self.observation("NOT_FOUND", installed=False, connected=False)
+                                        path=str(file.resolve()), connected=False,
+                                        architecture="UNKNOWN", ownership="UNKNOWN",
+                                        interfaces=["cli"], process="UNKNOWN")
+        return self.observation("NOT_FOUND", installed=False, connected=False,
+                                architecture="UNKNOWN", ownership="UNKNOWN",
+                                interfaces=[], process="UNKNOWN")
 
     def connect(self):
         found = self.inspect()
         if not found["installed"]:
             self.path = None
+            self._verified.clear()
             return found
         code, version = run_command(found["path"], self.spec["version_args"])
         if code or self.spec["version_contains"] not in version:
             self.path = None
+            self._verified.clear()
             return self.observation("VERSION_UNVERIFIED", installed=True,
                                     connected=False)
         self.path = found["path"]
@@ -91,7 +98,7 @@ class CliConnection:
     def capabilities(self):
         return self.observation("DECLARED" if self.path else "NOT_CONNECTED",
             connected=bool(self.path),
-            operations=[dict(name=name, declared=True, verified=False)
+            operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])
 
     def invoke(self, operation):
@@ -108,12 +115,14 @@ class CliConnection:
         if code:
             return self.observation("EXECUTION_FAILED", executed=False,
                                     exit_code=code)
+        self._verified.add(operation)
         return self.observation("EXECUTED", executed=True, operation=operation,
                                 output=output,
                                 elapsed_ms=round((time.perf_counter()-start)*1000, 3))
 
     def disconnect(self):
         self.path = None
+        self._verified.clear()
         return self.observation("DISCONNECTED", connected=False)
 
     def recover(self):

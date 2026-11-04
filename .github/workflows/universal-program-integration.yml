@@ -33,3 +33,13 @@ jobs:
       - name: Two genuinely installed independent programs, two host runtimes
         shell: bash
         run: python universal-install/qualification/two_host_programs.py
+      - name: Retrieve unmodified public Atlas observer for source compatibility test
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Atlas
+          ref: e5cc6ff593aa12eec3da8e8940ad5af5819b66fd
+          path: atlas-public
+          persist-credentials: false
+      - name: Real public Atlas observer and synthetic authorized-source contract
+        shell: bash
+        run: node universal-install/qualification/github_source_host.mjs
