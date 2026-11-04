@@ -175,3 +175,31 @@ test('pin requires observation-only authority and matching source kind',()=>{
  assert.throws(()=>sourceDescriptor({providerId:'git.local',sourceRef:'git://r',
   capabilities:[{id:'source.read',available:'yes'}]}),/SOURCE_DESCRIPTOR_INVALID/);
 });
+
+test('program changes are observable without treating capability digest as binary version',async()=>{
+ const view={connected:false,version:null,operations:[
+  {name:'beta',declared:true,verified:false},
+  {name:'alpha',declared:true,verified:false}]};
+ const connection={
+  inspect:()=>({schema:'IWXA_PROGRAM_CONNECTION/1.0.0',program_id:'NODE_CLI_V1',
+   status:'DISCOVERED',transport:'cli',version:view.version}),
+  capabilities:()=>({schema:'IWXA_PROGRAM_CONNECTION/1.0.0',program_id:'NODE_CLI_V1',
+   connected:view.connected,operations:view.operations})
+ };
+ const port=createProgramCapabilityView({programId:'NODE_CLI_V1',connection,now:t});
+ const a=await port.refresh();
+ assert.equal(a.status,'OK');assert.equal(a.revision,null);
+ assert.equal(a.versionStatus,'NOT_OBSERVED');
+ assert.throws(()=>pinSource(port.describe(),a),/SOURCE_PIN_UNAVAILABLE/);
+ view.connected=true;view.version='v22.16.0';view.operations[0].verified=true;
+ const b=await port.refresh();
+ assert.equal(b.status,'OK');assert.equal(b.programVersion,'v22.16.0');
+ assert.equal(b.versionStatus,'HOST_REPORTED');
+ assert.equal(sourceChange(a,b).status,'CHANGED');
+ assert.equal(sourceChange(a,b).basis,'CAPABILITY_OBSERVATION');
+ view.operations.reverse();
+ const c=await port.refresh();
+ assert.equal(sourceChange(b,c).status,'UNCHANGED');
+ view.connected=false;
+ assert.equal((await port.refresh()).status,'SOURCE_INVALID');
+});

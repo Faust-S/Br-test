@@ -9,7 +9,7 @@ permissions:
   contents: read
 concurrency:
   group: iwxa-u02-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 jobs:
   portable-contracts:
     strategy:
@@ -43,3 +43,17 @@ jobs:
       - name: Live public GitHub revision and exact pinned content, no secrets
         shell: bash
         run: node u02-source-connectors/qualification/live-atlas.mjs
+      - uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Center
+          ref: 87ec8f38b767222f991ee7288639fb449ddbe853
+          path: center-public
+          persist-credentials: false
+      - name: Connect Center reader to exact canonical Atlas checkout
+        shell: bash
+        run: |
+          mkdir -p center-public/vendor
+          cp -R atlas-public center-public/vendor/atlas
+      - name: U02 to real Atlas project model and Center read-only adapter
+        shell: bash
+        run: node u02-source-connectors/qualification/atlas-center.mjs

@@ -62,9 +62,19 @@ export function sourceChange(previous, next) {
   if (!previous || !next || previous.schema !== SOURCE_SCHEMA || next.schema !== SOURCE_SCHEMA ||
       previous.status !== 'OK' || next.status !== 'OK' ||
       previous.providerId !== next.providerId || previous.sourceRef !== next.sourceRef ||
-      previous.observationType !== next.observationType ||
-      !validRevision(previous.revision) || !validRevision(next.revision))
+      previous.observationType !== next.observationType)
     return {status: 'NOT_COMPARABLE'};
-  return {status: previous.revision === next.revision ? 'UNCHANGED' : 'CHANGED',
-    previousRevision: previous.revision, currentRevision: next.revision};
+  const byRevision = validRevision(previous.revision) && validRevision(next.revision);
+  // Program capability changes can be compared even when the vendor version is unknown.
+  // This content fingerprint is not a program binary version or authorization.
+  const byCapabilities = previous.observationType === 'program' &&
+    previous.revision === null && next.revision === null &&
+    validRevision(previous.contentRef) && validRevision(next.contentRef);
+  if (!byRevision && !byCapabilities) return {status: 'NOT_COMPARABLE'};
+  const older = byRevision ? previous.revision : previous.contentRef;
+  const newer = byRevision ? next.revision : next.contentRef;
+  return {status: older === newer ? 'UNCHANGED' : 'CHANGED',
+    basis: byRevision ? 'SOURCE_REVISION' : 'CAPABILITY_OBSERVATION',
+    previousRevision: previous.revision, currentRevision: next.revision,
+    ...(byCapabilities ? {previousContentRef: older, currentContentRef: newer} : {})};
 }
