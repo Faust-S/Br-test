@@ -25,11 +25,22 @@ jobs:
         with:
           python-version: '3.13'
       - name: Node consumers, epochs, and U01 bridging
-        run: node --test u03-capability-sdk/tests/capability.test.mjs u03-capability-sdk/tests/u01-bridge.test.mjs u03-capability-sdk/tests/connection-epochs.test.mjs
+        run: node --test u03-capability-sdk/tests/capability.test.mjs u03-capability-sdk/tests/u01-bridge.test.mjs u03-capability-sdk/tests/connection-epochs.test.mjs u03-capability-sdk/tests/t2-contract.test.mjs
       - name: Live local HTTP API, host-owned credential loss and reattachment
         run: node u03-capability-sdk/qualification/real-u01-http.mjs
       - name: Python consumer (same public specification)
         run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v
+      - name: Checkout pinned, unmodified T2 public source
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/T2
+          ref: e70de29b72b83e2546f7ab74b17572685a728c17
+          path: t2-public
+          persist-credentials: false
+      - name: JS T2 declaration readback, no runtime loading
+        run: node u03-capability-sdk/qualification/t2-contract-readback.mjs t2-public
+      - name: Python T2 declaration readback, no runtime loading
+        run: python u03-capability-sdk/qualification/t2_contract_readback.py t2-public
 
   real-u01-bridge:
     name: Real pinned jq via U01 into U03

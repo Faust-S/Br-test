@@ -1,0 +1,16 @@
+[
+  {"name":"compatible-declarations", "expected":[]},
+  {"name":"workspace-version-mismatch", "target":{"workspaceContract":"0.2.0","runtimeContract":"1.3.0"}, "expected":["U03_T2_WORKSPACE_CONTRACT_MISMATCH"]},
+  {"name":"runtime-version-mismatch", "target":{"workspaceContract":"0.1.0","runtimeContract":"1.4.0"}, "expected":["U03_T2_RUNTIME_CONTRACT_MISMATCH"]},
+  {"name":"both-contracts-mismatch", "target":{"workspaceContract":"0.2.0","runtimeContract":"1.2.0"}, "expected":["U03_T2_WORKSPACE_CONTRACT_MISMATCH","U03_T2_RUNTIME_CONTRACT_MISMATCH"]},
+  {"name":"unknown-target-shape", "target":{"workspaceContract":"0.1.0"}, "expected":["U03_T2_TARGET_INVALID"]},
+  {"name":"wrong-t2-manifest-version", "patch":{"module_manifest_version":"2.0.0"}, "expected":["U03_T2_MANIFEST_SHAPE_INVALID"]},
+  {"name":"t2-invalid-module-id", "patch":{"module_id":"IWXA-INVALID"}, "expected":["U03_T2_MANIFEST_SHAPE_INVALID"]},
+  {"name":"t2-invalid-runtime-declaration", "compatibilityPatch":{"runtime_contract":"1.4.0"}, "expected":["U03_T2_MANIFEST_SHAPE_INVALID"]},
+  {"name":"t2-remote-code-forbidden", "securityPatch":{"remote_code":true}, "expected":["U03_T2_MANIFEST_SHAPE_INVALID"]},
+  {"name":"t2-additional-manifest-field", "patch":{"grants":["all"]}, "expected":["U03_T2_MANIFEST_SHAPE_INVALID"]},
+  {"name":"t2-missing-contribution-group", "omitContribution":"legacy_importers", "expected":["U03_T2_MANIFEST_SHAPE_INVALID"]},
+  {"name":"native-t2-version-is-opaque", "patch":{"module_version":"v-next"}, "expected":[]},
+  {"name":"t2-native-id-remains-native", "patch":{"module_id":"iwxa..workspace"}, "expected":[]},
+  {"name":"unavailable-target-and-malformed-manifest", "patch":{"security":null}, "target":{"runtimeContract":"1.3.0"}, "expected":["U03_T2_MANIFEST_SHAPE_INVALID","U03_T2_TARGET_INVALID"]}
+]
