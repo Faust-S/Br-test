@@ -1,0 +1,23 @@
+name: IWXA U04 Presentation Bridge
+on:
+  push:
+    branches: [work/2026-11-04-u04-presentation-bridge]
+    paths:
+      - 'u04-presentation/**'
+      - '.github/workflows/u04-presentation-bridge.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --test u04-presentation/tests/*.test.mjs

@@ -1,0 +1,60 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {createPresentationBridge,SCHEMA} from "../bridge.mjs";
+import {createWindowsPresentationAdapter} from "../windows-adapter.mjs";
+
+function fixture() {
+ const state={alive:true,focus:true,observations:0,launches:0,terminated:0};
+ const adapter={
+  linkedWindow:true,embeddedView:false,
+  async launch(){state.launches++;return {status:"LAUNCHED",pid:105};},
+  async observe({pid}){assert.equal(pid,105);state.observations++;return state.alive?{observed:true,windowRef:String(state.observations)}:{observed:false};},
+  async focus({pid,windowRef}){assert.equal(pid,105);return {focused:state.focus};}
+ };
+ return {state,bridge:createPresentationBridge(adapter)};
+}
+test("launch, real observed window identity, re-observed repeated focus and harmless detach",async()=>{
+ const {state,bridge}=fixture();
+ const launched=await bridge.open({appRef:"sample",hostRef:"atlas",launchSpec:{approved:true}});
+ assert.equal(launched.schema,SCHEMA);
+ assert.equal(launched.status,"WINDOW_OBSERVED");
+ assert.equal(state.launches,1);
+ assert.equal((await bridge.activate({bindingRef:launched.binding.bindingRef,hostRef:"atlas"})).status,"WINDOW_FOCUSED");
+ assert.equal((await bridge.activate({bindingRef:launched.binding.bindingRef,hostRef:"atlas"})).status,"WINDOW_FOCUSED");
+ assert.equal(state.launches,1);
+ assert.equal(state.observations,3);
+ assert.equal((await bridge.closeBinding({bindingRef:launched.binding.bindingRef,hostRef:"atlas"})).processTerminated,false);
+ assert.equal(state.terminated,0);
+ assert.equal((await bridge.activate({bindingRef:launched.binding.bindingRef,hostRef:"atlas"})).status,"BINDING_NOT_FOUND");
+});
+test("capabilities refuse unsupported official embedding, no speculative I4",()=>{
+ const bridge=fixture().bridge;
+ const modes=bridge.capabilities().capabilities;
+ assert.deepEqual(modes.map(x=>x.mode),["LAUNCH","FOCUS","LINKED_WINDOW","EMBEDDED_VIEW"]);
+ assert.equal(modes.at(-1).supported,false);
+ assert.equal(modes.at(-1).reason,"NO_OFFICIAL_TOOLKIT_EMBED_API");
+});
+test("foreign host rejected without OS focus, disappearing window fail closed",async()=>{
+ const {state,bridge}=fixture();
+ const b=await bridge.open({appRef:"sample",hostRef:"host-A",launchSpec:{}});
+ assert.equal((await bridge.activate({bindingRef:b.binding.bindingRef,hostRef:"host-B"})).status,"BINDING_NOT_FOUND");
+ state.alive=false;
+ assert.equal((await bridge.activate({bindingRef:b.binding.bindingRef,hostRef:"host-A"})).status,"WINDOW_NOT_FOUND");
+});
+test("focus refusal is reported, never assumed successful",async()=>{
+ const {state,bridge}=fixture();state.focus=false;
+ const b=await bridge.open({appRef:"sample",hostRef:"host-A",launchSpec:{}});
+ const result=await bridge.activate({bindingRef:b.binding.bindingRef,hostRef:"host-A"});
+ assert.equal(result.status,"WINDOW_FOCUS_DENIED");
+ assert.equal(result.focused,false);
+});
+test("invalid binding and adapter rejected",async()=>{
+ assert.throws(()=>createPresentationBridge({}),/PRESENTATION_ADAPTER_INVALID/);
+ const bridge=fixture().bridge;
+ await assert.rejects(bridge.open({appRef:"",hostRef:"x",launchSpec:{}}),/PRESENTATION_BINDING_INVALID/);
+});
+test("Windows port never launches foreign-platform executable",async()=>{
+ const adapter=createWindowsPresentationAdapter({platform:"linux",observeWindow:()=>{},focusWindow:()=>{}});
+ assert.equal((await adapter.launch({launchSpec:{executable:"/bin/echo"}})).status,"PLATFORM_UNSUPPORTED");
+ assert.equal(adapter.linkedWindow,false);
+});
