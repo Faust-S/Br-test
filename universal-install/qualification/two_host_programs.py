@@ -112,6 +112,8 @@ def qualify():
                            "target"/"debug"/("iwxa-rust-cli-qualification.exe"
                                             if sys.platform=="win32"
                                             else "iwxa-rust-cli-qualification"))
+            rust_qualified=False
+            rust_binary_bytes=None
             if rust_binary.exists():
                 rust = subprocess.run(
                     [str(rust_binary),str(CONNECTORS),name,str(program)],
@@ -119,6 +121,13 @@ def qualify():
                 rust_report=json.loads(rust.stdout.strip())
                 if rust_report["status"]!="PASS" or rust_report["value"]!="42":
                     raise RuntimeError("NATIVE_RUST_HOST_FAILED")
+                rust_qualified=True
+                rust_binary_bytes=rust_binary.stat().st_size
+                print(json.dumps({"schema":"IWXA_RUST_REAL_PROGRAM_EVIDENCE/1",
+                                  "status":"PASS","program_id":name,
+                                  "platform":platform,"binary_bytes":rust_binary_bytes,
+                                  "rust_without_python_core":True,
+                                  "real_executable":True}), flush=True)
             elif __import__("os").environ.get("IWXA_REQUIRE_RUST_HOST") == "1":
                 raise RuntimeError("NATIVE_RUST_HOST_NOT_BUILT")
             if not backend.recover(package,str(install_root)).installed:
@@ -135,7 +144,9 @@ def qualify():
                            "platform":platform,"direct_ms":round(direct_ms,3),
                            "python_invoke_ms":first["elapsed_ms"],
                            "node_process_with_connection_ms":round(node_ms,3),
-                           "download_bytes":program.stat().st_size if program.exists() else None})
+                           "rust_host_qualified":rust_qualified,
+                           "rust_binary_bytes":rust_binary_bytes,
+                           "download_bytes":package.archive_sha256 is not None})
     print(json.dumps({"schema":"IWXA_PROGRAM_INTEGRATION_QUALIFICATION/1",
                       "status":"PASS","platform":platform,"results":report},sort_keys=True))
 
