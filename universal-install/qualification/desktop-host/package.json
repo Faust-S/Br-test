@@ -1,0 +1,11 @@
+{
+  "name": "iwxa-universal-program-gui-qualification",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build:desktop": "tauri build"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.2"
+  }
+}

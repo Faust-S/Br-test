@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>IWXA Universal Program CI</title><style>
+body{font-family:Segoe UI,Arial,sans-serif;margin:26px;background:#f5f7fa;color:#18233b}
+h1{font-size:23px;margin:6px 0 8px}
+p{font-size:14px;color:#55627c;max-width:510px}
+button{position:absolute;top:126px;left:32px;width:250px;height:56px;border:0;border-radius:8px;
+background:#234e8a;color:white;font-size:17px;cursor:pointer}
+button:focus{outline:3px solid #a9c9fd}
+#result{position:absolute;top:207px;left:32px;font-size:16px;font-weight:600}
+small{position:absolute;bottom:20px;left:32px;color:#6a7891}
+</style></head>
+<body>
+<h1>Universal Program Integration</h1>
+<p>Real installed Tauri host. The button invokes an approved Rust CLI port.</p>
+<button id="invoke" type="button">Execute jq: 6 × 7</button>
+<div id="result" role="status" aria-live="polite">Ready for an actual click</div>
+<small>Public test fixture • No Agent, Center or Atlas data</small>
+<script type="module" src="./app.js"></script>
+</body></html>

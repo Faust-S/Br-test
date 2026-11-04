@@ -1,0 +1,10 @@
+{
+  "identifier": "main",
+  "description": "Minimal public real-GUI fixture. No general filesystem or shell privileges in WebView.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}
