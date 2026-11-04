@@ -1,5 +1,6 @@
 import {readFileSync} from "node:fs";
 import {CliConnection,SCHEMA} from "../host-bindings/program-connection.mjs";
+import {createHostAdapter} from "../host-bindings/host-port.mjs";
 
 const [catalogPath,programId,executable]=process.argv.slice(2);
 const catalog=JSON.parse(readFileSync(catalogPath,"utf8"));
@@ -22,6 +23,12 @@ if(connection.disconnect().status!=="DISCONNECTED")throw Error("NODE_DISCONNECT_
 if(connection.invoke("evaluate",{expression:"6 * 7"}).status!=="NOT_CONNECTED")throw Error("NODE_DISCONNECTED_EXECUTION");
 if(connection.recover().status!=="CONNECTED")throw Error("NODE_RECOVER_FAILED");
 if(connection.verify().status!=="CONNECTED")throw Error("NODE_VERIFY_FAILED");
+const uiHost=createHostAdapter(async ({operation,request})=>
+  operation==="invoke" ? connection.invoke(request.operation,request.params) :
+  connection[operation]());
+const bridged=await uiHost.invoke({operation:"evaluate",params:{expression:"8 * 8"}});
+if(bridged.status!=="EXECUTED"||bridged.output.trim()!=="64")
+  throw Error("BROWSER_NEUTRAL_HOST_PORT_EXECUTION_FAILED");
 connection.disconnect();
 const result={schema:SCHEMA,host:"node",program_id:programId,status:"PASS",
   executed:true,output:executed.output.trim(),cold_ms:Math.round((performance.now()-start)*1000)/1000,
