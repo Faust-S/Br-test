@@ -4,6 +4,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
+import threading
 import time
 
 SCHEMA = "IWXA_PROGRAM_CONNECTION/1.0.0"
@@ -64,19 +65,62 @@ def executable_identity(path):
 
 
 def run_command(path, args):
+    """Run a native CLI with strict per-stream output limits on all hosts."""
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     try:
-        # A user-facing Windows host must not flash a console when executing
-        # background CLI commands such as jq or yq.
-        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
-        result = subprocess.run([path, *args], shell=False, capture_output=True,
-                                timeout=20, check=False, creationflags=flags)
-    except subprocess.TimeoutExpired:
-        raise ProgramError("CLI_TIMED_OUT") from None
+        child = subprocess.Popen(
+            [path, *args], shell=False, stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags,
+        )
     except OSError:
         raise ProgramError("CLI_EXECUTION_FAILED") from None
-    if len(result.stdout) > 131072 or len(result.stderr) > 131072:
-        raise ProgramError("CLI_OUTPUT_TOO_LARGE")
-    return result.returncode, result.stdout.decode("utf-8", errors="replace")
+
+    too_large = threading.Event()
+    stream_failed = threading.Event()
+    buffers = [bytearray(), bytearray()]
+
+    def collect(stream, buffer):
+        try:
+            while chunk := stream.read(8192):
+                buffer.extend(chunk)
+                if len(buffer) > 131072:
+                    too_large.set()
+                    break
+        except OSError:
+            stream_failed.set()
+
+    streams = (child.stdout, child.stderr)
+    readers = [threading.Thread(target=collect, args=(stream, buffer), daemon=True)
+               for stream, buffer in zip(streams, buffers)]
+    for reader in readers:
+        reader.start()
+    deadline = time.monotonic() + 20
+    try:
+        while child.poll() is None:
+            if too_large.is_set():
+                raise ProgramError("CLI_OUTPUT_TOO_LARGE")
+            if stream_failed.is_set():
+                raise ProgramError("CLI_EXECUTION_FAILED")
+            if time.monotonic() >= deadline:
+                raise ProgramError("CLI_TIMED_OUT")
+            time.sleep(0.01)
+        for reader in readers:
+            reader.join(timeout=max(0, deadline - time.monotonic()))
+        if too_large.is_set():
+            raise ProgramError("CLI_OUTPUT_TOO_LARGE")
+        if any(reader.is_alive() for reader in readers):
+            raise ProgramError("CLI_TIMED_OUT")
+        if stream_failed.is_set():
+            raise ProgramError("CLI_EXECUTION_FAILED")
+        return child.returncode, buffers[0].decode("utf-8", errors="replace")
+    finally:
+        if child.poll() is None:
+            child.kill()
+        child.wait()
+        for stream, reader in zip(streams, readers):
+            reader.join(timeout=0.2)
+            if not reader.is_alive():
+                stream.close()
 
 class CliConnection:
     """Host owns executable selection, consent, receipts, storage and install."""

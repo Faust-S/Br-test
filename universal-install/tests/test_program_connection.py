@@ -1,12 +1,13 @@
 """Cross-platform native CLI invocation and real Windows no-console verification."""
 import os
 import sys
+import time
 from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "universal-install"))
-from iwxa_universal_install.program_connection import run_command, CliConnection
+from iwxa_universal_install.program_connection import run_command, CliConnection, ProgramError
 
 
 class CliProcessHostTest(unittest.TestCase):
@@ -36,6 +37,19 @@ class CliProcessHostTest(unittest.TestCase):
         self.assertEqual(connection.disconnect()["status"], "DISCONNECTED")
         self.assertEqual(connection.recover()["status"], "CONNECTED")
         self.assertEqual(connection.capabilities()["operations"][0]["verified"], False)
+
+    def test_excessive_output_is_rejected_before_timeout(self):
+        for stream in ("stdout", "stderr"):
+            with self.subTest(stream=stream):
+                script = (
+                    "import sys,time; "
+                    f"sys.{stream}.buffer.write(b'x'*262144); "
+                    f"sys.{stream}.flush(); time.sleep(30)"
+                )
+                started = time.monotonic()
+                with self.assertRaisesRegex(ProgramError, "CLI_OUTPUT_TOO_LARGE"):
+                    run_command(sys.executable, ["-c", script])
+                self.assertLess(time.monotonic() - started, 8.0)
 
     @unittest.skipUnless(os.name == "nt", "Win32 console window belongs to Windows only")
     def test_child_console_is_absent_for_gui_host(self):

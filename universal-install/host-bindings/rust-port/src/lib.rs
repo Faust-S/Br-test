@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
@@ -100,16 +101,34 @@ fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static st
     let mut child = command.spawn().map_err(|_| "CLI_EXECUTION_FAILED")?;
     let stdout = child.stdout.take().ok_or("CLI_EXECUTION_FAILED")?;
     let stderr = child.stderr.take().ok_or("CLI_EXECUTION_FAILED")?;
+    // The reader stops at MAX_OUTPUT+1. Without a signal the child can fill
+    // its pipe and block until the 20-second timeout instead of failing fast.
+    let oversized = Arc::new(AtomicBool::new(false));
+    let out_limit = Arc::clone(&oversized);
     let out_thread = thread::spawn(move || {
         let mut buffer = Vec::new();
-        stdout.take(MAX_OUTPUT + 1).read_to_end(&mut buffer).map(|_| buffer)
+        let result = stdout.take(MAX_OUTPUT + 1).read_to_end(&mut buffer);
+        if buffer.len() as u64 > MAX_OUTPUT {
+            out_limit.store(true, Ordering::Release);
+        }
+        result.map(|_| buffer)
     });
+    let err_limit = Arc::clone(&oversized);
     let err_thread = thread::spawn(move || {
         let mut buffer = Vec::new();
-        stderr.take(MAX_OUTPUT + 1).read_to_end(&mut buffer).map(|_| buffer)
+        let result = stderr.take(MAX_OUTPUT + 1).read_to_end(&mut buffer);
+        if buffer.len() as u64 > MAX_OUTPUT {
+            err_limit.store(true, Ordering::Release);
+        }
+        result.map(|_| buffer)
     });
     let start = Instant::now();
     let status = loop {
+        if oversized.load(Ordering::Acquire) {
+            let _ = child.kill();
+            let _ = child.wait();
+            break Err("CLI_OUTPUT_TOO_LARGE");
+        }
         match child.try_wait() {
             Ok(Some(s)) => break Ok(s),
             Ok(None) if start.elapsed() < TIMEOUT => thread::sleep(Duration::from_millis(10)),
@@ -326,6 +345,21 @@ mod tests {
             .expect("Windows Python CLI must launch");
         assert_eq!(code, 0);
         assert_eq!(output.trim(), "0", "GUI-owned CLI must not create a console");
+    }
+    #[test]
+    fn excessive_cli_output_is_rejected_before_timeout() {
+        // Python is available in the existing cross-platform CI matrix.
+        for stream in ["stdout", "stderr"] {
+            let code = format!(
+                "import sys,time; sys.{stream}.buffer.write(b'x'*262144); \
+sys.{stream}.flush(); time.sleep(30)"
+            );
+            let start = Instant::now();
+            let result = execute(&PathBuf::from("python"), &["-c".into(), code]);
+            assert_eq!(result, Err("CLI_OUTPUT_TOO_LARGE"));
+            assert!(start.elapsed() < Duration::from_secs(8),
+                "oversized {stream} blocked until timeout");
+        }
     }
     #[test]
     fn versions_have_exact_boundaries() {
