@@ -57,3 +57,6 @@ jobs:
       - name: U02 to real Atlas project model and Center read-only adapter
         shell: bash
         run: node u02-source-connectors/qualification/atlas-center.mjs
+      - name: U02 Atlas Center persisted readback across independent processes
+        shell: bash
+        run: node u02-source-connectors/qualification/atlas-center-restart.mjs
