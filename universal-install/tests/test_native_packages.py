@@ -135,7 +135,7 @@ class NativePackageContractTest(unittest.TestCase):
                 if fmt == "exe-installer":
                     obj = NativePackageSpec(artifact, package_id,
                         install_arguments=("/S",),
-                        probe_arguments=(r"C:\Windows\System32\where.exe", "sample.exe"))
+                        probe_arguments=(str(Path(sys.executable).resolve()), "--version"))
                 else:
                     obj = NativePackageSpec(artifact, package_id)
                 command = _command(obj, "install", Path("/tmp/pinned-package"))
