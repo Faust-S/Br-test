@@ -1,4 +1,6 @@
 // On-demand HTTP API connector. Host retains authorization and persistence.
+// A host-approved path must be root-relative, not an absolute/cross-origin URL.
+const safePath=path=>typeof path==="string" && /^\/(?!\/)[A-Za-z0-9/_-]*$/.test(path);
 export class HttpProgramConnection {
  constructor(spec,{fetcher=globalThis.fetch,authHeaders=async()=>({})}={}){
   if(spec?.schema!=="IWXA_HTTP_PROGRAM/1" ||
@@ -6,10 +8,11 @@ export class HttpProgramConnection {
      typeof fetcher!=="function"||typeof authHeaders!=="function"||
      !spec.operations||!Object.keys(spec.operations).length)throw Error("HTTP_SPEC_INVALID");
   const url=new URL(spec.base_url);
-  if(!["http:","https:"].includes(url.protocol)||url.username||url.password)throw Error("HTTP_URL_INVALID");
+  if(!["http:","https:"].includes(url.protocol)||url.username||url.password||
+     !safePath(spec.health_path))throw Error("HTTP_URL_INVALID");
   for(const [name,op] of Object.entries(spec.operations))
    if(!/^[a-z][a-z0-9_]*$/.test(name)||!["GET","POST"].includes(op.method)||
-      !/^\/[A-Za-z0-9/_-]*$/.test(op.path))throw Error("HTTP_OPERATION_INVALID");
+      !safePath(op.path))throw Error("HTTP_OPERATION_INVALID");
   this.spec=spec;this.fetcher=fetcher;this.authHeaders=authHeaders;
   this.connected=false;this.verified=new Set();
  }
@@ -18,8 +21,13 @@ export class HttpProgramConnection {
  inspect(){return this.observation("CONFIGURED",{connected:false,installed:false,
   interfaces:["http"],ownership:"EXTERNAL",process:"UNKNOWN"});}
  async request(path,method="GET",payload){
-  const headers={...await this.authHeaders(this.spec.program_id)};
-  const opts={method,headers,signal:AbortSignal.timeout(10000)};
+  // Host secret-store or credential-provider failure is an auth loss, never
+  // a reason to leave previously verified operations in the connected state.
+  let headers;
+  try {headers={...await this.authHeaders(this.spec.program_id)};}
+  catch{return {ok:false,status:401,hostAuthorizationUnavailable:true};}
+  // Reject cross-origin redirects so credentials cannot follow HTTP 3xx.
+  const opts={method,headers,signal:AbortSignal.timeout(10000),redirect:"error"};
   if(payload!==undefined){
    const body=JSON.stringify(payload);
    if(body.length>131072)throw Error("HTTP_INPUT_TOO_LARGE");
