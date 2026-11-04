@@ -97,9 +97,44 @@ def qualify():
             except InstallError as exc:
                 if exc.code != "REMOVE_NATIVE_PKG_UNSUPPORTED":
                     raise
+            # macOS pkgutil records one version for this receipt. Upgrading
+            # must not permit the stale manifest to remove the new version.
+            payload.write_text("verified native macOS PKG fixture v2\n", encoding="utf-8")
+            upgraded_package = root / "iwxa-native-pkg-ci-v2.pkg"
+            run("pkgbuild", "--root", str(payload_root),
+                "--identifier", PACKAGE_ID, "--version", "1.1.0", str(upgraded_package))
+            upgraded_sha = hashlib.sha256(upgraded_package.read_bytes()).hexdigest()
+            upgraded_artifact = ManagedArtifactSpec(
+                program_id=artifact.program_id, slug=artifact.slug,
+                release_id="1.1.0", platform=artifact.platform,
+                executable_name=upgraded_package.name, archive_name=upgraded_package.name,
+                archive_format="pkg", archive_sha256=upgraded_sha, executable_sha256=upgraded_sha,
+                download_url="https://github.com/Faust-S/Br-test/releases/download/1.1.0/"
+                + upgraded_package.name)
+            upgraded_spec = NativePackageSpec(
+                upgraded_artifact, PACKAGE_ID, installed_version="1.1.0",
+                uninstall_arguments=spec.uninstall_arguments)
+            backend.prepare(upgraded_spec, str(stage), archive_path=str(upgraded_package))
+            upgrade_approval = ApprovedInstall(
+                upgraded_spec.program_id, upgraded_spec.fingerprint,
+                "PINS-native-pkg-upgrade", str(owned), True)
+            if not backend.apply(upgraded_spec, str(stage), upgrade_approval).installed:
+                raise RuntimeError("PKG_SMOKE_UPGRADE_FAILED")
+            if PAYLOAD.read_text(encoding="utf-8") != "verified native macOS PKG fixture v2\n":
+                raise RuntimeError("PKG_SMOKE_UPGRADE_PAYLOAD_WRONG")
+            if backend.verify(spec, str(owned)).installed:
+                raise RuntimeError("PKG_SMOKE_OLD_VERSION_FALSE_POSITIVE")
+            old_remove = ApprovedRemoval(
+                spec.program_id, spec.fingerprint, "PINS-native-pkg-old-remove",
+                str(owned), True)
+            if backend.remove(spec, old_remove).status != "NOT_INSTALLED":
+                raise RuntimeError("PKG_SMOKE_OLD_VERSION_REMOVE_NOT_BLOCKED")
+            if not backend.verify(upgraded_spec, str(owned)).installed:
+                raise RuntimeError("PKG_SMOKE_NEW_VERSION_DAMAGED")
             removal = ApprovedRemoval(
-                spec.program_id, spec.fingerprint, "PINS-native-pkg-remove", str(owned), True)
-            if backend.remove(spec, removal).status != "REMOVED":
+                upgraded_spec.program_id, upgraded_spec.fingerprint,
+                "PINS-native-pkg-remove", str(owned), True)
+            if backend.remove(upgraded_spec, removal).status != "REMOVED":
                 raise RuntimeError("PKG_SMOKE_VENDOR_UNINSTALL_FAILED")
             if installed() or PAYLOAD.exists():
                 raise RuntimeError("PKG_SMOKE_UNINSTALL_READBACK_FAILED")
@@ -110,7 +145,8 @@ def qualify():
                 "platform": _native_platform(), "installed": True,
                 "verified": True, "removed_by_backend": True,
                 "native_uninstall_supported": True,
-                "explicit_uninstall_required": True, "user_data_preserved": True
+                "explicit_uninstall_required": True, "upgraded": True,
+                "old_version_protected": True, "user_data_preserved": True
             }
             print(json.dumps(report, sort_keys=True))
             return report

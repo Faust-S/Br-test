@@ -8,6 +8,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -23,6 +24,9 @@ from iwxa_universal_install.managed import _native_platform
 
 
 def nsis_tool() -> Path:
+    found = shutil.which("makensis.exe") or shutil.which("makensis")
+    if found:
+        return Path(found)
     roots = [
         Path(os.environ.get("ProgramFiles(x86)", "C:/Program Files (x86)")) / "NSIS" / "makensis.exe",
         Path(os.environ.get("ProgramFiles", "C:/Program Files")) / "NSIS" / "makensis.exe",
@@ -34,8 +38,8 @@ def nsis_tool() -> Path:
 
 
 def qualify():
-    if sys.platform != "win32" or _native_platform() != "windows-x86_64":
-        raise RuntimeError("EXE_SMOKE_WINDOWS_X64_ONLY")
+    if sys.platform != "win32" or _native_platform() not in ("windows-x86_64", "windows-arm64"):
+        raise RuntimeError("EXE_SMOKE_WINDOWS_ONLY")
     with tempfile.TemporaryDirectory(prefix="iwxa-native-exe-ci-") as temp:
         root = Path(temp).resolve()
         installed_dir = root / "installed-by-vendor"

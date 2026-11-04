@@ -53,8 +53,8 @@ jobs:
         if: matrix.os == 'windows-2022'
         shell: bash
         run: python universal-install/qualification/native_msi_smoke.py
-      - name: Validate vendor EXE installer lifecycle on Windows x64
-        if: matrix.os == 'windows-2022'
+      - name: Validate vendor EXE installer lifecycle on Windows x64 and ARM64
+        if: runner.os == 'Windows'
         shell: bash
         run: python universal-install/qualification/native_exe_smoke.py
       - name: Existing public Obscura preparer regressions
