@@ -69,3 +69,12 @@ test('host lifecycle cannot claim attached without affirmative host receipt', as
   const value = await port.attach({ hostId: 'iwxa.agent', version: '0.3.0' }, observations.verified);
   assert.equal(value.attached, false);
 });
+
+test('identifiers and versions do not accept trailing newline in JS', () => {
+  assert.equal(validateDescriptor({ ...moduleDescriptor, id: 'iwxa.module\n' }), false);
+  assert.equal(validateDescriptor({ ...moduleDescriptor, version: '0.1.0\n' }), false);
+  assert.equal(validateDescriptor({ ...moduleDescriptor, requires: [{id:'iwxa.source.read',range:'>=1.0.0\n'}] }), false);
+  assert.equal(validateStatus({ ...observations.verified[0], id: 'iwxa.source.read\n' }), false);
+  assert.equal(satisfies('1.2.0\n', '>=1.0.0'), false);
+  assert.equal(satisfies('1.2.0', '>=1.0.0\n'), false);
+});

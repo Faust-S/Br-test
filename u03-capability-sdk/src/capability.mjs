@@ -1,9 +1,9 @@
 // U03: observations and compatibility only. No grants, registry or executor.
 export const MODULE_SCHEMA = 'IWXA_MODULE_DESCRIPTOR/1.0.0';
 export const STATUS_SCHEMA = 'IWXA_CAPABILITY_STATUS/1.0.0';
-const idPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$/;
-const versionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
-const clausePattern = /^(>=|<=|=|>|<)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+const idPattern = /^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?![\s\S])/;
+const versionPattern = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?![\s\S])/;
+const clausePattern = /^(>=|<=|=|>|<)?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?![\s\S])/;
 const isObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const hasKeys = (value, required, permitted) => isObject(value) &&
   required.every(key => Object.hasOwn(value, key)) &&

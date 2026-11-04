@@ -28,3 +28,23 @@ jobs:
         run: node --test u03-capability-sdk/tests/capability.test.mjs
       - name: Python consumer (same public specification)
         run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v
+
+  real-u01-bridge:
+    name: Real pinned jq via U01 into U03
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 16
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install official pinned jq, execute via Python and Node U01 hosts, revoke, remove
+        shell: bash
+        run: python u03-capability-sdk/qualification/real_u01_two_consumers.py

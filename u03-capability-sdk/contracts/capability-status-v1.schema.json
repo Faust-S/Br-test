@@ -4,13 +4,39 @@
   "title": "IWXA U03 Capability Status proposal 1.0.0",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema", "id", "available"],
+  "required": [
+    "schema",
+    "id",
+    "available"
+  ],
   "properties": {
-    "schema": {"const": "IWXA_CAPABILITY_STATUS/1.0.0"},
-    "id": {"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$"},
-    "available": {"type": "boolean"},
-    "version": {"type": "string", "minLength": 5, "maxLength": 120, "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$"},
-    "reason": {"type": "string", "maxLength": 256},
-    "observationRef": {"type": "string", "minLength": 1, "maxLength": 512, "pattern": "\\S"}
+    "schema": {
+      "const": "IWXA_CAPABILITY_STATUS/1.0.0"
+    },
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?![\\s\\S])"
+    },
+    "available": {
+      "type": "boolean"
+    },
+    "version": {
+      "type": "string",
+      "minLength": 5,
+      "maxLength": 120,
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?![\\s\\S])"
+    },
+    "reason": {
+      "type": "string",
+      "maxLength": 256
+    },
+    "observationRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "\\S"
+    }
   }
 }

@@ -67,3 +67,13 @@ class ConsumerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+class StrictEndOfStringTests(unittest.TestCase):
+    def test_inputs_reject_trailing_newline(self):
+        descriptor = fixture("module.json")
+        self.assertFalse(validate_descriptor({**descriptor, "id": "iwxa.module\n"}))
+        self.assertFalse(validate_descriptor({**descriptor, "version": "0.1.0\n"}))
+        self.assertFalse(validate_descriptor({**descriptor, "requires": [{"id": "iwxa.source.read", "range": ">=1.0.0\n"}]}))
+        self.assertFalse(validate_status({**fixture("observations.json")["verified"][0], "id": "iwxa.source.read\n"}))
+        self.assertFalse(satisfies("1.2.0\n", ">=1.0.0"))
+        self.assertFalse(satisfies("1.2.0", ">=1.0.0\n"))
