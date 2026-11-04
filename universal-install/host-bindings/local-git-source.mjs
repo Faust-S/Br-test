@@ -24,7 +24,7 @@ export function observeLocalGit(root){
   const branchHeads={};
   if(head)branchHeads[head]=sha;
   return {schema:"IWXA_LOCAL_GIT_SOURCE/1.0.0",scope:"repository",
-    status:"OK",complete:true,
+    status:"OK",complete:false,headComplete:true,branchScope:"WORKTREE_ONLY",
     repository:repo,defaultBranch:null,branches,branchHeads,
     headSha:sha,headRef:head??null,detachedHead:head===null,
     dirty:dirty===null?null:dirty.length>0,

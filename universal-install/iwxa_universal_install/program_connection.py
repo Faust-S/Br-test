@@ -49,6 +49,11 @@ def bind_arguments(args, params):
             re.fullmatch(r"\{[a-z][a-z0-9_]*\}", arg) else arg for arg in args]
 
 
+def version_matches(output, target):
+    """Exact version token, not a prefix of a newer package version."""
+    return re.search(re.escape(target) + r"(?![A-Za-z0-9.+-])", output) is not None
+
+
 def run_command(path, args):
     try:
         result = subprocess.run([path, *args], shell=False, capture_output=True,
@@ -95,8 +100,13 @@ class CliConnection:
             self.path = None
             self._verified.clear()
             return found
-        code, version = run_command(found["path"], self.spec["version_args"])
-        if code or self.spec["version_contains"] not in version:
+        try:
+            code, version = run_command(found["path"], self.spec["version_args"])
+        except ProgramError as error:
+            self.path = None
+            self._verified.clear()
+            return self.observation(error.code, installed=True, connected=False)
+        if code or not version_matches(version, self.spec["version_contains"]):
             self.path = None
             self._verified.clear()
             return self.observation("VERSION_UNVERIFIED", installed=True,

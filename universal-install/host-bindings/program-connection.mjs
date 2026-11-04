@@ -31,6 +31,12 @@ function bindArgs(args,params={}) {
     throw Error("CLI_INPUT_INVALID");
   return args.map(x=>/^\{[a-z][a-z0-9_]*\}$/.test(x)?params[x.slice(1,-1)]:x);
 }
+function versionMatches(value,needle) {
+  const index=value.indexOf(needle);
+  if(index<0)return false;
+  const next=value[index+needle.length]??"";
+  return !/[A-Za-z0-9.+-]/.test(next);
+}
 function run(path,args) {
   const r=spawnSync(path,args,{encoding:"utf8",timeout:20000,maxBuffer:131072,
     shell:false,windowsHide:true});
@@ -77,7 +83,7 @@ export class CliConnection {
     const found=this.inspect();
     if(!found.installed) {this.path=null;this.verified.clear();return found;}
     const r=run(found.path,this.spec.version_args);
-    if(r.status!=="EXECUTED"||!r.output.includes(this.spec.version_contains)){
+    if(r.status!=="EXECUTED"||!versionMatches(r.output,this.spec.version_contains)){
       this.path=null;this.verified.clear();return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
     }
     this.path=found.path;
