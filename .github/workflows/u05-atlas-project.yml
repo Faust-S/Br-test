@@ -1,0 +1,49 @@
+name: IWXA U05 canonical Atlas references
+on:
+  push:
+    branches: [work/2026-11-04-u05-atlas-public-project-core]
+    paths:
+      - 'u05-atlas-project/**'
+      - '.github/workflows/u05-atlas-project.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-u05-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  canonical-owner:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Atlas
+          ref: work/2026-11-04-u05-canonical-project-refs
+          path: atlas-public
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Center
+          ref: work/2026-11-04-admin-center-0.1
+          path: center-public
+          persist-credentials: false
+      - name: Match actual Center source to canonical Atlas source
+        shell: bash
+        run: |
+          mkdir -p center-public/vendor
+          cp -R atlas-public center-public/vendor/atlas
+      - name: Run canonical Atlas U05 tests
+        shell: bash
+        run: node --test atlas-public/tests/project-reference.test.mjs
+      - name: Actual Atlas, Center and allowed personal projection contract
+        shell: bash
+        run: node u05-atlas-project/qualification/atlas-center-agent-projection.mjs
