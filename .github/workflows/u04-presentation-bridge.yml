@@ -31,7 +31,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq xvfb xdotool openbox python3-tk
+          sudo apt-get install -y -qq xvfb xdotool x11-utils openbox python3-tk
           xvfb-run -a -s '-screen 0 1280x800x24' bash -c 'openbox >/tmp/u04-openbox.log 2>&1 & sleep 2; /usr/bin/python3 u04-presentation/qualification/linux_x11_gui.py'
       - name: Upload X11 real GUI report
         if: always() && runner.os == 'Linux'
