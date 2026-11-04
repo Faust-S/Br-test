@@ -16,7 +16,7 @@ import sys
 from typing import Callable
 
 from .contract import ApprovedInstall, ApprovedRemoval, InstallError, InstallObservation
-from .managed import ManagedArtifactBackend, _native_platform, _root
+from .managed import _native_platform, _root
 from .manifest import ManagedArtifactSpec, NATIVE_FORMATS
 from .preparer import ManagedArtifactPreparer, _check_parent_chain, _sha_file, NATIVE_LIMIT
 
@@ -169,9 +169,19 @@ class NativePackageBackend:
                 on_progress: Callable[[int, int | None], None] | None = None,
                 is_cancelled: Callable[[], bool] | None = None):
         _require_native(spec)
-        backend = ManagedArtifactBackend()
-        return backend.prepare(spec.artifact, staging_root, archive_path=archive_path,
-                               on_progress=on_progress, is_cancelled=is_cancelled)
+        staging = ManagedArtifactPreparer(managed_root=_root(staging_root))
+        if is_cancelled is not None:
+            if not callable(is_cancelled):
+                raise InstallError("INSTALL_CANCEL_CALLBACK_INVALID")
+            if is_cancelled():
+                raise InstallError("ARTIFACT_DOWNLOAD_CANCELLED")
+        if archive_path is None:
+            return staging.download_and_prepare(
+                spec.artifact, on_progress=on_progress, is_cancelled=is_cancelled)
+        staged = staging.prepare_local(archive_path, spec.artifact)
+        if on_progress is not None:
+            on_progress(1, 1)
+        return staged
 
     def verify(self, spec: NativePackageSpec, installation_root: str) -> InstallObservation:
         _require_native(spec)
