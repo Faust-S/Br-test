@@ -64,7 +64,7 @@ test('bounded streaming response, length header and invalid body',async()=>{
   fetcher:async()=>({ok:true,status:200,headers:{get:()=>null},body:stream})});
  assert.equal((await port.refresh()).status,'SOURCE_TOO_LARGE');
  const oversized=createHttpSourcePort({endpoint,sourceId:'example.api',maxBytes:4,
-  fetcher:async()=>({ok:true,status:200,headers:{get:()=> '100000'},arrayBuffer:async()=>{throw Error('NOT_READ')}})});
+  fetcher:async()=>({ok:true,status:200,headers:{get:name=>name==='content-length'?'100000':null},arrayBuffer:async()=>{throw Error('NOT_READ')}})});
  assert.equal((await oversized.refresh()).status,'SOURCE_TOO_LARGE');
  const invalid=createHttpSourcePort({endpoint,sourceId:'example.api',fetcher:async()=>({ok:true,status:200})});
  assert.equal((await invalid.refresh()).status,'SOURCE_INVALID');
