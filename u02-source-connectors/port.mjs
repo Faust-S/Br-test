@@ -29,9 +29,11 @@ export function sourceObservation(descriptor, {status, revision = null, observed
       (revision !== null && !validRevision(revision)) ||
       typeof observedAt !== 'string' || !Number.isFinite(Date.parse(observedAt)) ||
       !provenance || typeof provenance !== 'object') throw Error('SOURCE_OBSERVATION_INVALID');
-  return {schema: SOURCE_SCHEMA, providerId: descriptor.providerId, sourceRef: descriptor.sourceRef,
-    observationType: descriptor.observationType, revision, observedAt, provenance, status,
-    authority: OBSERVATION_AUTHORITY, contentRef, bytes, content, capabilities, ...detail};
+  // Provider-specific metadata must never override source identity or authority.
+  return {...detail, schema: SOURCE_SCHEMA, providerId: descriptor.providerId,
+    sourceRef: descriptor.sourceRef, observationType: descriptor.observationType,
+    revision, observedAt, provenance, status, authority: OBSERVATION_AUTHORITY,
+    contentRef, bytes, content, capabilities};
 }
 
 export function pinSource(descriptor, observation) {

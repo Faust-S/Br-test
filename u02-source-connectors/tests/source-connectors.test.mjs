@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp,writeFile,rm,symlink} from 'node:fs/promises';
+import {spawnSync} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {createHash} from 'node:crypto';
 import {pinSource,sourceChange,sourceDescriptor,sourceObservation} from '../port.mjs';
 import {createLocalFileSourcePort} from '../local-file.mjs';
 import {createAtlasGitHubSourcePort} from '../atlas-github.mjs';
+import {createAuthorizedGitHubSourcePort} from '../authorized-github.mjs';
+import {observeLocalGit} from '../../universal-install/host-bindings/local-git-source.mjs';
 import {createLocalGitSourcePort} from '../local-git.mjs';
 import {createProgramCapabilityView} from '../program-view.mjs';
 const t=()=>'2026-11-04T10:00:00Z',sha=c=>c.repeat(40);
@@ -93,4 +96,71 @@ test('existing local Git observer: dirty worktree is not a pinned complete sourc
  dirty=true;const changed=await p.refresh();
  assert.equal(changed.status,'SOURCE_DIRTY');assert.equal(sourceChange(clean,changed).status,'NOT_COMPARABLE');
  assert.equal((await p.read()).status,'READ_UNSUPPORTED');
+});
+
+test('real local Git pin survives two commits and mutable worktree changes',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'u02-git-'));
+ const git=(...args)=>{const r=spawnSync('git',['-C',root,...args],{encoding:'utf8',windowsHide:true});
+   assert.equal(r.status,0,String(r.stderr));return String(r.stdout).trim();};
+ try {
+   git('init','--quiet');git('config','user.email','fixture@example.invalid');
+   git('config','user.name','U02 fixture');
+   await writeFile(join(root,'data.txt'),'version one');
+   git('add','data.txt');git('commit','--quiet','-m','v1');
+   const p=createLocalGitSourcePort({root,rootId:'checkout',relativePath:'data.txt',observeLocalGit});
+   const a=await p.refresh();const old=pinSource(p.describe(),a);
+   assert.equal(Buffer.from((await p.read(old)).content.data,'base64').toString(),'version one');
+   await writeFile(join(root,'data.txt'),'version two');
+   assert.equal((await p.refresh()).status,'SOURCE_DIRTY');
+   git('add','data.txt');git('commit','--quiet','-m','v2');
+   const b=await p.refresh();const fresh=pinSource(p.describe(),b);
+   assert.equal(sourceChange(a,b).status,'CHANGED');
+   assert.equal(Buffer.from((await p.read(old)).content.data,'base64').toString(),'version one');
+   assert.equal(Buffer.from((await p.read(fresh)).content.data,'base64').toString(),'version two');
+   assert.equal((await p.read({...fresh,revision:'main'})).status,'REVISION_REQUIRED');
+   assert.equal((await p.read({...fresh,sourceRef:'git://other/data.txt'})).status,'REVISION_REQUIRED');
+   const absent=createLocalGitSourcePort({root,rootId:'checkout',relativePath:'absent.txt',observeLocalGit});
+   assert.equal((await absent.read(pinSource(absent.describe(),await absent.refresh()))).status,'SOURCE_MISSING');
+   const bounded=createLocalGitSourcePort({root,rootId:'checkout',relativePath:'data.txt',observeLocalGit,maxBytes:2});
+   assert.equal((await bounded.read(pinSource(bounded.describe(),await bounded.refresh()))).status,'SOURCE_TOO_LARGE');
+   for(const relativePath of ['../secret','/etc/passwd','bad:path'])
+     assert.throws(()=>createLocalGitSourcePort({root,rootId:'checkout',relativePath,observeLocalGit}));
+ } finally {await rm(root,{recursive:true,force:true});}
+});
+test('host-supplied authorized GitHub observation and SHA read have no token ownership',async()=>{
+ const secret='SYNTHETIC-CI-NOT-PUBLISHED';let sha='a'.repeat(40),requests=0;
+ const observer=async repository=>({scope:'repository',repository,complete:true,status:'OK',
+   branchHeads:{main:sha}});
+ const fetcher=async (url,options)=>{
+   requests++;const hostResolvedHeader={...options.headers,Authorization:'Bearer '+secret};
+   assert.equal(hostResolvedHeader.Authorization,'Bearer '+secret);
+   const bytes=Buffer.from(new URL(url).searchParams.get('ref').startsWith('a')?'private one':'private two');
+   return reply(200,{type:'file',path:'LICENSE',encoding:'base64',size:bytes.length,
+     content:bytes.toString('base64'),
+     sha:createHash('sha1').update('blob '+bytes.length+String.fromCharCode(0)).update(bytes).digest('hex')});
+ };
+ const p=createAuthorizedGitHubSourcePort({repository:'Private/Example',branch:'main',relativePath:'LICENSE',
+   observeAuthorizedRepo:observer,authorizedFetcher:fetcher,now:fixedNow});
+ const a=await p.refresh(),old=pinSource(p.describe(),a);
+ const read=await p.read(old);assert.equal(read.status,'OK');
+ assert.equal(Buffer.from(read.content.data,'base64').toString(),'private one');
+ sha='b'.repeat(40);const next=await p.refresh();
+ assert.equal(sourceChange(a,next).status,'CHANGED');
+ assert.equal(Buffer.from((await p.read(old)).content.data,'base64').toString(),'private one');
+ assert.equal(requests,2);
+ assert.ok(!JSON.stringify({a,next,read}).includes(secret));
+ const unknown=createAuthorizedGitHubSourcePort({repository:'Private/Example',branch:'main',relativePath:'LICENSE',
+   observeAuthorizedRepo:observer,authorizedFetcher:async()=>reply(404,{}),now:fixedNow});
+ assert.equal((await unknown.read(pinSource(unknown.describe(),await unknown.refresh()))).status,'ACCESS_UNKNOWN');
+ const denied=createAuthorizedGitHubSourcePort({repository:'Private/Example',branch:'main',relativePath:'LICENSE',
+   observeAuthorizedRepo:async()=>({status:'AUTHORIZATION_REQUIRED'}),authorizedFetcher:async()=>{throw Error('SHOULD_NOT_FETCH')},now:fixedNow});
+ assert.equal((await denied.refresh()).status,'AUTHORIZATION_REQUIRED');
+});
+test('provider-specific extension cannot overwrite contract authority',()=>{
+ const d=sourceDescriptor({providerId:'file.local',sourceRef:'file://root/example'});
+ const o=sourceObservation(d,{status:'OK',revision:hash('safe'),observedAt:fixedNow(),
+   provenance:{provider:'test'},authority:'WRITE_GRANTED',schema:'INCOMPATIBLE',providerId:'evil',
+   sourceRef:'file://other/file'});
+ assert.equal(o.authority,'OBSERVATION_ONLY');assert.equal(o.schema,d.schema);
+ assert.equal(o.providerId,d.providerId);assert.equal(o.sourceRef,d.sourceRef);
 });

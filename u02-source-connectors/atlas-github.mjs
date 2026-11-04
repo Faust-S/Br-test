@@ -6,8 +6,8 @@ const MAX_BYTES = 1024 * 1024;
 const REPO = /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?\/[a-z\d_.-]+$/i;
 const encodePath = path => path.split('/').map(encodeURIComponent).join('/');
 
-export function createAtlasGitHubSourcePort({repository, branch, relativePath,
-  observePublicRepo, fetcher = globalThis.fetch, maxBytes = MAX_BYTES,
+export function createGitHubSourcePort({repository, branch, relativePath,
+  observeRepository, access = 'public', fetcher = globalThis.fetch, maxBytes = MAX_BYTES,
   now = () => new Date().toISOString()} = {}) {
   if (typeof repository !== 'string' || !REPO.test(repository) || repository.includes('..') ||
       typeof branch !== 'string' || !branch || branch.length > 250 ||
@@ -16,12 +16,13 @@ export function createAtlasGitHubSourcePort({repository, branch, relativePath,
       typeof relativePath !== 'string' || !relativePath || relativePath.length > 1024 ||
       relativePath.split('/').some(s => !s || s === '.' || s === '..' ||
         !/^[a-zA-Z0-9._-]+$/.test(s)) ||
-      typeof observePublicRepo !== 'function' || typeof fetcher !== 'function' ||
+      !['public', 'authorized'].includes(access) ||
+      typeof observeRepository !== 'function' || typeof fetcher !== 'function' ||
       !Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_BYTES ||
       typeof now !== 'function') throw Error('GITHUB_SOURCE_CONFIG_INVALID');
   const sourceRef = `github://${repository}/${encodePath(relativePath)}?ref=${encodeURIComponent(branch)}`;
-  const descriptor = sourceDescriptor({providerId: 'github.public', sourceRef});
-  const provenance = {provider: 'github', access: 'public', authority: 'GitHub REST API',
+  const descriptor = sourceDescriptor({providerId: 'github.' + access, sourceRef});
+  const provenance = {provider: 'github', access, authority: 'GitHub REST API',
     repository, branch, path: relativePath};
   const observe = (status, extra = {}) => sourceObservation(descriptor,
     {status, observedAt: now(), provenance, ...extra});
@@ -30,8 +31,12 @@ export function createAtlasGitHubSourcePort({repository, branch, relativePath,
     describe: () => descriptor,
     refresh: async () => {
       let snapshot;
-      try {snapshot = await observePublicRepo(repository, fetcher, {maxPages: 20});}
+      try {snapshot = await observeRepository(repository, fetcher, {maxPages: 20});}
       catch {return observe('SOURCE_UNAVAILABLE');}
+      if (access === 'authorized' && snapshot?.status !== 'OK') {
+        const status = snapshot?.status;
+        return observe(typeof status === 'string' && /^[A-Z_]+$/.test(status) ? status : 'SOURCE_UNAVAILABLE');
+      }
       if (!snapshot || snapshot.scope !== 'repository' || snapshot.complete !== true ||
           snapshot.repository?.toLowerCase() !== repository.toLowerCase())
         return observe('SOURCE_INCOMPLETE');
@@ -48,12 +53,12 @@ export function createAtlasGitHubSourcePort({repository, branch, relativePath,
       let response;
       try {response = await fetcher(url, {headers: {Accept: 'application/vnd.github+json'}});}
       catch {return observe('SOURCE_UNAVAILABLE');}
-      if (response?.status === 404) return observe('SOURCE_MISSING');
+      if (response?.status === 404) return observe(access === 'authorized' ? 'ACCESS_UNKNOWN' : 'SOURCE_MISSING');
       if (response?.status === 429 || (response?.status === 403 &&
             response?.headers?.get?.('x-ratelimit-remaining') === '0'))
         return observe('RATE_LIMITED');
       if (response?.status === 401 || response?.status === 403)
-        return observe('ACCESS_DENIED');
+        return observe(access === 'authorized' && response.status === 401 ? 'AUTHORIZATION_REQUIRED' : 'ACCESS_DENIED');
       if (!response?.ok) return observe('SOURCE_UNAVAILABLE');
       let item;
       try {item = await response.json();}
@@ -78,4 +83,9 @@ export function createAtlasGitHubSourcePort({repository, branch, relativePath,
     }
   };
   return Object.freeze(port);
+}
+
+// Atlas is still the owner of the original public repository observer.
+export function createAtlasGitHubSourcePort({observePublicRepo, ...options} = {}) {
+  return createGitHubSourcePort({...options, access: 'public', observeRepository: observePublicRepo});
 }
