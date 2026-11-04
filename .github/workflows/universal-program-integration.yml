@@ -33,11 +33,14 @@ jobs:
         run: |
           rustc --version
           cargo test --manifest-path universal-install/host-bindings/rust-port/Cargo.toml
+          cargo build --manifest-path universal-install/host-bindings/rust-port/Cargo.toml --bin iwxa-rust-cli-qualification
       - name: Existing generic install contract
         shell: bash
         run: python -m unittest discover -s universal-install/tests -v
       - name: Two genuinely installed independent programs, two host runtimes
         shell: bash
+        env:
+          IWXA_REQUIRE_RUST_HOST: ${{ matrix.os == 'ubuntu-24.04' && '1' || '0' }}
         run: python universal-install/qualification/two_host_programs.py
       - name: Real local HTTP API connection with host-owned authorization
         shell: bash
