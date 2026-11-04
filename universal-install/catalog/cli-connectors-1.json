@@ -1,0 +1,35 @@
+{
+  "schema": "IWXA_PROGRAM_CONNECTOR_CATALOG/1",
+  "programs": [
+    {
+      "schema": "IWXA_CLI_PROGRAM/1",
+      "program_id": "JQ_CLI_V1",
+      "executable_name": "jq",
+      "version_args": [
+        "--version"
+      ],
+      "version_contains": "jq-1.8.1",
+      "operations": {
+        "evaluate": [
+          "-n",
+          "6 * 7"
+        ]
+      }
+    },
+    {
+      "schema": "IWXA_CLI_PROGRAM/1",
+      "program_id": "YQ_CLI_V1",
+      "executable_name": "yq",
+      "version_args": [
+        "--version"
+      ],
+      "version_contains": "v4.54.1",
+      "operations": {
+        "evaluate": [
+          "-n",
+          "6 * 7"
+        ]
+      }
+    }
+  ]
+}
