@@ -58,3 +58,42 @@ test("Windows port never launches foreign-platform executable",async()=>{
  assert.equal((await adapter.launch({launchSpec:{executable:"/bin/echo"}})).status,"PLATFORM_UNSUPPORTED");
  assert.equal(adapter.linkedWindow,false);
 });
+
+test("host approval required before Windows executable launch",async()=>{
+ const port=createWindowsPresentationAdapter({platform:"win32",observeWindow:()=>{},focusWindow:()=>{}});
+ assert.equal(port.launchAvailable,false);
+ assert.equal((await port.launch({appRef:"editor",hostRef:"agent",
+   launchSpec:{executable:"C:\\\\Windows\\\\System32\\\\notepad.exe"}})).status,"HOST_APPROVAL_REQUIRED");
+});
+test("capabilities follow real platform adapters",()=>{
+ const a=createWindowsPresentationAdapter({platform:"linux",observeWindow:()=>{},focusWindow:()=>{}});
+ const caps=createPresentationBridge(a).capabilities().capabilities;
+ assert.equal(caps.find(c=>c.mode==="LAUNCH").supported,false);
+ assert.equal(caps.find(c=>c.mode==="FOCUS").supported,false);
+ assert.equal(caps.find(c=>c.mode==="LINKED_WINDOW").supported,false);
+ assert.equal(caps.find(c=>c.mode==="EMBEDDED_VIEW").supported,false);
+});
+test("launch observation failure retains detached-safe binding",async()=>{
+ const bridge=createPresentationBridge({linkedWindow:true,
+   async launch(){return {status:"LAUNCHED",pid:202}},
+   async observe(){throw Error("transient native probe")},
+   async focus(){return {focused:false}}});
+ const x=await bridge.open({appRef:"editor",hostRef:"center",launchSpec:{}});
+ assert.equal(x.status,"LAUNCHED_NO_WINDOW");
+ assert.equal(x.reason,"WINDOW_OBSERVATION_FAILED");
+ assert.equal((await bridge.activate({bindingRef:x.binding.bindingRef,hostRef:"center"})).status,"WINDOW_OBSERVATION_FAILED");
+ assert.equal((await bridge.closeBinding({bindingRef:x.binding.bindingRef,hostRef:"center"})).processTerminated,false);
+});
+test("closing binding during pending focus does not return a stale success",async()=>{
+ let resolve;
+ const bridge=createPresentationBridge({linkedWindow:true,
+   async launch(){return {status:"LAUNCHED",pid:205}},
+   async observe(){return {observed:true,windowRef:"25"}},
+   async focus(){return await new Promise(r=>{resolve=r})}});
+ const x=await bridge.open({appRef:"editor",hostRef:"host",launchSpec:{}});
+ const pending=bridge.activate({bindingRef:x.binding.bindingRef,hostRef:"host"});
+ await new Promise(r=>setImmediate(r));
+ assert.equal((await bridge.closeBinding({bindingRef:x.binding.bindingRef,hostRef:"host"})).status,"BINDING_CLOSED");
+ resolve({focused:true});
+ assert.equal((await pending).status,"BINDING_NOT_FOUND");
+});

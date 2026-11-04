@@ -2,15 +2,26 @@ import {spawn} from "node:child_process";
 import {isAbsolute} from "node:path";
 
 // A host-selected native executable; no shell and no U01 installation/connection.
-export function createWindowsPresentationAdapter({observeWindow,focusWindow,platform=process.platform}={}) {
+export function createWindowsPresentationAdapter({
+  observeWindow,focusWindow,resolveApprovedProgram,platform=process.platform
+}={}) {
   if (typeof observeWindow !== "function" || typeof focusWindow !== "function")
     throw Error("WINDOW_PORT_REQUIRED");
   return Object.freeze({
     linkedWindow:platform==="win32",
+    launchAvailable:platform==="win32"&&typeof resolveApprovedProgram==="function",
+    launchReason:platform!=="win32"?"PLATFORM_UNSUPPORTED":"HOST_APPROVAL_REQUIRED",
+    focusAvailable:platform==="win32",
     embeddedView:false,
-    async launch({launchSpec}) {
+    async launch({appRef,hostRef,launchSpec}) {
       if(platform!=="win32") return {status:"PLATFORM_UNSUPPORTED"};
-      const {executable,args=[]}=launchSpec;
+      if(typeof resolveApprovedProgram!=="function") return {status:"HOST_APPROVAL_REQUIRED"};
+      let approved;
+      try {approved=await resolveApprovedProgram({appRef,hostRef,launchSpec});}
+      catch {return {status:"HOST_APPROVAL_FAILED"};}
+      if(approved?.approved!==true) return {status:"HOST_APPROVAL_REQUIRED"};
+      // The host resolves an approved program. Never execute caller-provided paths.
+      const {executable,args=[]}=approved;
       if(typeof executable!=="string"||!isAbsolute(executable)||!Array.isArray(args)||
           args.length>64 || args.some(x=>typeof x!=="string"||x.includes("\0")))
         return {status:"EXECUTABLE_INVALID"};

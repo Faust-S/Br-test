@@ -99,6 +99,26 @@ def click_operation(host, window, receipt, operation, previous):
     mouse.click(button="left",coords=(rect.left+center[0],rect.top+center[1]))
     return wait_receipt(receipt,operation,None,host.pid)
 
+def wait_external_window(external, report, timeout=25):
+    """Observe the actual external GUI independently before OS activation."""
+    limit=time.monotonic()+timeout
+    last=""
+    while time.monotonic()<limit:
+        if not external.is_running() or external.status()==psutil.STATUS_ZOMBIE:
+            raise RuntimeError("EXTERNAL_PROCESS_EXITED_BEFORE_WINDOW")
+        try:
+            app=Application(backend="win32").connect(process=external.pid, timeout=1)
+            for window in app.windows():
+                if window.is_visible() and "IWXA U04 Real External Editor" in window.window_text():
+                    report["external_window_observed"]=True
+                    report["external_window_title"]=window.window_text()
+                    return window
+        except Exception as exc:
+            last=type(exc).__name__
+        time.sleep(.25)
+    raise RuntimeError("REAL_EXTERNAL_WINDOW_NOT_VISIBLE:"+last)
+
+
 def run_host(exe, env, receipt):
     if receipt.exists():
         receipt.unlink()
@@ -132,11 +152,23 @@ def main():
         external = psutil.Process(pid)
         check(external.is_running(),"EXTERNAL_GUI_NOT_RUNNING")
         report["sessions"].append({"host_pid":host.pid,"external_pid":pid,"process_stamp":stamp,"open":opened["status"]})
-        # Native HWND focus is an OS observation, not a fabricated UI receipt.
+        wait_external_window(external,report)
+        # A launch receipt before the window exists is NOT focus evidence.
+        # Repeat an actual GUI click only if Windows rejects the foreground request.
+        report["focus_attempts"]=[]
         for i in range(2):
-            last, focused = click_operation(host,window,receipt,"activate",last)
-            check(focused["status"]=="WINDOW_FOCUSED" and focused["focused"],"OS_WINDOW_FOCUS_NOT_CONFIRMED")
-            check(foreground_pid()==pid,"EXTERNAL_FOREGROUND_PID_MISMATCH")
+            focused_ok=False
+            for retry in range(3):
+                last, focused = click_operation(host,window,receipt,"activate",last)
+                actual_foreground=foreground_pid()
+                report["focus_attempts"].append({"round":i+1,"retry":retry+1,
+                    "status":focused.get("status"),"focused":focused.get("focused"),
+                    "foreground_pid":actual_foreground})
+                if focused.get("status")=="WINDOW_FOCUSED" and focused.get("focused") and actual_foreground==pid:
+                    focused_ok=True
+                    break
+                time.sleep(.3)
+            check(focused_ok,"OS_WINDOW_FOCUS_NOT_CONFIRMED")
         last, detached = click_operation(host,window,receipt,"closeBinding",last)
         check(detached["status"]=="BINDING_CLOSED","BINDING_NOT_DETACHED")
         window.close()
@@ -165,6 +197,9 @@ def main():
         report["embed_supported"]=False
         report["status"]="PASS"
         print("U04_REAL_INSTALLED_WINDOWS_GUI_PASS",flush=True)
+    except Exception as error:
+        report["error"]=str(error)
+        raise
     finally:
         OUTPUT.joinpath("report.json").write_text(json.dumps(report,indent=2),encoding="utf8")
         if host and host.poll() is None:
