@@ -24,8 +24,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
-      - name: Node consumer (same public specification)
-        run: node --test u03-capability-sdk/tests/capability.test.mjs
+      - name: Node consumers, epochs, and U01 bridging
+        run: node --test u03-capability-sdk/tests/capability.test.mjs u03-capability-sdk/tests/u01-bridge.test.mjs u03-capability-sdk/tests/connection-epochs.test.mjs
+      - name: Live local HTTP API, host-owned credential loss and reattachment
+        run: node u03-capability-sdk/qualification/real-u01-http.mjs
       - name: Python consumer (same public specification)
         run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v
 
