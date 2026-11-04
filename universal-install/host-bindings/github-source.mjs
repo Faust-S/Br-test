@@ -20,11 +20,16 @@ export async function observeAuthorizedGitHubRepo(repository,{
   if(!Number.isInteger(maxPages)||maxPages<1||maxPages>50)
     throw Error("SOURCE_PAGINATION_INVALID");
   // Secret resolution is an explicit host callback, never a process global.
-  const token=await credentialProvider("github",repo);
+  let token;
+  try{token=await credentialProvider("github",repo);}
+  catch{return observation(repo,"authorized","AUTHORIZATION_REQUIRED");}
   if(typeof token!=="string"||!token)
     return observation(repo,"authorized","AUTHORIZATION_REQUIRED");
   const url="https://api.github.com/repos/"+repo;
   const headers={Accept:"application/vnd.github+json",Authorization:"Bearer "+token};
+  const validSha=value=>typeof value==="string"&&/^[a-f0-9]{40,64}$/i.test(value);
+  const safeBranch=value=>typeof value==="string"&&value.length>0&&
+    value.length<=255&&!/[\u0000-\u001f\u007f]/.test(value);
   const request=async path=>{
     try {return await fetcher(path,{headers,signal});}
     catch{return null;}
@@ -58,8 +63,14 @@ export async function observeAuthorizedGitHubRepo(repository,{
     catch{return observation(repo,"authorized","PARTIAL_INVALID",{branches,branchHeads});}
     if(!Array.isArray(batch))return observation(repo,"authorized","PARTIAL_INVALID",{branches,branchHeads});
     for(const b of batch) {
-      if(typeof b?.name!=="string"||typeof b.commit?.sha!=="string")
+      if(!safeBranch(b?.name)||!validSha(b?.commit?.sha))
         return observation(repo,"authorized","PARTIAL_INVALID",{branches,branchHeads});
+      if(Object.hasOwn(branchHeads,b.name)){
+        if(branchHeads[b.name]!==b.commit.sha)
+          return observation(repo,"authorized","PARTIAL_INVALID",{branches,branchHeads});
+        // A repeated branch makes pagination completeness untrustworthy.
+        return observation(repo,"authorized","PARTIAL_INVALID",{branches,branchHeads});
+      }
       branches.push(b.name);branchHeads[b.name]=b.commit.sha;
     }
     if(batch.length<100){complete=true;break;}

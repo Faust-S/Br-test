@@ -39,6 +39,29 @@ const partial=await observeAuthorizedGitHubRepo("Faust-S/Atlas",{
   credentialProvider:tokenProvider});
 assert.equal(partial.status,"PARTIAL_ACCESS_DENIED");
 assert.equal(partial.complete,false);
+// Host-owned secret provider may fail before any request starts.
+let providerFetches=0;
+const unavailableCredentials=await observeAuthorizedGitHubRepo("Faust-S/Atlas",{
+  credentialProvider:async()=>{throw Error("PRIVATE_HOST_CREDENTIALS_UNAVAILABLE");},
+  fetcher:async()=>{providerFetches++;throw Error("MUST_NOT_REQUEST");}
+});
+assert.equal(unavailableCredentials.status,"AUTHORIZATION_REQUIRED");
+assert.equal(providerFetches,0);
+assert.ok(!JSON.stringify(unavailableCredentials).includes("PRIVATE_HOST_CREDENTIALS_UNAVAILABLE"));
+// GitHub metadata must not manufacture a verified branch from malformed SHA.
+for(const branches of [
+  [{name:"main",commit:{sha:"not-a-sha"}}],
+  [{name:"main",commit:{sha:"b".repeat(40)}},{name:"main",commit:{sha:"c".repeat(40)}}],
+  [{name:"constructor",commit:{sha:"d".repeat(40)}},{name:"constructor",commit:{sha:"d".repeat(40)}}]
+]){
+ const invalid=await observeAuthorizedGitHubRepo("Faust-S/Atlas",{
+   credentialProvider:tokenProvider,
+   fetcher:async(url)=>url.includes("/branches?")
+     ?reply(200,branches):reply(200,{full_name:"Faust-S/Atlas"})
+ });
+ assert.equal(invalid.status,"PARTIAL_INVALID");
+ assert.equal(invalid.complete,false);
+}
 const publicObserved=await observeGitHubSource("Faust-S/Atlas",{
   access:"public",publicObserver:observePublicRepo});
 assert.equal(publicObserved.complete,true);
@@ -50,4 +73,5 @@ console.log(JSON.stringify({schema:"IWXA_GITHUB_SOURCE_QUALIFICATION/1",
   private_live_qualified:false,public_repository:"Faust-S/Atlas",
   branches:publicObserved.branches.length,
   access_404:"ACCESS_UNKNOWN",without_token:"AUTHORIZATION_REQUIRED",
-  partial:"PARTIAL_ACCESS_DENIED"}));
+  partial:"PARTIAL_ACCESS_DENIED",provider_error_no_request:true,
+  malformed_sha_and_duplicate_branch_rejected:true}));
