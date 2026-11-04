@@ -56,7 +56,23 @@ def qualify():
             archive_format="pkg", archive_sha256=sha, executable_sha256=sha,
             download_url="https://github.com/Faust-S/Br-test/releases/download/1.0.0/" + package.name
         )
-        spec = NativePackageSpec(artifact, PACKAGE_ID)
+        # A real PKG has no universal uninstall. This CI fixture provides an
+        # explicit vendor uninstall program, as a manifest command.
+        vendor_uninstall = root / "uninstall_vendor.py"
+        vendor_uninstall.write_text(
+            "from pathlib import Path\\n"
+            "import subprocess\\n"
+            "p=Path(" + repr(str(PAYLOAD)) + ")\\n"
+            "p.unlink()\\n"
+            "p.parent.rmdir()\\n"
+            "subprocess.run(['pkgutil','--forget'," + repr(PACKAGE_ID) +
+            "],check=True,capture_output=True)\\n",
+            encoding="utf-8"
+        )
+        no_uninstall = NativePackageSpec(artifact, PACKAGE_ID)
+        spec = NativePackageSpec(
+            artifact, PACKAGE_ID,
+            uninstall_arguments=(str(Path(sys.executable).resolve()), str(vendor_uninstall)))
         stage = root / "staging"
         owned = root / "owner"
         owned.mkdir()
@@ -72,21 +88,28 @@ def qualify():
                 raise RuntimeError("PKG_SMOKE_INSTALL_READBACK_INVALID")
             if not backend.recover(spec, str(owned)).installed:
                 raise RuntimeError("PKG_SMOKE_RECOVER_FAILED")
-            removal = ApprovedRemoval(
-                spec.program_id, spec.fingerprint, "PINS-native-pkg-remove", str(owned), True)
+            unsupported = ApprovedRemoval(
+                no_uninstall.program_id, no_uninstall.fingerprint,
+                "PINS-native-pkg-no-remove", str(owned), True)
             try:
-                backend.remove(spec, removal)
+                backend.remove(no_uninstall, unsupported)
                 raise RuntimeError("PKG_SMOKE_UNSUPPORTED_REMOVE_MUST_FAIL")
             except InstallError as exc:
                 if exc.code != "REMOVE_NATIVE_PKG_UNSUPPORTED":
                     raise
+            removal = ApprovedRemoval(
+                spec.program_id, spec.fingerprint, "PINS-native-pkg-remove", str(owned), True)
+            if backend.remove(spec, removal).status != "REMOVED":
+                raise RuntimeError("PKG_SMOKE_VENDOR_UNINSTALL_FAILED")
+            if installed() or PAYLOAD.exists():
+                raise RuntimeError("PKG_SMOKE_UNINSTALL_READBACK_FAILED")
             if userfile.read_text(encoding="utf-8") != "keep":
                 raise RuntimeError("PKG_SMOKE_USER_DATA_CHANGED")
             report = {
                 "schema": "IWXA_NATIVE_PKG_SMOKE/1", "status": "PASS",
                 "platform": _native_platform(), "installed": True,
-                "verified": True, "removed_by_backend": False,
-                "native_uninstall_supported": False,
+                "verified": True, "removed_by_backend": True,
+                "native_uninstall_supported": True,
                 "explicit_uninstall_required": True, "user_data_preserved": True
             }
             print(json.dumps(report, sort_keys=True))
