@@ -50,6 +50,17 @@ class NativePackageContractTest(unittest.TestCase):
         self.removal = ApprovedRemoval(self.spec.program_id, self.spec.fingerprint,
                                        "PINS-native-remove", self.install, True)
 
+    def test_native_manifest_roundtrip_requires_only_data(self):
+        data = self.spec.as_dict()
+        rebuilt = NativePackageSpec.from_mapping(data)
+        self.assertEqual(rebuilt, self.spec)
+        self.assertEqual(rebuilt.fingerprint, self.spec.fingerprint)
+        self.assertIsInstance(rebuilt.artifact, ManagedArtifactSpec)
+        for invalid in ({**data, "unknown_field": 1},
+                        {**data, "probe_arguments": "not-an-array"}):
+            with self.assertRaises(ValueError):
+                NativePackageSpec.from_mapping(invalid)
+
     def test_native_stages_and_preserves_pinned_package(self):
         events = []
         result = self.backend.prepare(self.spec, self.staging, archive_path=str(self.package),
