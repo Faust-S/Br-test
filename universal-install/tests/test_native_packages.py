@@ -104,6 +104,31 @@ class NativePackageContractTest(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaisesRegex(InstallError, "REMOVE_APPROVAL_MISMATCH"):
                 self.backend.remove(self.spec, bad_remove)
 
+    def test_exe_uninstall_waits_for_completion_without_relaunch(self):
+        from iwxa_universal_install.native import NativePackageBackend, NativePackageSpec
+        mapping = {**self.artifact.as_dict(),
+                   "platform": "windows-x86_64", "archive_format": "exe-installer",
+                   "archive_name": "vendor.exe", "executable_name": "vendor.exe",
+                   "download_url": "https://github.com/Faust-S/Br-test/releases/download/v1/vendor.exe"}
+        spec = NativePackageSpec(
+            ManagedArtifactSpec.from_mapping(mapping), "fixture-exe",
+            install_arguments=("/S",), uninstall_arguments=(str(Path(sys.executable).resolve()), "/S"),
+            probe_arguments=(str(Path(sys.executable).resolve()), "--version"))
+        # Exercise the real backend on the current runner by substituting only
+        # native platform detection and subprocess responses.
+        with mock.patch("iwxa_universal_install.native._native_platform",
+                        return_value="windows-x86_64"), \
+             mock.patch("iwxa_universal_install.native._probe",
+                        side_effect=[True, True, True, False, False]), \
+             mock.patch("iwxa_universal_install.native._run") as runner, \
+             mock.patch("iwxa_universal_install.native.time.sleep") as sleeper:
+            runner.return_value.returncode = 0
+            approved = ApprovedRemoval(spec.program_id, spec.fingerprint,
+                                      "PINS-exe-remove", self.install, True)
+            self.assertEqual(NativePackageBackend().remove(spec, approved).status, "REMOVED")
+            runner.assert_called_once()
+            self.assertGreaterEqual(sleeper.call_count, 1)
+
     def test_native_install_requires_post_install_probe(self):
         self.backend.prepare(self.spec, self.staging, archive_path=str(self.package))
         with mock.patch("iwxa_universal_install.native._run") as runner, mock.patch(
