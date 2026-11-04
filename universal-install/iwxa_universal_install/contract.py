@@ -61,6 +61,39 @@ class InstallObservation:
     external_process_started: bool = False
 
 
+
+@dataclass(frozen=True)
+class ApprovedUpdate:
+    """Host approval for one exact old -> new pinned version transition.
+
+    Host owns active-version selection, consent, receipts and serialization.
+    Constructing this data object is not proof of user consent.
+    """
+    program_id: str
+    current_fingerprint: str
+    target_fingerprint: str
+    receipt_id: str
+    installation_root: str
+    confirmed: bool
+
+
+@dataclass(frozen=True)
+class UpdateObservation:
+    """Readback only. 'Ready' is NOT activation or product execution."""
+    status: str
+    program_id: str
+    current_release_id: str
+    target_release_id: str
+    current_installed: bool
+    target_installed: bool
+    rollback_available: bool
+    current_executable: str | None = None
+    target_executable: str | None = None
+    current_sha256: str | None = None
+    target_sha256: str | None = None
+    activated: bool = False
+    receipt_written: bool = False
+
 class ProgramInstallBackend(Protocol):
     family: str
 

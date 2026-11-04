@@ -15,7 +15,7 @@ import sys
 import re
 import stat
 
-from .contract import ApprovedInstall, ApprovedRemoval, InstallError, InstallObservation
+from .contract import ApprovedInstall, ApprovedRemoval, ApprovedUpdate, InstallError, InstallObservation, UpdateObservation
 from .manifest import ManagedArtifactSpec
 from .preparer import (
     ManagedPreparationError as ArtifactPreparationError, ManagedArtifactPreparer,
@@ -193,6 +193,81 @@ class ManagedArtifactBackend:
     def recover(self, spec, installation_root: str) -> InstallObservation:
         """After a crash only observe; never download, copy or rerun apply."""
         return self.verify(spec, installation_root)
+
+    def _update_specs(self, current: ManagedArtifactSpec, target: ManagedArtifactSpec) -> None:
+        """A managed update never changes a foreign program or overwrites a release."""
+        self._require_host_platform(current)
+        self._require_host_platform(target)
+        if current.program_id != target.program_id or current.slug != target.slug:
+            raise InstallError("UPDATE_PROGRAM_MISMATCH")
+        if current.release_id == target.release_id:
+            raise InstallError("UPDATE_RELEASE_UNCHANGED")
+        # Version ordering is application policy, never a lexicographic guess.
+
+    def recover_update(self, current: ManagedArtifactSpec,
+                       target: ManagedArtifactSpec, installation_root: str) -> UpdateObservation:
+        """Observe two pinned installations after any interruption; no writes."""
+        self._update_specs(current, target)
+        before = self.verify(current, installation_root)
+        after = self.verify(target, installation_root)
+        if not before.installed:
+            state = "UPDATE_SOURCE_NOT_VERIFIED"
+        elif after.installed:
+            state = "UPDATE_READY_FOR_ACTIVATION"
+        elif after.status == "NOT_INSTALLED":
+            state = "UPDATE_AVAILABLE"
+        else:
+            state = "UPDATE_TARGET_INVALID"
+        return UpdateObservation(
+            status=state, program_id=current.program_id,
+            current_release_id=current.release_id, target_release_id=target.release_id,
+            current_installed=before.installed, target_installed=after.installed,
+            rollback_available=before.installed,
+            current_executable=before.executable, target_executable=after.executable,
+            current_sha256=before.sha256, target_sha256=after.sha256,
+        )
+
+    def plan_update(self, current: ManagedArtifactSpec,
+                    target: ManagedArtifactSpec, installation_root: str) -> UpdateObservation:
+        """Read-only update availability; host chooses version and timing."""
+        return self.recover_update(current, target, installation_root)
+
+    def apply_update(self, current: ManagedArtifactSpec, target: ManagedArtifactSpec,
+                     staging_root: str, approval: ApprovedUpdate) -> UpdateObservation:
+        """Install a new pinned release alongside the old, without activation.
+
+        Reuses the SAME apply() path and ownership marker as initial install.
+        On failure the prior release is untouched; host must decide switch or
+        rollback and may only claim activation after its own connect/invoke proof.
+        """
+        self._update_specs(current, target)
+        if not isinstance(approval, ApprovedUpdate) or approval.confirmed is not True:
+            raise InstallError("UPDATE_OWNER_APPROVAL_REQUIRED")
+        if (approval.program_id != current.program_id or
+                approval.current_fingerprint != current.fingerprint or
+                approval.target_fingerprint != target.fingerprint or
+                not isinstance(approval.receipt_id, str) or
+                re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", approval.receipt_id) is None):
+            raise InstallError("UPDATE_APPROVAL_MISMATCH")
+        state = self.recover_update(current, target, approval.installation_root)
+        if state.status == "UPDATE_SOURCE_NOT_VERIFIED":
+            raise InstallError("UPDATE_CURRENT_NOT_VERIFIED")
+        if state.status == "UPDATE_TARGET_INVALID":
+            raise InstallError("UPDATE_TARGET_CONFLICT")
+        if state.status == "UPDATE_AVAILABLE":
+            # This is deliberately not a separate copy/install implementation.
+            installed = self.apply(
+                target, staging_root,
+                ApprovedInstall(target.program_id, target.fingerprint,
+                                approval.receipt_id, approval.installation_root, True),
+            )
+            if not installed.installed:
+                raise InstallError("UPDATE_TARGET_NOT_VERIFIED")
+        # Always read back BOTH releases, including the idempotent case.
+        result = self.recover_update(current, target, approval.installation_root)
+        if result.status != "UPDATE_READY_FOR_ACTIVATION":
+            raise InstallError("UPDATE_POST_VERIFY_FAILED")
+        return result
 
     def remove(self, spec, approval: ApprovedRemoval) -> InstallObservation:
         """Remove only the pinned Worker version after the host stops its use.

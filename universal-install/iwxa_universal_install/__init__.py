@@ -1,10 +1,11 @@
 """Portable IWXA program-install backends; host owns consent, receipts and activation."""
-from .contract import ApprovedInstall, ApprovedRemoval, InstallError, InstallObservation, ProgramInstallBackend
+from .contract import ApprovedInstall, ApprovedRemoval, ApprovedUpdate, InstallError, InstallObservation, UpdateObservation, ProgramInstallBackend
 from .manifest import ManagedArtifactSpec
 from .managed import ManagedArtifactBackend
 
 __all__ = [
-    "ApprovedInstall", "ApprovedRemoval", "InstallError", "InstallObservation", "ProgramInstallBackend",
+    "ApprovedInstall", "ApprovedRemoval", "ApprovedUpdate", "InstallError", "InstallObservation",
+    "UpdateObservation", "ProgramInstallBackend",
     "ManagedArtifactSpec", "ManagedArtifactBackend", "ObscuraManagedBackend",
     "NativePackageSpec", "NativePackageBackend",
 ]
