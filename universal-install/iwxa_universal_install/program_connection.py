@@ -65,8 +65,11 @@ def executable_identity(path):
 
 def run_command(path, args):
     try:
+        # A user-facing Windows host must not flash a console when executing
+        # background CLI commands such as jq or yq.
+        flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
         result = subprocess.run([path, *args], shell=False, capture_output=True,
-                                timeout=20, check=False)
+                                timeout=20, check=False, creationflags=flags)
     except subprocess.TimeoutExpired:
         raise ProgramError("CLI_TIMED_OUT") from None
     except OSError:

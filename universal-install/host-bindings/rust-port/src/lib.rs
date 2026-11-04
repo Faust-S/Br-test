@@ -87,9 +87,17 @@ fn file_identity(path: &PathBuf) -> Option<FileIdentity> {
     })
 }
 fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static str> {
-    let mut child = Command::new(path).args(argv).stdin(Stdio::null())
-        .stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|_| "CLI_EXECUTION_FAILED")?;
+    let mut command = Command::new(path);
+    command.args(argv).stdin(Stdio::null())
+        .stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Suppress a transient console when called from an installed GUI.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = command.spawn().map_err(|_| "CLI_EXECUTION_FAILED")?;
     let stdout = child.stdout.take().ok_or("CLI_EXECUTION_FAILED")?;
     let stderr = child.stderr.take().ok_or("CLI_EXECUTION_FAILED")?;
     let out_thread = thread::spawn(move || {
@@ -305,6 +313,20 @@ impl CliPort {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn background_cli_has_no_console_window() {
+        // The Windows hosted runner installs Python before running Rust tests.
+        // This checks the actual child process, not merely the flag constant.
+        let args = vec![
+            "-c".to_string(),
+            "import ctypes; print(ctypes.windll.kernel32.GetConsoleWindow())".to_string()
+        ];
+        let (code, output) = execute(&PathBuf::from("python"), &args)
+            .expect("Windows Python CLI must launch");
+        assert_eq!(code, 0);
+        assert_eq!(output.trim(), "0", "GUI-owned CLI must not create a console");
+    }
     #[test]
     fn versions_have_exact_boundaries() {
         assert!(version_token("jq-1.8.1\n", "jq-1.8.1"));
