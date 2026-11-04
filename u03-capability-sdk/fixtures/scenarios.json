@@ -1,0 +1,20 @@
+[
+  {"name":"agent-ok", "host":{"hostId":"iwxa.agent", "version":"0.3.2"}, "observations":"verified", "expected":[]},
+  {"name":"center-ok", "host":{"hostId":"iwxa.center", "version":"0.1.0"}, "observations":"verified", "expected":[]},
+  {"name":"t2-compatible", "host":{"hostId":"iwxa.t2", "version":"1.3.0"}, "observations":"verified", "expected":[]},
+  {"name":"agent-0.2-refused", "host":{"hostId":"iwxa.agent", "version":"0.2.0"}, "observations":"verified", "expected":["U03_HOST_VERSION_INCOMPATIBLE"]},
+  {"name":"t2-runtime-1.4-refused", "host":{"hostId":"iwxa.t2", "version":"1.4.0"}, "observations":"verified", "expected":["U03_HOST_VERSION_INCOMPATIBLE"]},
+  {"name":"atlas-undeclared-refused", "host":{"hostId":"iwxa.atlas", "version":"0.2.0"}, "observations":"verified", "expected":["U03_HOST_UNSUPPORTED"]},
+  {"name":"missing-capability", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"missing", "expected":["U03_CAPABILITY_MISSING:iwxa.source.read"]},
+  {"name":"unavailable-capability", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"unavailable", "expected":["U03_CAPABILITY_UNAVAILABLE:iwxa.source.read"]},
+  {"name":"unverified-capability", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"unverified", "expected":["U03_CAPABILITY_UNVERIFIED:iwxa.source.read"]},
+  {"name":"old-capability-version", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"oldVersion", "expected":["U03_CAPABILITY_VERSION_INCOMPATIBLE:iwxa.source.read"]},
+  {"name":"duplicate-observation", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"duplicate", "expected":["U03_OBSERVATION_AMBIGUOUS"]},
+  {"name":"invalid-observation", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"invalid", "expected":["U03_OBSERVATION_INVALID"]},
+  {"name":"observation-cannot-grant", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"extraField", "expected":["U03_OBSERVATION_INVALID"]},
+  {"name":"unsupported-descriptor-schema", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"verified", "descriptorOverrides":{"schema":"IWXA_MODULE_DESCRIPTOR/2.0.0"}, "expected":["U03_SCHEMA_UNSUPPORTED"]},
+  {"name":"invalid-descriptor-version", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"verified", "descriptorOverrides":{"version":"01.0.0"}, "expected":["U03_DESCRIPTOR_INVALID"]},
+  {"name":"invalid-range", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"verified", "descriptorOverrides":{"requires":[{"id":"iwxa.source.read", "range":"^1.0.0"}]}, "expected":["U03_DESCRIPTOR_INVALID"]},
+  {"name":"duplicate-requirement", "host":{"hostId":"iwxa.agent", "version":"0.3.0"}, "observations":"verified", "descriptorOverrides":{"requires":[{"id":"iwxa.source.read", "range":">=1.0.0"},{"id":"iwxa.source.read", "range":">=1.0.0"}]}, "expected":["U03_DESCRIPTOR_INVALID"]},
+  {"name":"invalid-host", "host":{"hostId":"iwxa.agent", "version":"bad"}, "observations":"verified", "expected":["U03_HOST_INVALID"]}
+]

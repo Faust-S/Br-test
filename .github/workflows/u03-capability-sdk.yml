@@ -1,0 +1,30 @@
+name: U03 capability SDK (public contracts)
+on:
+  push:
+    branches:
+      - 'work/2026-11-04-u03-*'
+    paths:
+      - 'u03-capability-sdk/**'
+      - '.github/workflows/u03-capability-sdk.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  consumers:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Node consumer (same public specification)
+        run: node --test u03-capability-sdk/tests/capability.test.mjs
+      - name: Python consumer (same public specification)
+        run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v

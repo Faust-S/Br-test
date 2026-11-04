@@ -1,0 +1,25 @@
+{
+  "verified": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": true, "observationRef": "host:real-readback:42"}
+  ],
+  "missing": [],
+  "unavailable": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": false, "reason": "not connected", "observationRef": "host:disconnected:42"}
+  ],
+  "unverified": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": true}
+  ],
+  "oldVersion": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.0.0", "available": true, "observationRef": "host:old:42"}
+  ],
+  "duplicate": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": true, "observationRef": "host:one"},
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": true, "observationRef": "host:two"}
+  ],
+  "invalid": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": "yes", "observationRef": "host:bad"}
+  ],
+  "extraField": [
+    {"schema": "IWXA_CAPABILITY_STATUS/1.0.0", "id": "iwxa.source.read", "version": "1.2.0", "available": true, "observationRef": "host:x", "grants": ["all"]}
+  ]
+}

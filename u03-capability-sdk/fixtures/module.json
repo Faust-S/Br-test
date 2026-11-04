@@ -1,0 +1,12 @@
+{
+  "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+  "id": "iwxa.u03.example",
+  "version": "0.1.0",
+  "provides": [{"id": "iwxa.demo.inspect", "version": "1.0.0"}],
+  "requires": [{"id": "iwxa.source.read", "range": ">=1.1.0 <2.0.0"}],
+  "hostCompatibility": [
+    {"hostId": "iwxa.agent", "range": ">=0.3.0 <1.0.0"},
+    {"hostId": "iwxa.center", "range": ">=0.1.0 <1.0.0"},
+    {"hostId": "iwxa.t2", "range": "=1.3.0"}
+  ]
+}
