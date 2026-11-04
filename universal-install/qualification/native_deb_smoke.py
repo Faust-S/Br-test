@@ -86,9 +86,42 @@ def qualify() -> dict:
                 raise RuntimeError("DEB_SMOKE_INSTALL_VERIFY_FAILED")
             if backend.recover(spec, str(install_root)).status != "INSTALLED_NOT_CONNECTED":
                 raise RuntimeError("DEB_SMOKE_RECOVER_FAILED")
-            removal = ApprovedRemoval(spec.program_id, spec.fingerprint,
+            # Upgrade using the *same* generic backend. The old manifest must
+            # no longer claim to own (or remove) the new installed version.
+            control_file = control / "control"
+            control_file.write_text(
+                control_file.read_text(encoding="utf-8").replace(
+                    "Version: 1.0.0", "Version: 1.1.0"), encoding="utf-8")
+            target.write_text("verified native dpkg fixture v2\n", encoding="utf-8")
+            upgraded_pkg = root / "iwxa-native-ci-fixture-v2.deb"
+            run("dpkg-deb", "--build", str(package_root), str(upgraded_pkg))
+            next_pin = hashlib.sha256(upgraded_pkg.read_bytes()).hexdigest()
+            next_artifact = ManagedArtifactSpec(
+                program_id=artifact.program_id, slug=artifact.slug, release_id="1.1.0",
+                platform=artifact.platform, executable_name=upgraded_pkg.name,
+                archive_name=upgraded_pkg.name, archive_format="deb",
+                archive_sha256=next_pin, executable_sha256=next_pin,
+                download_url="https://github.com/Faust-S/Br-test/releases/download/1.1.0/"
+                + upgraded_pkg.name)
+            next_spec = NativePackageSpec(next_artifact, PACKAGE_ID, installed_version="1.1.0")
+            backend.prepare(next_spec, str(staging), archive_path=str(upgraded_pkg))
+            next_approval = ApprovedInstall(
+                next_spec.program_id, next_spec.fingerprint,
+                "PINS-native-deb-ci-upgrade", str(install_root), True)
+            if not backend.apply(next_spec, str(staging), next_approval).installed:
+                raise RuntimeError("DEB_SMOKE_UPGRADE_FAILED")
+            if backend.verify(spec, str(install_root)).installed:
+                raise RuntimeError("DEB_SMOKE_OLD_VERSION_FALSE_POSITIVE")
+            old_removal = ApprovedRemoval(
+                spec.program_id, spec.fingerprint, "PINS-old-version-remove",
+                str(install_root), True)
+            if backend.remove(spec, old_removal).status != "NOT_INSTALLED":
+                raise RuntimeError("DEB_SMOKE_OLD_VERSION_REMOVE_NOT_BLOCKED")
+            if not backend.verify(next_spec, str(install_root)).installed:
+                raise RuntimeError("DEB_SMOKE_NEW_VERSION_DAMAGED")
+            removal = ApprovedRemoval(next_spec.program_id, next_spec.fingerprint,
                                       "PINS-native-deb-ci-remove", str(install_root), True)
-            if backend.remove(spec, removal).status != "REMOVED":
+            if backend.remove(next_spec, removal).status != "REMOVED":
                 raise RuntimeError("DEB_SMOKE_REMOVE_FAILED")
             if installed() or Path(PAYLOAD).exists():
                 raise RuntimeError("DEB_SMOKE_REMOVE_READBACK_FAILED")
@@ -99,7 +132,8 @@ def qualify() -> dict:
                 raise RuntimeError("DEB_SMOKE_STAGING_NOT_PRESERVED")
             outcome = {"schema":"IWXA_NATIVE_DEB_SMOKE/1", "platform":_native_platform(),
                        "status":"PASS","native_tool":"dpkg","installed":True,
-                       "verified":True,"removed":True,"user_data_preserved":True}
+                       "verified":True,"removed":True,"upgraded":True,
+                       "old_version_protected":True,"user_data_preserved":True}
             print(json.dumps(outcome, sort_keys=True))
             return outcome
         finally:
