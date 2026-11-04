@@ -62,3 +62,24 @@ Integration order: publish and qualify this public component; open independent p
 Общая исходная ветка универсального установщика, Agent 0.2, Center 0.1 и выпущенный Atlas 0.2 не изменены. Эти результаты **не** заменяют установленную Tauri GUI-приёмку и замеры overhead внутри реальных продуктов. Размеры отдельных debug test binary зависят от платформы и не означают накладные расходы встроенной Rust-библиотеки.
 
 Документальная фиксация не меняет проверенные исходники и не требует нового запуска CI.
+
+
+## M8 — квалифицированный Tauri v2 command / IPC (04.11.2026)
+
+Исходный кандидат `0966c235b17817e13c2d5d5639d72fa0b8f85fa7`, [GitHub Actions 41834717969](https://github.com/Faust-S/Br-test/actions/runs/41834717969): **7/7 PASS** — шесть стандартных OS/architecture заданий и отдельное `tauri-native-ipc` на Windows x64. Этот кандидат включает исправления идентичности CLI и сброса capability после потери HTTP-авторизации; ранее квалифицированные M1–M7 сценарии остаются PASS.
+
+**Реальный код**: `host-bindings/rust-port/src/tauri_host.rs` — опциональная Tauri v2 команда `iwxa_program_connection`, основанная на том же `CliPort::dispatch` и host-owned `Mutex<CliPort>`. Обычная Rust-сборка не активирует Tauri-зависимость; потребитель добавляет feature `tauri-host`. Повторного Python/Node runtime, независимого Core или постоянного процесса нет.
+
+Для будущего продукта, уже использующего Tauri 2, добавляется только локальная зависимость с feature:
+
+```toml
+iwxa-program-native-port = { path = "<approved-path>/rust-port", features = ["tauri-host"] }
+```
+
+В действующем `tauri::Builder` приложение само создаёт `CliPort` из разрешённого манифеста и проверенного пути, сохраняет `Mutex<CliPort>` в своём managed state, и добавляет `iwxa_program_native_port::tauri_host::iwxa_program_connection` в **существующий** `generate_handler!` (у Tauri должен быть один общий `invoke_handler`). WebView по-прежнему использует `createTauriProgramPort(invoke)`. Никаких операций install/remove frontend через этот native port не получает.
+
+**Доказательство**: `qualification/tauri-ipc/tests/ipc_real.rs` использует реальный механизм обработки команды Tauri в **MockRuntime**, но не заменяет команду mock-ответом. Официальный jq 1.8.1 устанавливается через прежний pinned `ManagedArtifactBackend`, затем реальная Rust/Tauri команда `inspect / connect / capabilities / invoke / disconnect / recover` исполняет `6 * 7 = 42` и возвращает JSON. Проверены запрет неизвестной функции и неверной схемы. `qualification/tauri_ipc_smoke.py` удаляет свою тестовую установку через backend и проверяет пользовательский файл. Журнал: `IWXA_TAURI_NATIVE_IPC/1 status=PASS`, `1 passed; 0 failed`, `IWXA_TAURI_NATIVE_IPC_QUALIFICATION/1 status=PASS`.
+
+**Граница приёмки**: реальная нативная команда и IPC PASS, но `mock_runtime=true`, `installed_product_gui=false`. Нативный installed GUI запуск Atlas/Center/Agent и замер памяти/CPU в их конечных сборках ещё не проводились. Полноценный Tauri Wry GUI, внешние OAuth/private GitHub и I4/I5 сюда не включены.
+
+Документальная фиксация — без изменения исходников после проверенного SHA, `[skip ci]`.
