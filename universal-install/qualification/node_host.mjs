@@ -1,4 +1,6 @@
-import {readFileSync} from "node:fs";
+import {readFileSync,copyFileSync,chmodSync,statSync,utimesSync,mkdtempSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join,basename} from "node:path";
 import {CliConnection,SCHEMA} from "../host-bindings/program-connection.mjs";
 import {createHostAdapter} from "../host-bindings/host-port.mjs";
 
@@ -26,6 +28,26 @@ if(connection.disconnect().status!=="DISCONNECTED")throw Error("NODE_DISCONNECT_
 if(connection.invoke("evaluate",{expression:"6 * 7"}).status!=="NOT_CONNECTED")throw Error("NODE_DISCONNECTED_EXECUTION");
 if(connection.recover().status!=="CONNECTED")throw Error("NODE_RECOVER_FAILED");
 if(connection.verify().status!=="CONNECTED")throw Error("NODE_VERIFY_FAILED");
+const temp=mkdtempSync(join(tmpdir(),"iwxa-identity-"));
+try {
+ const copy=join(temp,basename(executable));
+ copyFileSync(executable,copy);
+ chmodSync(copy,statSync(executable).mode);
+ const test=new CliConnection(spec,copy);
+ if(test.connect().status!=="CONNECTED")throw Error("NODE_IDENTITY_COPY_CONNECT");
+ if(test.invoke("evaluate",{expression:"6 * 7"}).status!=="EXECUTED")
+  throw Error("NODE_IDENTITY_COPY_INVOKE");
+ const st=statSync(copy);
+ utimesSync(copy,st.atime,new Date(st.mtimeMs+10_000));
+ if(test.verify().status!=="CONNECTION_LOST")
+  throw Error("NODE_IDENTITY_CHANGE_NOT_DETECTED");
+ if(test.capabilities().operations[0].verified)
+  throw Error("NODE_IDENTITY_STALE_CAPABILITY");
+ if(test.recover().status!=="CONNECTED")
+  throw Error("NODE_IDENTITY_RECOVER_FAILED");
+ if(test.capabilities().operations[0].verified)
+  throw Error("NODE_RECOVER_FALSE_CAPABILITY");
+} finally {rmSync(temp,{recursive:true,force:true});}
 const uiHost=createHostAdapter(async ({operation,request})=>
   operation==="invoke" ? connection.invoke(request.operation,request.params) :
   connection[operation]());

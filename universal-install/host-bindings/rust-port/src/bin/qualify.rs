@@ -49,6 +49,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Err("RUST_RECOVER_FAILED".into());
     }
     port.disconnect();
+    // Use an isolated copy of the actual native executable: changing its
+    // contents invalidates the previous connection before another invoke.
+    let temp = std::env::temp_dir().join(format!("iwxa-rust-identity-{}-{}",
+        std::process::id(), std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)?.as_nanos()));
+    fs::create_dir(&temp)?;
+    let shadow = temp.join(file.file_name().ok_or("NO_BINARY_FILENAME")?);
+    let check = (|| -> Result<(), Box<dyn std::error::Error>> {
+        fs::copy(&file,&shadow)?;
+        let mut shadow_port = CliPort::from_manifest(spec,shadow.clone())?;
+        if status(&shadow_port.connect()) != "CONNECTED" {
+            return Err("RUST_SHADOW_CONNECT_FAILED".into());
+        }
+        if status(&shadow_port.invoke("evaluate",&json!({"expression":"6 * 7"})))
+            != "EXECUTED" { return Err("RUST_SHADOW_INVOKE_FAILED".into()); }
+        use std::io::Write;
+        let mut changed = fs::OpenOptions::new().append(true).open(&shadow)?;
+        changed.write_all(b"\n")?;
+        drop(changed);
+        if status(&shadow_port.verify()) != "CONNECTION_LOST" {
+            return Err("RUST_BINARY_CHANGE_NOT_DETECTED".into());
+        }
+        if shadow_port.capabilities()["operations"][0]["verified"] != false {
+            return Err("RUST_BINARY_STALE_CAPABILITY".into());
+        }
+        Ok(())
+    })();
+    let _ = fs::remove_file(&shadow);
+    let _ = fs::remove_dir(&temp);
+    check?;
     let mut wrong_spec = spec.clone();
     wrong_spec["version_contains"] = Value::from("impossible-999.999");
     let mut negative = CliPort::from_manifest(&wrong_spec,file)?;

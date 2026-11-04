@@ -4,6 +4,8 @@ Uses official pinned jq/yq binaries, never executes a mock program.
 """
 import hashlib
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -95,6 +97,25 @@ def qualify():
             if connection.recover()["status"]!="CONNECTED":
                 raise RuntimeError("RECONNECT_FAILED")
             connection.disconnect()
+            shadow_dir=root/"identity-test"/name
+            shadow_dir.mkdir(parents=True,exist_ok=True)
+            shadow=shadow_dir/program.name
+            shutil.copy2(program,shadow)
+            shadow_connection=CliConnection(manifest,str(shadow))
+            if shadow_connection.connect()["status"]!="CONNECTED":
+                raise RuntimeError("SHADOW_CONNECT_FAILED")
+            if shadow_connection.invoke("evaluate",{"expression":"6 * 7"})["status"]!="EXECUTED":
+                raise RuntimeError("SHADOW_INVOKE_FAILED")
+            st=shadow.stat()
+            os.utime(shadow,ns=(st.st_atime_ns,st.st_mtime_ns+10_000_000_000))
+            if shadow_connection.verify()["status"]!="CONNECTION_LOST":
+                raise RuntimeError("SHADOW_IDENTITY_CHANGE_UNDETECTED")
+            if shadow_connection.capabilities()["operations"][0]["verified"]:
+                raise RuntimeError("SHADOW_STALE_CAPABILITY")
+            if shadow_connection.recover()["status"]!="CONNECTED":
+                raise RuntimeError("SHADOW_RECOVER_FAILED")
+            if shadow_connection.capabilities()["operations"][0]["verified"]:
+                raise RuntimeError("SHADOW_FALSE_CAPABILITY_AFTER_RECOVERY")
             node_start=time.perf_counter()
             node=subprocess.run(["node",str(ROOT/"universal-install"/"qualification"/"node_host.mjs"),
                                  str(CONNECTORS),name,str(program)],

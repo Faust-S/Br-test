@@ -32,10 +32,21 @@ function bindArgs(args,params={}) {
   return args.map(x=>/^\{[a-z][a-z0-9_]*\}$/.test(x)?params[x.slice(1,-1)]:x);
 }
 function versionMatches(value,needle) {
-  const index=value.indexOf(needle);
-  if(index<0)return false;
-  const next=value[index+needle.length]??"";
-  return !/[A-Za-z0-9.+-]/.test(next);
+  let index=-1;
+  while((index=value.indexOf(needle,index+1))>=0) {
+    const before=value[index-1]??"";
+    const after=value[index+needle.length]??"";
+    if(!/[A-Za-z0-9._+-]/.test(before) &&
+       !/[A-Za-z0-9._+-]/.test(after))return true;
+  }
+  return false;
+}
+function executableIdentity(path) {
+  try {
+    const st=lstatSync(path,{bigint:true});
+    if(!st.isFile()||st.isSymbolicLink())return null;
+    return [st.dev,st.ino,st.size,st.mtimeNs].map(String).join(":");
+  }catch{return null;}
 }
 function run(path,args) {
   const r=spawnSync(path,args,{encoding:"utf8",timeout:20000,maxBuffer:131072,
@@ -61,6 +72,7 @@ export class CliConnection {
     this.spec=validateCliSpec(spec);
     this.requested=executable;
     this.path=null;
+    this.identity=null;
     this.verified=new Set();
   }
   observation(status,detail={}) {return {schema:SCHEMA,program_id:this.spec.program_id,
@@ -81,21 +93,35 @@ export class CliConnection {
   }
   connect() {
     const found=this.inspect();
-    if(!found.installed) {this.path=null;this.verified.clear();return found;}
+    if(!found.installed) {this.disconnect();return found;}
+    const identity=executableIdentity(found.path);
+    if(!identity){this.disconnect();
+      return this.observation("NOT_FOUND",{installed:false,connected:false});}
+    if(this.path!==found.path||this.identity!==identity)this.verified.clear();
     const r=run(found.path,this.spec.version_args);
     if(r.status!=="EXECUTED"||!versionMatches(r.output,this.spec.version_contains)){
-      this.path=null;this.verified.clear();return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
+      this.disconnect();return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
     }
     this.path=found.path;
+    this.identity=identity;
     return this.observation("CONNECTED",{installed:true,connected:true,
       path:this.path,version:r.output.trim().slice(0,256)});
   }
-  verify(){return this.path?this.connect():this.observation("NOT_CONNECTED",{connected:false});}
+  verify(){
+    if(!this.path)return this.observation("NOT_CONNECTED",{connected:false});
+    if(executableIdentity(this.path)!==this.identity){
+      this.disconnect();return this.observation("CONNECTION_LOST",{connected:false});
+    }
+    return this.connect();
+  }
   capabilities(){return this.observation(this.path?"DECLARED":"NOT_CONNECTED",{
     connected:!!this.path,operations:Object.keys(this.spec.operations).sort()
      .map(name=>({name,declared:true,verified:this.verified.has(name)}))});}
   invoke(operation,params={}) {
     if(!this.path) return this.observation("NOT_CONNECTED",{executed:false});
+    if(executableIdentity(this.path)!==this.identity){
+      this.disconnect();return this.observation("CONNECTION_LOST",{executed:false});
+    }
     const args=this.spec.operations[operation];
     if(!args) return this.observation("OPERATION_UNSUPPORTED",{executed:false});
     let bound;
@@ -109,6 +135,6 @@ export class CliConnection {
     return this.observation("EXECUTED",{executed:true,operation,
       output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
   }
-  disconnect(){this.path=null;this.verified.clear();return this.observation("DISCONNECTED",{connected:false});}
+  disconnect(){this.path=null;this.identity=null;this.verified.clear();return this.observation("DISCONNECTED",{connected:false});}
   recover(){return this.connect();}
 }

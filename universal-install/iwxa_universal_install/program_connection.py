@@ -51,7 +51,16 @@ def bind_arguments(args, params):
 
 def version_matches(output, target):
     """Exact version token, not a prefix of a newer package version."""
-    return re.search(re.escape(target) + r"(?![A-Za-z0-9.+-])", output) is not None
+    return re.search(r"(?<![A-Za-z0-9._+-])" + re.escape(target)
+                     + r"(?![A-Za-z0-9._+-])", output) is not None
+
+def executable_identity(path):
+    """Local observation only, never a host-owned install receipt."""
+    try:
+        st = os.stat(path, follow_symlinks=False)
+        return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
 
 
 def run_command(path, args):
@@ -72,6 +81,7 @@ class CliConnection:
         self.spec = validate_spec(spec)
         self.requested = executable
         self.path = None
+        self._identity = None
         self._verified = set()
 
     def observation(self, status, **extra):
@@ -97,29 +107,35 @@ class CliConnection:
     def connect(self):
         found = self.inspect()
         if not found["installed"]:
-            self.path = None
-            self._verified.clear()
+            self.disconnect()
             return found
+        identity = executable_identity(found["path"])
+        if identity is None:
+            self.disconnect()
+            return self.observation("NOT_FOUND", installed=False, connected=False)
+        if self.path != found["path"] or self._identity != identity:
+            self._verified.clear()
         try:
             code, version = run_command(found["path"], self.spec["version_args"])
         except ProgramError as error:
-            self.path = None
-            self._verified.clear()
+            self.disconnect()
             return self.observation(error.code, installed=True, connected=False)
         if code or not version_matches(version, self.spec["version_contains"]):
-            self.path = None
-            self._verified.clear()
+            self.disconnect()
             return self.observation("VERSION_UNVERIFIED", installed=True,
                                     connected=False)
         self.path = found["path"]
+        self._identity = identity
         return self.observation("CONNECTED", installed=True, connected=True,
                                 path=self.path, version=version.strip()[:256])
 
     def verify(self):
         if not self.path:
             return self.observation("NOT_CONNECTED", connected=False)
-        result = self.connect()
-        return result
+        if executable_identity(self.path) != self._identity:
+            self.disconnect()
+            return self.observation("CONNECTION_LOST", connected=False)
+        return self.connect()
 
     def capabilities(self):
         return self.observation("DECLARED" if self.path else "NOT_CONNECTED",
@@ -130,6 +146,9 @@ class CliConnection:
     def invoke(self, operation, params=None):
         if not self.path:
             return self.observation("NOT_CONNECTED", executed=False)
+        if executable_identity(self.path) != self._identity:
+            self.disconnect()
+            return self.observation("CONNECTION_LOST", executed=False)
         args = self.spec["operations"].get(operation)
         if args is None:
             return self.observation("OPERATION_UNSUPPORTED", executed=False)
@@ -149,6 +168,7 @@ class CliConnection:
 
     def disconnect(self):
         self.path = None
+        self._identity = None
         self._verified.clear()
         return self.observation("DISCONNECTED", connected=False)
 
