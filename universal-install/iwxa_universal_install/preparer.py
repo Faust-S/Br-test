@@ -21,10 +21,21 @@ from urllib.parse import urlsplit
 from urllib.request import Request, build_opener, HTTPRedirectHandler, HTTPSHandler, ProxyHandler
 import zipfile
 
-from .manifest import ManagedArtifactSpec
+from .manifest import ManagedArtifactSpec, NATIVE_FORMATS
 
 ARCHIVE_LIMIT = 150 * 1024 * 1024
 BINARY_LIMIT = 350 * 1024 * 1024
+# Upper bound applies only to native installers, which can be much larger than
+# portable single-file tools. The data is streamed; never held in memory.
+NATIVE_LIMIT = 2 * 1024 * 1024 * 1024
+
+
+def _package_limit(spec: ManagedArtifactSpec) -> int:
+    return NATIVE_LIMIT if spec.archive_format in NATIVE_FORMATS else ARCHIVE_LIMIT
+
+
+def _payload_limit(spec: ManagedArtifactSpec) -> int:
+    return NATIVE_LIMIT if spec.archive_format in NATIVE_FORMATS else BINARY_LIMIT
 _CHUNK = 1024 * 1024
 _MARKER = "artifact-manifest.json"
 _CDN_HOSTS = frozenset({"release-assets.githubusercontent.com", "objects.githubusercontent.com"})
@@ -67,7 +78,7 @@ def _sha_file(path: Path, limit: int) -> str:
         raise ManagedPreparationError("ARTIFACT_INPUT_UNREADABLE") from None
 
 
-def _write_limited(source, target: Path):
+def _write_limited(source, target: Path, *, limit: int = BINARY_LIMIT):
     size = 0
     with target.open("xb") as output:
         while True:
@@ -75,7 +86,7 @@ def _write_limited(source, target: Path):
             if not chunk:
                 break
             size += len(chunk)
-            if size > BINARY_LIMIT:
+            if size > limit:
                 raise ManagedPreparationError("ARTIFACT_EXECUTABLE_TOO_LARGE")
             output.write(chunk)
         output.flush()
@@ -86,11 +97,11 @@ def _write_limited(source, target: Path):
 
 def _extract(archive: Path, destination: Path, spec: ManagedArtifactSpec) -> None:
     try:
-        if spec.archive_format == "binary":
-            # Official standalone executables need no repackaging.
-            # Both binary and downloaded artifact digests are still pinned.
+        if spec.archive_format == "binary" or spec.archive_format in NATIVE_FORMATS:
+            # Native installer packages are opaque pinned files; never execute
+            # them during staging or pretend they are portable applications.
             with archive.open("rb") as source:
-                _write_limited(source, destination)
+                _write_limited(source, destination, limit=_payload_limit(spec))
         elif spec.archive_format == "zip":
             with zipfile.ZipFile(archive) as package:
                 entries = package.infolist()
@@ -167,7 +178,7 @@ class ManagedArtifactPreparer:
             raise ManagedPreparationError("ARTIFACT_PREPARED_MARKER_INVALID") from None
         if data != {"schema": "IWXA_MANAGED_STAGING/1", "spec_fingerprint": spec.fingerprint}:
             raise ManagedPreparationError("ARTIFACT_PREPARED_MARKER_INVALID")
-        if _sha_file(executable, BINARY_LIMIT) != spec.executable_sha256:
+        if _sha_file(executable, _payload_limit(spec)) != spec.executable_sha256:
             raise ManagedPreparationError("ARTIFACT_PREPARED_DIGEST_MISMATCH")
         return ManagedPreparedArtifact(str(executable), spec.executable_sha256,
                                        spec.release_id, spec.platform, spec.fingerprint)
@@ -177,7 +188,7 @@ class ManagedArtifactPreparer:
         if not isinstance(spec, ManagedArtifactSpec):
             raise ManagedPreparationError("MANAGED_SPEC_INVALID")
         archive = Path(archive_path)
-        if _sha_file(archive, ARCHIVE_LIMIT) != spec.archive_sha256:
+        if _sha_file(archive, _package_limit(spec)) != spec.archive_sha256:
             raise ManagedPreparationError("ARTIFACT_ARCHIVE_DIGEST_MISMATCH")
         target = self._target(spec)
         parent = target.parent
@@ -189,7 +200,7 @@ class ManagedArtifactPreparer:
         try:
             binary = temporary / spec.executable_name
             _extract(archive, binary, spec)
-            if _sha_file(binary, BINARY_LIMIT) != spec.executable_sha256:
+            if _sha_file(binary, _payload_limit(spec)) != spec.executable_sha256:
                 raise ManagedPreparationError("ARTIFACT_EXECUTABLE_DIGEST_MISMATCH")
             if os.name != "nt":
                 binary.chmod(0o500)
@@ -238,7 +249,7 @@ class ManagedArtifactPreparer:
                         total = max(0, int(raw_size)) if raw_size is not None else None
                     except (ValueError, TypeError):
                         total = None
-                    if total is not None and total > ARCHIVE_LIMIT:
+                    if total is not None and total > _package_limit(spec):
                         raise ManagedPreparationError("ARTIFACT_DOWNLOAD_TOO_LARGE")
                     if on_progress is not None:
                         on_progress(0, total)
@@ -252,7 +263,7 @@ class ManagedArtifactPreparer:
                             if not block:
                                 break
                             amount += len(block)
-                            if amount > ARCHIVE_LIMIT:
+                            if amount > _package_limit(spec):
                                 raise ManagedPreparationError("ARTIFACT_DOWNLOAD_TOO_LARGE")
                             digest.update(block)
                             output.write(block)
