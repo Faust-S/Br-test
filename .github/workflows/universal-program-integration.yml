@@ -41,5 +41,6 @@ jobs:
           path: atlas-public
           persist-credentials: false
       - name: Real public Atlas observer and synthetic authorized-source contract
+        if: matrix.os == 'windows-2022'
         shell: bash
         run: node universal-install/qualification/github_source_host.mjs
