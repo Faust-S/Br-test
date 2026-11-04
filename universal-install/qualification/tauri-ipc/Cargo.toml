@@ -1,0 +1,10 @@
+[package]
+name = "iwxa-tauri-ipc-qualification"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+iwxa-program-native-port = { path = "../../host-bindings/rust-port", features = ["tauri-host"] }
+serde_json = "1"
+tauri = { version = "2", default-features = false, features = ["test"] }

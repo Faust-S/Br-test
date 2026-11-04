@@ -9,6 +9,9 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, UNIX_EPOCH};
 
+#[cfg(feature = "tauri-host")]
+pub mod tauri_host;
+
 pub const CONTRACT: &str = "IWXA_PROGRAM_CONNECTION/1.0.0";
 const MAX_OUTPUT: u64 = 131_072;
 const TIMEOUT: Duration = Duration::from_secs(20);

@@ -65,3 +65,15 @@ jobs:
         if: matrix.os == 'windows-2022'
         shell: bash
         run: node universal-install/qualification/github_source_host.mjs
+
+  tauri-native-ipc:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Real native Tauri command IPC with pinned jq binary
+        shell: bash
+        run: python universal-install/qualification/tauri_ipc_smoke.py
