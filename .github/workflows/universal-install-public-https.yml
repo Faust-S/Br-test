@@ -13,9 +13,9 @@ concurrency:
   group: universal-install-public-https-${{ github.ref }}
   cancel-in-progress: false
 env:
-  CI_TEST_TAG: iwxa-obscura-native-ci-2026-11-04-test1
-  SOURCE_NATIVE_RUN: '41735454659'
-  SOURCE_NATIVE_SHA: '4d52b80fc3575c8a63ed44188703485f09852704'
+  CI_TEST_TAG: iwxa-obscura-native-ci-2026-11-04-test2
+  SOURCE_NATIVE_RUN: '41739733626'
+  SOURCE_NATIVE_SHA: '2a7bb5021f0e0b7dd7c9fb1d692442a5c6d87a16'
 jobs:
   package:
     runs-on: ubuntu-24.04
@@ -43,7 +43,7 @@ jobs:
       - name: Download six verified native GitHub Actions artifacts
         uses: actions/download-artifact@v4
         with:
-          run-id: 41735454659
+          run-id: 41739733626
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
           pattern: universal-native-obscura-*
