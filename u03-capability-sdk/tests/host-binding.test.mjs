@@ -62,7 +62,7 @@ test('async U01 product host port is consumed without a new executor',async()=>{
  assert.equal((await bridge.attach()).attached,true);
  broken=true;
  assert.equal((await bridge.attach()).attached,false,'transport failure revokes projection');
- assert.equal(calls,6);
+ assert.equal(calls,8);
  assert.equal(attached,2);
 });
 test('async bridge validates mapping first, rejects malformed observations and versions',async()=>{
@@ -82,4 +82,108 @@ test('async bridge validates mapping first, rejects malformed observations and v
  assert.equal(queries,3);
  assert.throws(()=>bindModuleToU01Host({descriptor:desc,port:{},getBindings:()=>cfg,
    hooks:{attach:()=>null,detach:()=>null}}),/U03_HOST_BINDING_PORT_REQUIRED/);
+});
+
+test('in-flight attach rolls back after host epoch changes',async()=>{
+ let epoch=epochA,release,started;
+ const entered=new Promise(resolve=>{started=resolve;});
+ const gate=new Promise(resolve=>{release=resolve;});
+ const refs=[];
+ const port=createProductHostPort('admin-center',async({operation})=>{
+   assert.equal(operation,'capabilities');
+   return source(epoch);
+ });
+ const bridge=bindModuleToU01Host({
+   descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+   port,getBindings:()=>({...cfg,receipts:{evaluate:receipt(epochA)}}),
+   hooks:{
+     attach:async()=>{started();await gate;return {attached:true,bindingRef:'host:in-flight'};},
+     detach:async ref=>{refs.push(ref);return {detached:true};},
+   },
+ });
+ const pending=bridge.attach();
+ await entered;
+ epoch=epochB;
+ release();
+ const result=await pending;
+ assert.equal(result.attached,false);
+ assert.deepEqual(result.assessment.reasons,['U03_CAPABILITY_UNAVAILABLE:iwxa.cli.evaluate']);
+ assert.equal(result.rollback,'DETACHED');
+ assert.equal(result.hostState,'DETACHED');
+ assert.deepEqual(refs,['host:in-flight']);
+ assert.equal(result.hostReceipt.bindingRef,'host:in-flight');
+});
+
+test('compatible but changed capability receipt also rolls back in-flight attach',async()=>{
+ let current=epochA;
+ let release,started;
+ const entered=new Promise(resolve=>{started=resolve;});
+ const gate=new Promise(resolve=>{release=resolve;});
+ const refs=[];
+ const bridge=bindModuleToU01Host({
+  descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+  port:{capabilities:async()=>source(current)},
+  getBindings:()=>({...cfg,receipts:{evaluate:receipt(current)}}),
+  hooks:{
+    attach:async()=>{started();await gate;return {attached:true,bindingRef:'host:epochA'};},
+    detach:async ref=>{refs.push(ref);return {detached:true};},
+  },
+ });
+ const pending=bridge.attach();
+ await entered;
+ current=epochB;
+ release();
+ const result=await pending;
+ assert.equal(result.attached,false);
+ assert.deepEqual(result.assessment.reasons,['U03_HOST_OBSERVATION_CHANGED']);
+ assert.equal(result.rollback,'DETACHED');
+ assert.deepEqual(refs,['host:epochA']);
+});
+
+test('unconfirmed rollback is surfaced, never reported as safe detach',async()=>{
+ for(const mode of ['ref-missing','host-denied','host-exception']){
+  let current=epochA,release,started;
+  const entered=new Promise(resolve=>{started=resolve;});
+  const gate=new Promise(resolve=>{release=resolve;});
+  let calls=0;
+  const bridge=bindModuleToU01Host({
+    descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+    port:{capabilities:async()=>source(current)},
+    getBindings:()=>({...cfg,receipts:{evaluate:receipt(epochA)}}),
+    hooks:{
+      attach:async()=>{started();await gate;return mode==='ref-missing'
+        ?{attached:true}:{attached:true,bindingRef:'host:uncertain'};},
+      detach:async()=>{calls++;if(mode==='host-exception')throw Error('host disconnected');
+        return {detached:false};},
+    },
+  });
+  const pending=bridge.attach();
+  await entered;
+  current=epochB;
+  release();
+  const result=await pending;
+  assert.equal(result.attached,false);
+  assert.equal(result.rollback,'UNCONFIRMED');
+  assert.equal(result.hostState,'UNKNOWN');
+  assert.equal(calls,mode==='ref-missing'?0:1);
+ }
+});
+
+test('post-attach observation errors trigger host-owned detach, not false success',async()=>{
+ let calls=0,detached=0;
+ const bridge=bindModuleToU01Host({
+   descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+   port:{capabilities:async()=>source(epochA)},
+   getBindings:()=>{calls++;if(calls===2)throw Error('no receipt cache');
+     return {...cfg,receipts:{evaluate:receipt(epochA)}};},
+   hooks:{
+      attach:async()=>({attached:true,bindingRef:'host:lost'}),
+      detach:async()=>{detached++;return {detached:true};},
+   },
+ });
+ const result=await bridge.attach();
+ assert.equal(result.attached,false);
+ assert.deepEqual(result.assessment.reasons,['U03_HOST_OBSERVATION_LOST']);
+ assert.equal(result.rollback,'DETACHED');
+ assert.equal(detached,1);
 });

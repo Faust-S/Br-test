@@ -63,6 +63,21 @@ assert.equal(live.hostReceipt.bindingRef,'existing-u01-host:1');
 assert.equal((await binding.detach(live.hostReceipt.bindingRef)).detached,true);
 assert.equal(attached,1);
 assert.equal(detached,1);
+// The host disconnects while acknowledging attach. A successful old receipt
+// must not be exposed as an active U03 binding.
+let rolledBack=0;
+const racing=bindModuleToU01Host({
+ descriptor:hostDescriptor,host:actualHost,port:productPort,getBindings:()=>config,
+ hooks:{
+   attach:async()=>{c.disconnect();return {attached:true,bindingRef:'host:racing'};},
+   detach:async ref=>{assert.equal(ref,'host:racing');rolledBack++;return {detached:true};},
+ },
+});
+const raced=await racing.attach();
+assert.equal(raced.attached,false);
+assert.equal(raced.rollback,'DETACHED');
+assert.equal(raced.hostState,'DETACHED');
+assert.equal(rolledBack,1);
 assert.equal((await productPort.disconnect({})).status,'DISCONNECTED');
 assert.equal((await binding.attach()).attached,false);
 assert.equal(attached,1,'stale availability must not reconnect host');

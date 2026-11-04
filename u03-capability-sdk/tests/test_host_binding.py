@@ -91,3 +91,83 @@ class BindingTests(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main()
+
+class AttachRaceTests(unittest.TestCase):
+    def test_session_changes_inside_host_hook_must_detach(self):
+        connection=Connection()
+        removed=[]
+        cfg={**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}}
+        def attach(*_):
+            connection.epoch=EPOCH_B
+            return {'attached':True,'bindingRef':'host:race'}
+        bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                             connection,lambda:cfg,attach,
+                             lambda ref:removed.append(ref) or {'detached':True})
+        outcome=bridge.attach()
+        self.assertFalse(outcome['attached'])
+        self.assertEqual(outcome['assessment']['reasons'],
+                         ['U03_CAPABILITY_UNAVAILABLE:iwxa.cli.evaluate'])
+        self.assertEqual(outcome['rollback'],'DETACHED')
+        self.assertEqual(outcome['hostState'],'DETACHED')
+        self.assertEqual(removed,['host:race'])
+
+    def test_new_compatible_receipt_still_invalidates_prior_attach(self):
+        connection=Connection()
+        cfg={**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}}
+        removed=[]
+        def attach(*_):
+            connection.epoch=EPOCH_B
+            cfg['receipts']={'evaluate':receipt(EPOCH_B)}
+            return {'attached':True,'bindingRef':'host:changed'}
+        bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                             connection,lambda:cfg,attach,
+                             lambda ref:removed.append(ref) or {'detached':True})
+        outcome=bridge.attach()
+        self.assertFalse(outcome['attached'])
+        self.assertEqual(outcome['assessment']['reasons'],
+                         ['U03_HOST_OBSERVATION_CHANGED'])
+        self.assertEqual(outcome['rollback'],'DETACHED')
+        self.assertEqual(removed,['host:changed'])
+
+    def test_missing_ref_and_rollback_failures_are_visible(self):
+        for mode in ('missing-ref','refused','exception'):
+            with self.subTest(mode=mode):
+                connection=Connection()
+                detach_calls=[]
+                def attach(*_):
+                    connection.epoch=EPOCH_B
+                    return {'attached':True,**(
+                        {} if mode=='missing-ref' else {'bindingRef':'host:uncertain'})}
+                def detach(ref):
+                    detach_calls.append(ref)
+                    if mode=='exception':
+                        raise RuntimeError('host unavailable')
+                    return {'detached':False}
+                bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                                     connection,lambda:{**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}},
+                                     attach,detach)
+                outcome=bridge.attach()
+                self.assertFalse(outcome['attached'])
+                self.assertEqual(outcome['rollback'],'UNCONFIRMED')
+                self.assertEqual(outcome['hostState'],'UNKNOWN')
+                self.assertEqual(len(detach_calls),0 if mode=='missing-ref' else 1)
+
+    def test_post_hook_failure_rolls_back(self):
+        connection=Connection()
+        calls=[]
+        removed=[]
+        def bindings():
+            calls.append(True)
+            if len(calls)>1:
+                raise RuntimeError('host mapping unavailable')
+            return {**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}}
+        bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                             connection,bindings,
+                             lambda *_:{'attached':True,'bindingRef':'host:lost'},
+                             lambda ref:removed.append(ref) or {'detached':True})
+        outcome=bridge.attach()
+        self.assertFalse(outcome['attached'])
+        self.assertEqual(outcome['assessment']['reasons'],
+                         ['U03_HOST_OBSERVATION_LOST'])
+        self.assertEqual(outcome['rollback'],'DETACHED')
+        self.assertEqual(removed,['host:lost'])
