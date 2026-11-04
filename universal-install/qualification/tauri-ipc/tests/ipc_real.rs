@@ -1,5 +1,4 @@
 use iwxa_program_native_port::{CliPort, CONTRACT};
-use iwxa_program_native_port::tauri_host::iwxa_program_connection;
 use serde_json::{json, Value};
 use std::{env,fs,path::PathBuf,sync::Mutex};
 use tauri::{WebviewWindowBuilder, ipc::{CallbackFn,InvokeBody}, webview::InvokeRequest};
@@ -25,14 +24,14 @@ fn real_tauri_ipc_runs_host_selected_jq() {
     let binary = PathBuf::from(env::var("IWXA_CLI_EXECUTABLE")
         .expect("qualification requires a real pinned executable"));
     let catalog: Value = serde_json::from_slice(&fs::read(
-        env::var("IWXA_CLI_CATALOG").expect("qualification catalog"))).unwrap();
+        env::var("IWXA_CLI_CATALOG").expect("qualification catalog"))?).unwrap();
     let spec = catalog["programs"].as_array().unwrap().iter()
         .find(|p| p["program_id"]=="JQ_CLI_V1").expect("official jq manifest");
     let port = CliPort::from_manifest(spec,binary).expect("valid host-owned port");
 
     let app = tauri::test::mock_builder()
         .manage(Mutex::new(port))
-        .invoke_handler(tauri::generate_handler![iwxa_program_connection])
+        .invoke_handler(tauri::generate_handler![iwxa_program_native_port::tauri_host::iwxa_program_connection])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("build native Tauri command harness");
     let webview = WebviewWindowBuilder::new(&app,"main",Default::default())
