@@ -20,3 +20,13 @@ Native installation/removal now validates the owner receipt ID. The component st
 This does **not** mean every MSI or EXE installer will work. Native MSI/EXE ARM64, non-NSIS EXE conventions, package conflicts and complex system-level operations remain unqualified. macOS `pkgutil --forget` alone is **not** removal: for PKG uninstall the native manifest must provide a working vendor command, followed by readback. System-installed packages do not necessarily preserve old versions side-by-side, unlike portable binaries.
 
 No new manager, registry, package Store, external Python dependency or private Agent changes were introduced. Only the single public branch was updated.
+
+## Qualification extension: MSI/PKG upgrades and Windows ARM64 EXE (2026-11-04)
+
+GitHub Actions [41815082066](https://github.com/Faust-S/Br-test/actions/runs/41815082066) — six native runners PASS at source SHA `47fd3f7e05c43715ea4883431c2bd2b808acc149`.
+
+- Windows x64: real WiX MSI 1.0.0 to 1.1.0 major upgrade, old-version uninstall attempt did not remove 1.1.0, final removal PASS.
+- macOS Intel/ARM64: real PKG 1.0.0 to 1.1.0 upgrade, stale-manifest removal rejected, vendor uninstall and readback PASS.
+- Windows ARM64: real NSIS EXE install, verify, uninstall PASS.
+- Linux x64/ARM64: prior DEB/RPM upgrades and stale-version protection remain PASS.
+- The general native backend did not change; these are additional qualification fixtures. Windows ARM64 native MSI and other vendor EXE installer families remain unqualified. Native package upgrades are not portable side-by-side installations.
