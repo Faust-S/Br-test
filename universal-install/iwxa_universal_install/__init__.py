@@ -6,6 +6,7 @@ from .managed import ManagedArtifactBackend
 __all__ = [
     "ApprovedInstall", "ApprovedRemoval", "InstallError", "InstallObservation", "ProgramInstallBackend",
     "ManagedArtifactSpec", "ManagedArtifactBackend", "ObscuraManagedBackend",
+    "NativePackageSpec", "NativePackageBackend",
 ]
 
 def __getattr__(name):
@@ -13,4 +14,8 @@ def __getattr__(name):
     if name == "ObscuraManagedBackend":
         from .obscura import ObscuraManagedBackend
         return ObscuraManagedBackend
+    if name in ("NativePackageSpec", "NativePackageBackend"):
+        from .native import NativePackageSpec, NativePackageBackend
+        return {"NativePackageSpec": NativePackageSpec,
+                "NativePackageBackend": NativePackageBackend}[name]
     raise AttributeError(name)
