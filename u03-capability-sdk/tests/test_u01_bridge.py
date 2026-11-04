@@ -6,11 +6,11 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1] / 'python'))
 from u01_bridge import observe_u01_capabilities
 
 SRC = {"schema":"IWXA_PROGRAM_CONNECTION/1.0.0","program_id":"JQ_CLI_V1","transport":"cli",
-       "status":"DECLARED","connected":True,
+       "status":"DECLARED","connected":True,"connection_epoch":"fixtureepoch0000001",
        "operations":[{"name":"evaluate","declared":True,"verified":True}]}
 RECEIPT = {"observationRef":"host:test:42","observation":{
            "schema":SRC["schema"],"program_id":SRC["program_id"],"transport":"cli",
-           "status":"EXECUTED","executed":True,"operation":"evaluate","output":"42"}}
+           "connection_epoch":"fixtureepoch0000001","status":"EXECUTED","executed":True,"operation":"evaluate","output":"42"}}
 CFG = {"programId":"JQ_CLI_V1","bindings":[{"operation":"evaluate","id":"iwxa.cli.evaluate","version":"1.0.0"}],
        "receipts":{"evaluate":RECEIPT}}
 
@@ -54,3 +54,13 @@ class ProjectionTests(unittest.TestCase):
 
 if __name__=="__main__":
     unittest.main()
+
+class ConnectionEpochTests(unittest.TestCase):
+    def test_replay_after_reconnect_and_repeat_invoke_is_refused(self):
+        current = {**SRC, "connection_epoch": "fixtureepoch0000002"}
+        self.assertEqual(value(current)["reason"], "execution-receipt-missing")
+        self.assertEqual(value({**SRC, "connection_epoch": None})["reason"], "connection-unscoped")
+        self.assertEqual(value({**SRC, "connection_epoch": "x"})["reason"], "connection-unscoped")
+        newer = {**RECEIPT, "observation": {**RECEIPT["observation"],
+                 "connection_epoch": current["connection_epoch"]}}
+        self.assertTrue(value(current, {**CFG, "receipts": {"evaluate": newer}})["available"])

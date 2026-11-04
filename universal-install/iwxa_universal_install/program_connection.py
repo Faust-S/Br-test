@@ -1,5 +1,6 @@
 """Ephemeral, read-only discovery and CLI capability connection for multiple hosts."""
 import os
+from secrets import token_hex
 from pathlib import Path
 import re
 import shutil
@@ -82,11 +83,14 @@ class CliConnection:
         self.requested = executable
         self.path = None
         self._identity = None
+        self._epoch = None
         self._verified = set()
 
     def observation(self, status, **extra):
         return dict(schema=SCHEMA, program_id=self.spec["program_id"],
-                    transport="cli", status=status, **extra)
+                    transport="cli", status=status,
+                    **({"connection_epoch": self._epoch} if self._epoch and
+                       status in ("CONNECTED", "DECLARED", "EXECUTED") else {}), **extra)
 
     def inspect(self):
         """Never runs the program or modifies its installation."""
@@ -115,6 +119,7 @@ class CliConnection:
             return self.observation("NOT_FOUND", installed=False, connected=False)
         if self.path != found["path"] or self._identity != identity:
             self._verified.clear()
+            self._epoch = None
         try:
             code, version = run_command(found["path"], self.spec["version_args"])
         except ProgramError as error:
@@ -126,6 +131,8 @@ class CliConnection:
                                     connected=False)
         self.path = found["path"]
         self._identity = identity
+        if self._epoch is None:
+            self._epoch = token_hex(16)
         return self.observation("CONNECTED", installed=True, connected=True,
                                 path=self.path, version=version.strip()[:256])
 
@@ -173,6 +180,7 @@ class CliConnection:
     def disconnect(self):
         self.path = None
         self._identity = None
+        self._epoch = None
         self._verified.clear()
         return self.observation("DISCONNECTED", connected=False)
 

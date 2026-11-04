@@ -34,5 +34,12 @@ c.disconnect();
 assert.equal(compatible(),false);
 assert.equal(c.recover().status,'CONNECTED');
 assert.equal(compatible(),false);
+const replay=c.invoke('evaluate',{expression:'6 * 7'});
+assert.equal(replay.status,'EXECUTED');
+assert.notEqual(replay.connection_epoch,output.connection_epoch);
+assert.equal(compatible(),false,'old U01 receipt must not survive reconnect and fresh invoke');
+config.receipts={evaluate:{observation:replay,observationRef:'qualification:node:epoch2:'+
+ createHash('sha256').update(replay.output).digest('hex')}};
+assert.equal(compatible(),true);
 console.log(JSON.stringify({schema:'IWXA_U03_REAL_U01_QUALIFICATION/1',consumer:'node',
  program:'jq',output:'42',status:'PASS'}));

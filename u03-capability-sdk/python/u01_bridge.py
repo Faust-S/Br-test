@@ -7,6 +7,7 @@ _ID = re.compile(r"[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*\Z")
 _VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 _OP = re.compile(r"[a-z][a-z0-9_]*\Z")
 _PROGRAM = re.compile(r"[A-Z][A-Z0-9_]{2,79}\Z")
+_EPOCH = re.compile(r"[A-Za-z0-9_-]{16,128}\Z")
 _TRANSPORTS = frozenset(("cli", "http", "mcp", "sdk", "ipc", "file"))
 
 
@@ -46,13 +47,14 @@ def _live(x, program_id):
             len({item["name"] for item in ops}) == len(ops))
 
 
-def _receipt_valid(receipt, operation, program_id, transport):
+def _receipt_valid(receipt, operation, program_id, transport, epoch):
     if not _keys(receipt, ("observation", "observationRef")):
         return False
     o, ref = receipt["observation"], receipt["observationRef"]
     return (isinstance(o, dict) and o.get("schema") == U01 and o.get("program_id") == program_id and
             o.get("transport") == transport and o.get("operation") == operation and
             o.get("status") == "EXECUTED" and o.get("executed") is True and
+            o.get("connection_epoch") == epoch and
             isinstance(ref, str) and 0 < len(ref.strip()) and len(ref) <= 512)
 
 
@@ -72,11 +74,14 @@ def observe_u01_capabilities(connection, config):
         receipt = receipts.get(item["operation"])
         reason = "source-unavailable"
         if live:
-            if operation is None or not operation["declared"]:
+            if not isinstance(source.get("connection_epoch"), str) or not _EPOCH.fullmatch(source["connection_epoch"]):
+                reason = "connection-unscoped"
+            elif operation is None or not operation["declared"]:
                 reason = "operation-unsupported"
             elif not operation["verified"]:
                 reason = "operation-unverified"
-            elif not _receipt_valid(receipt, item["operation"], config["programId"], source["transport"]):
+            elif not _receipt_valid(receipt, item["operation"], config["programId"], source["transport"],
+                                    source["connection_epoch"]):
                 reason = "execution-receipt-missing"
             else:
                 reason = None

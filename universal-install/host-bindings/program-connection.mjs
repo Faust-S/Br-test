@@ -3,6 +3,7 @@ import {spawnSync} from "node:child_process";
 import {accessSync, constants, lstatSync, realpathSync} from "node:fs";
 import {delimiter, isAbsolute} from "node:path";
 import {platform} from "node:os";
+import {randomUUID} from "node:crypto";
 
 export const SCHEMA = "IWXA_PROGRAM_CONNECTION/1.0.0";
 export function validateCliSpec(spec) {
@@ -73,10 +74,12 @@ export class CliConnection {
     this.requested=executable;
     this.path=null;
     this.identity=null;
+    this.epoch=null;
     this.verified=new Set();
   }
   observation(status,detail={}) {return {schema:SCHEMA,program_id:this.spec.program_id,
-    transport:"cli",status,...detail};}
+    transport:"cli",status,...(this.epoch && ["CONNECTED","DECLARED","EXECUTED"].includes(status)
+       ? {connection_epoch:this.epoch}:{}),...detail};}
   inspect() {
     let path=this.requested??located(this.spec.executable_name);
     try {
@@ -97,13 +100,14 @@ export class CliConnection {
     const identity=executableIdentity(found.path);
     if(!identity){this.disconnect();
       return this.observation("NOT_FOUND",{installed:false,connected:false});}
-    if(this.path!==found.path||this.identity!==identity)this.verified.clear();
+    if(this.path!==found.path||this.identity!==identity){this.verified.clear();this.epoch=null;}
     const r=run(found.path,this.spec.version_args);
     if(r.status!=="EXECUTED"||!versionMatches(r.output,this.spec.version_contains)){
       this.disconnect();return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
     }
     this.path=found.path;
     this.identity=identity;
+    if(!this.epoch)this.epoch=randomUUID();
     return this.observation("CONNECTED",{installed:true,connected:true,
       path:this.path,version:r.output.trim().slice(0,256)});
   }
@@ -139,6 +143,6 @@ export class CliConnection {
     return this.observation("EXECUTED",{executed:true,operation,
       output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
   }
-  disconnect(){this.path=null;this.identity=null;this.verified.clear();return this.observation("DISCONNECTED",{connected:false});}
+  disconnect(){this.path=null;this.identity=null;this.epoch=null;this.verified.clear();return this.observation("DISCONNECTED",{connected:false});}
   recover(){return this.connect();}
 }

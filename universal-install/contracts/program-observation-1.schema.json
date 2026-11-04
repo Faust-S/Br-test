@@ -54,6 +54,12 @@
     },
     "elapsed_ms": {
       "type": "number"
+    },
+    "connection_epoch": {
+      "type": "string",
+      "minLength": 16,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9_-]+$"
     }
   },
   "additionalProperties": true

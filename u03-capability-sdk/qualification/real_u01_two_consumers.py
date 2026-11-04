@@ -70,6 +70,13 @@ def qualify():
         assert compatible() is False
         assert c.recover()['status']=='CONNECTED'
         assert compatible() is False
+        replay=c.invoke('evaluate',{'expression':'6 * 7'})
+        assert replay['status']=='EXECUTED'
+        assert replay['connection_epoch']!=output['connection_epoch']
+        assert compatible() is False,'old receipt must not be replayed after reconnect and new invoke'
+        config['receipts']={'evaluate':{'observation':replay,
+          'observationRef':'qualification:python:epoch2:'+hashlib.sha256(replay['output'].encode()).hexdigest()}}
+        assert compatible() is True
         node=subprocess.run(['node',str(ROOT/'u03-capability-sdk/qualification/real-u01-node.mjs'),
            str(executable)],capture_output=True,text=True,timeout=40,check=True)
         report=json.loads(node.stdout.strip())

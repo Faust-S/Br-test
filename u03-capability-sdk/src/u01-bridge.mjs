@@ -5,6 +5,7 @@ const id=/^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*(?![\s\S])/;
 const ver=/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(?![\s\S])/;
 const op=/^[a-z][a-z0-9_]*(?![\s\S])/;
 const prog=/^[A-Z][A-Z0-9_]{2,79}(?![\s\S])/;
+const scoped=/^[A-Za-z0-9_-]{16,128}(?![\s\S])/;
 const transports=new Set(['cli','http','mcp','sdk','ipc','file']);
 const obj=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const keys=(x,r,o=[])=>obj(x)&&r.every(k=>Object.hasOwn(x,k))&&Object.keys(x).every(k=>[...r,...o].includes(k));
@@ -30,11 +31,12 @@ function live(x,programId){
      typeof o.declared==='boolean'&&typeof o.verified==='boolean')&&
    new Set(x.operations.map(o=>o.name)).size===x.operations.length;
 }
-function validReceipt(x,operation,programId,transport){
+function validReceipt(x,operation,programId,transport,epoch){
  if(!keys(x,['observation','observationRef']))return false;
  const o=x.observation;
  return obj(o)&&o.schema===U01&&o.program_id===programId&&o.transport===transport&&
    o.status==='EXECUTED'&&o.executed===true&&o.operation===operation&&
+   o.connection_epoch===epoch&&
    typeof x.observationRef==='string'&&x.observationRef.trim().length>0&&x.observationRef.length<=512;
 }
 export function observeU01Capabilities(connection,config){
@@ -48,10 +50,12 @@ export function observeU01Capabilities(connection,config){
    const operation=ops.get(binding.operation);
    let reason='source-unavailable';
    if(current){
-     if(!operation||!operation.declared)reason='operation-unsupported';
+     if(typeof observed.connection_epoch!=='string'||!scoped.test(observed.connection_epoch))
+       reason='connection-unscoped';
+     else if(!operation||!operation.declared)reason='operation-unsupported';
      else if(!operation.verified)reason='operation-unverified';
      else if(!validReceipt(receipts[binding.operation],binding.operation,
-               config.programId,observed.transport))reason='execution-receipt-missing';
+               config.programId,observed.transport,observed.connection_epoch))reason='execution-receipt-missing';
      else reason=null;
    }
    const status={schema:STATUS_SCHEMA,id:binding.id,available:reason===null};
