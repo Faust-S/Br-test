@@ -94,7 +94,7 @@ try{
  const pending=race.invoke("evaluate",{a:9,b:9});
  await Promise.resolve();
  race.disconnect();
- opWait.resolve(new Response("{\\"answer\\":81}",{status:200}));
+ opWait.resolve(new Response('{"answer":81}',{status:200}));
  assert.equal((await pending).status,"CONNECTION_SUPERSEDED");
  assert.equal(race.capabilities().connected,false);
  assert.equal(race.capabilities().operations[0].verified,false);
@@ -117,7 +117,7 @@ try{
  const p=afterRead.invoke("evaluate",{a:2,b:2});
  await readEntered.promise;
  afterRead.disconnect();
- readWait.resolve("{\\"answer\\":4}");
+ readWait.resolve('{"answer":4}');
  assert.equal((await p).status,"CONNECTION_SUPERSEDED");
  assert.equal(afterRead.capabilities().operations[0].verified,false);
 
