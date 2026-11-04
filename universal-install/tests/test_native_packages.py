@@ -108,7 +108,11 @@ class NativePackageContractTest(unittest.TestCase):
 
     def test_format_platform_and_hash_consistency(self):
         wrong = {**self.artifact.as_dict(), "archive_format": "binary"}
-        self.assertEqual(ManagedArtifactSpec.from_mapping(wrong).archive_format, "binary")
+        if self.platform.startswith("windows"):
+            with self.assertRaisesRegex(ValueError, "MANAGED_SPEC_WINDOWS_EXECUTABLE_INVALID"):
+                ManagedArtifactSpec.from_mapping(wrong)
+        else:
+            self.assertEqual(ManagedArtifactSpec.from_mapping(wrong).archive_format, "binary")
         bad = {**self.artifact.as_dict(), "executable_sha256": "f" * 64}
         with self.assertRaisesRegex(ValueError, "MANAGED_SPEC_NATIVE_FORMAT_INVALID"):
             ManagedArtifactSpec.from_mapping(bad)
