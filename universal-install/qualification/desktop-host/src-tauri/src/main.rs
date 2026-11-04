@@ -1,9 +1,29 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// Public test-only Tauri host: one window, one real CLI connector, no product Core.
+// Reuse the installed Tauri qualification host: U01 CLI and U04 UI are independent.
 use iwxa_program_native_port::{CliPort, CONTRACT};
 use serde_json::{json, Value};
 use std::{env, fs, path::PathBuf, sync::Mutex, time::Instant};
 use tauri::State;
+
+#[path = "../../../../../u04-presentation/native/windows_port.rs"]
+mod windows_port;
+
+#[tauri::command]
+fn iwxa_u04_presentation(operation: String,
+    port: State<'_, Mutex<windows_port::Port>>) -> Result<Value, String> {
+    let mut p = port.lock().map_err(|_| "PRESENTATION_PORT_LOCK_UNAVAILABLE")?;
+    let response = p.handle(&operation);
+    if operation != "capabilities" && operation != "getBinding" {
+        if let Some(path) = env::var_os("IWXA_U04_RECEIPT").map(PathBuf::from) {
+            if !path.is_absolute() {return Err("U04_RECEIPT_PATH_INVALID".into());}
+            let record = json!({"schema":"IWXA_U04_GUI_RECEIPT/1","host_pid":std::process::id(),
+                "operation":operation,"response":response});
+            fs::write(path, serde_json::to_vec(&record).map_err(|e| e.to_string())?)
+                .map_err(|e| format!("U04_RECEIPT_WRITE_FAILED: {e}"))?;
+        }
+    }
+    Ok(response)
+}
 
 #[tauri::command]
 fn qualification_evidence(port: State<'_, Mutex<CliPort>>) -> Result<Value, String> {
@@ -12,7 +32,6 @@ fn qualification_evidence(port: State<'_, Mutex<CliPort>>) -> Result<Value, Stri
     if caps["operations"][0]["verified"] != true {
         return Err("CAPABILITY_NOT_VERIFIED".into());
     }
-    // Independent native readback: the real program must work in this process.
     let start = Instant::now();
     let proof = connection.invoke("evaluate", &json!({"expression":"6 * 7"}));
     if proof["status"] != "EXECUTED" ||
@@ -21,7 +40,7 @@ fn qualification_evidence(port: State<'_, Mutex<CliPort>>) -> Result<Value, Stri
     }
     let evidence = json!({
         "schema":"IWXA_INSTALLED_TAURI_GUI/1",
-        "status":"PASS", "pid":std::process::id(),
+        "status":"PASS","pid":std::process::id(),
         "native_contract":CONTRACT,
         "real_cli_output":"42",
         "invoke_ms":start.elapsed().as_secs_f64()*1000.0,
@@ -39,23 +58,26 @@ fn qualification_evidence(port: State<'_, Mutex<CliPort>>) -> Result<Value, Stri
 }
 
 fn main() {
-    let binary = PathBuf::from(env::var_os("IWXA_CLI_EXECUTABLE")
-        .expect("Test host requires host-selected pinned jq binary"));
-    let manifest = PathBuf::from(env::var_os("IWXA_CLI_CATALOG")
-        .expect("Test host requires approved connector catalog"));
-    let data: Value = serde_json::from_slice(&fs::read(manifest)
-        .expect("Read public approved connector catalog"))
-        .expect("Parse public connector catalog");
-    let spec = data["programs"].as_array().expect("Expected approved list")
-        .iter().find(|p| p["program_id"]=="JQ_CLI_V1")
-        .expect("Test jq connector must be declared");
-    let port = CliPort::from_manifest(spec,binary).expect("Valid host-owned CLI port");
-    tauri::Builder::default()
-        .manage(Mutex::new(port))
-        .invoke_handler(tauri::generate_handler![
-            iwxa_program_native_port::tauri_host::iwxa_program_connection,
-            qualification_evidence
-        ])
-        .run(tauri::generate_context!())
-        .expect("Run real installed Tauri GUI host");
+    let mut builder = tauri::Builder::default()
+        .manage(Mutex::new(windows_port::Port::from_env()));
+    if env::var_os("IWXA_U04_QUALIFICATION").is_none() {
+        let binary = PathBuf::from(env::var_os("IWXA_CLI_EXECUTABLE")
+            .expect("Test host requires host-selected pinned jq binary"));
+        let manifest = PathBuf::from(env::var_os("IWXA_CLI_CATALOG")
+            .expect("Test host requires approved connector catalog"));
+        let data: Value = serde_json::from_slice(&fs::read(manifest)
+            .expect("Read public approved connector catalog"))
+            .expect("Parse public connector catalog");
+        let spec = data["programs"].as_array().expect("Expected approved list")
+            .iter().find(|p| p["program_id"]=="JQ_CLI_V1")
+            .expect("Test jq connector must be declared");
+        let port = CliPort::from_manifest(spec,binary).expect("Valid host-owned CLI port");
+        builder = builder.manage(Mutex::new(port));
+    }
+    builder.invoke_handler(tauri::generate_handler![
+        iwxa_program_native_port::tauri_host::iwxa_program_connection,
+        qualification_evidence,iwxa_u04_presentation
+    ])
+    .run(tauri::generate_context!())
+    .expect("Run real installed Tauri GUI host");
 }

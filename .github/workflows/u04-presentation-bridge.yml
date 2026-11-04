@@ -4,6 +4,8 @@ on:
     branches: [work/2026-11-04-u04-presentation-bridge]
     paths:
       - 'u04-presentation/**'
+      - 'universal-install/qualification/desktop-host/src-tauri/src/main.rs'
+      - 'universal-install/qualification/desktop-host/web/**'
       - '.github/workflows/u04-presentation-bridge.yml'
   workflow_dispatch:
 permissions:
@@ -21,3 +23,55 @@ jobs:
         with:
           node-version: '22'
       - run: node --test u04-presentation/tests/*.test.mjs
+      - name: Native U04 Rust port negative contract
+        if: runner.os == 'Windows'
+        working-directory: universal-install/qualification/desktop-host/src-tauri
+        run: cargo test --bin iwxa-universal-program-ci windows_port::tests -- --nocapture
+  installed-windows-gui:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Build existing independent Tauri qualification GUI
+        shell: pwsh
+        working-directory: universal-install/qualification/desktop-host
+        run: |
+          npm install --no-audit --no-fund
+          npx tauri build
+      - name: Install exact NSIS GUI candidate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $build = Get-ChildItem universal-install/qualification/desktop-host/src-tauri/target/release/bundle/nsis -Filter '*.exe' | Select-Object -First 1
+          if (!$build) { throw "U04_INSTALLER_NOT_BUILT" }
+          $p = Start-Process -FilePath $build.FullName -ArgumentList '/S' -PassThru
+          $p | Wait-Process -Timeout 90
+          $p.Refresh()
+          if ($p.ExitCode -ne 0) { throw "U04_INSTALL_EXIT_$($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'IWXA Universal Program CI\iwxa-universal-program-ci.exe'
+          if (!(Test-Path $exe)) { throw "U04_INSTALLED_EXE_MISSING" }
+          $pythonw = Join-Path (Split-Path (Get-Command python).Source) 'pythonw.exe'
+          if (!(Test-Path $pythonw)) { throw "U04_PYTHONW_NOT_FOUND" }
+          "IWXA_INSTALLED_GUI_EXE=$exe" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          "IWXA_U04_PYTHONW=$pythonw" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+      - name: GUI automation dependencies
+        shell: pwsh
+        run: python -m pip install pywinauto==0.6.9 pillow==11.3.0 psutil==7.0.0
+      - name: Real Windows GUI open focus detach host restart and user document
+        shell: pwsh
+        timeout-minutes: 8
+        run: python u04-presentation/qualification/installed_windows_gui.py
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: u04-installed-windows-gui-evidence
+          path: artifacts/u04/windows-gui/
+          retention-days: 7
+          if-no-files-found: ignore
