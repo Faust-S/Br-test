@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IWXA Program Connection observation",
+  "type": "object",
+  "required": [
+    "schema",
+    "program_id",
+    "transport",
+    "status"
+  ],
+  "properties": {
+    "schema": {
+      "const": "IWXA_PROGRAM_CONNECTION/1.0.0"
+    },
+    "program_id": {
+      "type": "string"
+    },
+    "transport": {
+      "enum": [
+        "cli",
+        "http",
+        "mcp",
+        "sdk",
+        "ipc",
+        "file"
+      ]
+    },
+    "status": {
+      "type": "string"
+    },
+    "installed": {
+      "type": "boolean"
+    },
+    "connected": {
+      "type": "boolean"
+    },
+    "executed": {
+      "type": "boolean"
+    },
+    "architecture": {
+      "type": "string"
+    },
+    "ownership": {
+      "type": "string"
+    },
+    "process": {
+      "type": "string"
+    },
+    "operations": {
+      "type": "array"
+    },
+    "output": {
+      "type": "string"
+    },
+    "elapsed_ms": {
+      "type": "number"
+    }
+  },
+  "additionalProperties": true
+}

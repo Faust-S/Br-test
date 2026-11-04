@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "IWXA Program Connection request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation",
+    "request"
+  ],
+  "properties": {
+    "schema": {
+      "const": "IWXA_PROGRAM_CONNECTION/1.0.0"
+    },
+    "operation": {
+      "enum": [
+        "inspect",
+        "connect",
+        "verify",
+        "capabilities",
+        "invoke",
+        "disconnect",
+        "recover"
+      ]
+    },
+    "request": {
+      "type": "object"
+    }
+  }
+}
