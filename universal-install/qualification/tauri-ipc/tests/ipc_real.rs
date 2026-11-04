@@ -24,7 +24,7 @@ fn real_tauri_ipc_runs_host_selected_jq() {
     let binary = PathBuf::from(env::var("IWXA_CLI_EXECUTABLE")
         .expect("qualification requires a real pinned executable"));
     let catalog: Value = serde_json::from_slice(&fs::read(
-        env::var("IWXA_CLI_CATALOG").expect("qualification catalog"))?).unwrap();
+        env::var("IWXA_CLI_CATALOG").expect("qualification catalog")).expect("read catalog bytes")).unwrap();
     let spec = catalog["programs"].as_array().unwrap().iter()
         .find(|p| p["program_id"]=="JQ_CLI_V1").expect("official jq manifest");
     let port = CliPort::from_manifest(spec,binary).expect("valid host-owned port");
