@@ -63,6 +63,7 @@ def main():
         status.set(result["status"])
     tk.Button(gui,text="Focus existing",width=23,command=lambda:act("focus")).pack()
     tk.Button(gui,text="Detach only",width=23,command=lambda:act("detach")).pack()
+    tk.Button(gui,text="Close host GUI",width=23,command=gui.destroy).pack()
     gui.mainloop()
 
 if __name__=="__main__":

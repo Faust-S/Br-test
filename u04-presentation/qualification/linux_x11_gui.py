@@ -144,9 +144,17 @@ def main():
             check(restored_detached["status"]=="BINDING_CLOSED" and
                   restored_detached["processTerminated"] is False,
                   "SECOND_HOST_DETACH_FAILED")
-            cmd("windowclose",second_window)
-            second_host.wait(timeout=10)
-            check(second_host.returncode==0,"SECOND_HOST_EXIT_NONZERO")
+            cmd("windowactivate","--sync",second_window)
+            cmd("mousemove","--window",second_window,170,105)
+            cmd("click","1")
+            try:
+                _,errors=second_host.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                second_host.terminate()
+                _,errors=second_host.communicate(timeout=5)
+            check(second_host.returncode==0,
+                  "SECOND_HOST_EXIT_NONZERO:"+str(second_host.returncode)+":"+
+                  errors.decode("utf-8",errors="replace")[-500:])
             second_host=None
             check(mod._read_start(pid)==opened["processStamp"],"SECOND_HOST_KILLED_EDITOR")
             check(document.read_text(encoding="utf8")=="PRESERVE REAL USER DOCUMENT",
