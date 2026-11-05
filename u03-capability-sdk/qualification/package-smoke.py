@@ -5,6 +5,7 @@ Build from local source and install into clean hosts; never import source via cw
 from __future__ import annotations
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -103,20 +104,23 @@ print(json.dumps({'consumer':'python','packaged':True,'status':'PASS'}))
 
 
 def main():
+    npm = shutil.which("npm.cmd" if os.name == "nt" else "npm")
+    if not npm:
+        raise RuntimeError("U03_NPM_NOT_FOUND")
     with tempfile.TemporaryDirectory(prefix="iwxa-u03-dist-") as tmp:
         root = Path(tmp)
         node_host = root / "node-host"
         py_host = root / "py-host"
         node_host.mkdir()
         py_host.mkdir()
-        run(["npm", "pack", str(SDK), "--pack-destination", str(root),
+        run([npm, "pack", str(SDK), "--pack-destination", str(root),
              "--silent"], cwd=node_host)
         archives = list(root.glob("*.tgz"))
         assert len(archives) == 1, "U03_NODE_ARCHIVE_MISSING"
         (node_host / "package.json").write_text(
             '{"name":"u03-independent-node-host","private":true,"type":"module"}',
             encoding="utf-8")
-        run(["npm", "install", "--ignore-scripts", "--no-audit", "--no-fund",
+        run([npm, "install", "--ignore-scripts", "--no-audit", "--no-fund",
              "--offline", str(archives[0])], cwd=node_host)
         (node_host / "consumer.mjs").write_text(NODE_CONSUMER, encoding="utf-8")
         out_node = run(["node", "consumer.mjs"], cwd=node_host)
