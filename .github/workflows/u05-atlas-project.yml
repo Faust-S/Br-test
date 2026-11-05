@@ -27,13 +27,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: Faust-S/Atlas
-          ref: 74d666a2498ef6498080d5f4bed3441e478feb06
+          ref: 1c606cd5c54ec466a1152a1e707f149cdeee883e
           path: atlas-public
           persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: Faust-S/Center
-          ref: c6c3f77a8fdadbc815a03b89e6033cc48caac8c2
+          ref: 7c736545cb8b36e84681fa3ed86f5dc4bbadc1ec
           path: center-public
           persist-credentials: false
       - name: Match actual Center source to canonical Atlas source
@@ -50,4 +50,4 @@ jobs:
       - name: Real Center issuance, stale revision refusal and Atlas reference regression
         shell: bash
         working-directory: center-public
-        run: node --test tests/ports.test.mjs tests/atlas-integration.test.mjs
+        run: node --test tests/ports.test.mjs tests/atlas-integration.test.mjs tests/atlas-native.test.mjs
