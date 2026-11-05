@@ -12,7 +12,7 @@ try {
   await writeFile(join(root,'index.html'),
     '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div><script type="module" src="/src/main.mjs"></script></body></html>');
   await writeFile(join(root,'src','main.mjs'), `
-    import {sourceDescriptor,sourceObservation,captureSource,readPinnedSource,sourceChange}
+    import {sourceDescriptor,sourceObservation,captureSource,readPinnedSource,sourceChange,createHostSelectedSourcePort}
       from '@iwxa/u02-source-connectors/web';
     const bytes = new TextEncoder().encode('Atlas Center source preview');
     const hash = new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
@@ -24,6 +24,13 @@ try {
     const port={describe:()=>descriptor,refresh:()=>observation(false),read:()=>observation(true)};
     const captured=await captureSource(port);
     const restored=await readPinnedSource(port,JSON.parse(JSON.stringify(captured.pin)));
+    const source=createHostSelectedSourcePort({
+      hostId:'admin-center',scopeId:'org-a',sourceId:'atlas',bindingId:'native-v1',
+      readSelected:async()=>({status:'OK',bytes})
+    });
+    const verified=await captureSource(source);
+    window.IWXA_U02_HOST_PORT_READY=verified.status==='OK' &&
+      verified.read.contentRef===sha && verified.read.authority==='OBSERVATION_ONLY';
     window.IWXA_U02_WEBVIEW_READY = captured.status==='OK' &&
       restored.status==='OK' && sourceChange(captured.observation,captured.observation).status==='UNCHANGED';
   `);

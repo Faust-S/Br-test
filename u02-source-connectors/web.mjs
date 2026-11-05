@@ -5,3 +5,4 @@ export {
   pinSource, requirePinnedSource, sourceChange
 } from './port.mjs';
 export {captureSource, readPinnedSource} from './source-read.mjs';
+export {createHostSelectedSourcePort} from './host-source.mjs';

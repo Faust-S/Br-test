@@ -10,3 +10,4 @@ export {createAuthorizedGitHubSourcePort} from './authorized-github.mjs';
 export {createHttpSourcePort} from './http-source.mjs';
 export {createProgramCapabilityView} from './program-view.mjs';
 export {createCliOutputSourcePort} from './cli-source.mjs';
+export {createHostSelectedSourcePort} from './host-source.mjs';

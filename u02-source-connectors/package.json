@@ -14,6 +14,7 @@
   "files": [
     "index.mjs",
     "web.mjs",
+    "host-source.mjs",
     "source-read.mjs",
     "port.mjs",
     "local-file.mjs",
