@@ -42,10 +42,13 @@ try{
    return {Authorization:"Bearer "+authToken};
   }});
  assert.equal(c.inspect().status,"CONFIGURED");
- assert.equal((await c.connect()).status,"CONNECTED");
+ const firstConnect=await c.connect();
+ assert.equal(firstConnect.status,"CONNECTED");
+ assert.match(firstConnect.connection_epoch,/^[a-f0-9-]{36}$/);
  assert.equal(c.capabilities().operations[0].verified,false);
  const result=await c.invoke("evaluate",{a:6,b:7});
  assert.equal(result.status,"EXECUTED");
+ assert.equal(result.connection_epoch,firstConnect.connection_epoch);
  assert.equal(JSON.parse(result.output).answer,42);
  assert.equal(c.capabilities().operations[0].verified,true);
  assert.equal((await c.invoke("not_declared")).status,"OPERATION_UNSUPPORTED");
@@ -76,7 +79,9 @@ try{
  assert.equal(c.capabilities().operations[0].verified,false);
  assert.equal((await c.invoke("evaluate",{a:3,b:4})).status,"EXECUTED");
  assert.equal(c.capabilities().operations[0].verified,true);
- assert.equal((await c.verify()).status,"CONNECTED");
+ const afterVerify=await c.verify();
+ assert.equal(afterVerify.status,"CONNECTED");
+ assert.notEqual(afterVerify.connection_epoch,firstConnect.connection_epoch);
  assert.equal(c.capabilities().operations[0].verified,false);
  assert.equal(c.disconnect().status,"DISCONNECTED");
  assert.equal(c.capabilities().connection_epoch,undefined);
