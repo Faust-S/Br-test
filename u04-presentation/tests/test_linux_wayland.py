@@ -105,7 +105,7 @@ class WaylandPortTest(unittest.TestCase):
                 self.assertEqual(second.close_binding(bound["bindingRef"], "host")["status"],
                                  "BINDING_CLOSED")
                 self.assertEqual(second.reattach("editor", "host", pid, "0")["status"],
-                                 "HOST_APPROVAL_REQUIRED")
+                                 "PROCESS_IDENTITY_CHANGED")
                 self.assertEqual(second.reattach("editor", "host", True, stamp)["status"],
                                  "PROCESS_IDENTITY_INVALID")
             finally:
