@@ -10,6 +10,23 @@ func output(_ status: String, _ fields: [String: Any] = [:]) {
        let text = String(data:bytes,encoding:.utf8) {print(text)}
     else {print("{\"status\":\"SERIALIZATION_FAILED\"}")}
 }
+if CommandLine.arguments.count == 3 && CommandLine.arguments[1] == "lookup" {
+    let bundleId = CommandLine.arguments[2]
+    let candidates = NSRunningApplication.runningApplications(withBundleIdentifier:bundleId)
+        .filter { !$0.isTerminated }
+    if let active = candidates.first {
+        output("PROCESS_OBSERVED",[
+            "processId":Int(active.processIdentifier),
+            "launchTimestamp":active.launchDate.map {
+                String(format:"%.6f",$0.timeIntervalSince1970)
+            } ?? "NOT_OBSERVED",
+            "isFinishedLaunching":active.isFinishedLaunching,
+            "isActive":active.isActive,
+            "instanceCount":candidates.count
+        ])
+    } else { output("PROCESS_NOT_FOUND") }
+    exit(0)
+}
 guard CommandLine.arguments.count == 3,
       ["inspect","activate","foreground"].contains(CommandLine.arguments[1]),
       let pidValue = Int32(CommandLine.arguments[2]), pidValue > 0

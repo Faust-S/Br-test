@@ -52,8 +52,10 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: |
-          swiftc -framework AppKit u04-presentation/qualification/macos_editor.swift -o /tmp/iwxa-u04-external-editor
-          IWXA_U04_APPKIT_PORT=/tmp/iwxa-u04-appkit-process IWXA_U04_APPKIT_FIXTURE=/tmp/iwxa-u04-external-editor python3 u04-presentation/qualification/macos_gui.py
+          mkdir -p /tmp/IWXA-U04-Editor.app/Contents/MacOS
+          swiftc -framework AppKit u04-presentation/qualification/macos_editor.swift -o /tmp/IWXA-U04-Editor.app/Contents/MacOS/iwxa-u04-editor
+          python3 -c 'import plistlib; from pathlib import Path; p=Path("/tmp/IWXA-U04-Editor.app/Contents/Info.plist"); p.write_bytes(plistlib.dumps({"CFBundleExecutable":"iwxa-u04-editor","CFBundleIdentifier":"ru.iwxa.u04.ci.external-editor","CFBundleName":"IWXA U04 Editor","CFBundlePackageType":"APPL","CFBundleVersion":"1","CFBundleShortVersionString":"1.0","LSMinimumSystemVersion":"12.0","NSHighResolutionCapable":True}))'
+          IWXA_U04_APPKIT_PORT=/tmp/iwxa-u04-appkit-process IWXA_U04_APPKIT_FIXTURE=/tmp/IWXA-U04-Editor.app python3 u04-presentation/qualification/macos_gui.py
       - name: Preserve real macOS AppKit GUI evidence
         if: always() && runner.os == 'macOS'
         uses: actions/upload-artifact@v4
