@@ -49,6 +49,9 @@ try{
  assert.equal(JSON.parse(result.output).answer,42);
  assert.equal(c.capabilities().operations[0].verified,true);
  assert.equal((await c.invoke("not_declared")).status,"OPERATION_UNSUPPORTED");
+ // Execution evidence is bound to this exact session; this is what U03 uses
+ // to reject stale receipts after reconnect, without granting authority.
+ assert.equal(c.capabilities().connection_epoch,firstConnect.connection_epoch);
  // Real host credentials can become temporarily unavailable while the CLI/API
  // connection remains cached. This must fail closed and revoke verification.
  authProviderFailed=true;
@@ -76,6 +79,7 @@ try{
  assert.equal((await c.verify()).status,"CONNECTED");
  assert.equal(c.capabilities().operations[0].verified,false);
  assert.equal(c.disconnect().status,"DISCONNECTED");
+ assert.equal(c.capabilities().connection_epoch,undefined);
  assert.equal((await c.invoke("evaluate",{a:2,b:3})).status,"NOT_CONNECTED");
  assert.equal((await c.recover()).status,"CONNECTED");
  assert.equal(calls,3);

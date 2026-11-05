@@ -1,3 +1,4 @@
+import {randomUUID} from "node:crypto";
 // On-demand HTTP API connector. Host retains authorization and persistence.
 // A host-approved path must be root-relative, not an absolute/cross-origin URL.
 const safePath=path=>typeof path==="string" && /^\/(?!\/)[A-Za-z0-9/_-]*$/.test(path);
@@ -51,10 +52,12 @@ export class HttpProgramConnection {
       !["GET","POST"].includes(op.method)||!safePath(op.path))
     throw Error("HTTP_OPERATION_INVALID");
   this.spec=spec;this.fetcher=fetcher;this.authHeaders=authHeaders;
-  this.connected=false;this.verified=new Set();this.generation=0;
+  this.connected=false;this.verified=new Set();this.generation=0;this.connectionEpoch=null;
  }
  observation(status,extra={}){return{schema:"IWXA_PROGRAM_CONNECTION/1.0.0",
-  program_id:this.spec.program_id,transport:"http",status,...extra};}
+  program_id:this.spec.program_id,transport:"http",status,
+  ...(this.connected&&this.connectionEpoch&&["CONNECTED","DECLARED","EXECUTED"].includes(status)
+    ?{connection_epoch:this.connectionEpoch}:{}),...extra};}
  inspect(){return this.observation("CONFIGURED",{connected:false,installed:false,
   interfaces:["http"],ownership:"EXTERNAL",process:"UNKNOWN"});}
  async request(path,method="GET",payload,epoch=this.generation){
@@ -82,7 +85,7 @@ export class HttpProgramConnection {
   // Starting a new connection epoch invalidates previous capability proofs.
   // Late successes from older connect/invoke cannot revive disconnected state.
   const epoch=++this.generation;
-  this.connected=false;this.verified.clear();
+  this.connected=false;this.verified.clear();this.connectionEpoch=null;
   const r=await this.request(this.spec.health_path,"GET",undefined,epoch);
   if(epoch!==this.generation)
    return this.observation("CONNECTION_SUPERSEDED",{connected:this.connected});
@@ -90,7 +93,8 @@ export class HttpProgramConnection {
    return this.observation(r?.status===401||r?.status===403?"AUTHORIZATION_REQUIRED":"HTTP_UNAVAILABLE",
      {connected:false});}
   // A health check is not proof of the current identity or any capability.
-  this.connected=true;return this.observation("CONNECTED",{connected:true});
+  this.connected=true;this.connectionEpoch=randomUUID();
+  return this.observation("CONNECTED",{connected:true});
  }
  verify(){return this.connected?this.connect():this.observation("NOT_CONNECTED",{connected:false});}
  capabilities(){return this.observation(this.connected?"DECLARED":"NOT_CONNECTED",{
@@ -133,7 +137,7 @@ export class HttpProgramConnection {
   this.verified.add(name);
   return this.observation("EXECUTED",{executed:true,operation:name,output:body});
  }
- disconnect(){this.generation++;this.connected=false;this.verified.clear();
+ disconnect(){this.generation++;this.connected=false;this.verified.clear();this.connectionEpoch=null;
   return this.observation("DISCONNECTED",{connected:false});}
  recover(){return this.connect();}
 }

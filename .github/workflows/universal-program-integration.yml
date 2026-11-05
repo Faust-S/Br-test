@@ -92,6 +92,20 @@ jobs:
       - name: Real local HTTP API connection with host-owned authorization
         shell: bash
         run: node universal-install/qualification/http_program_host.mjs
+      - name: Install pinned real LiteLLM Gateway for U01 HTTP compatibility
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --disable-pip-version-check 'litellm[proxy]==1.108.0'
+          litellm --version
+      - name: Actual LiteLLM Gateway routing through U01 (synthetic upstream, no model inference)
+        if: matrix.os == 'ubuntu-24.04'
+        shell: bash
+        timeout-minutes: 7
+        run: |
+          set -euo pipefail
+          node universal-install/qualification/real_litellm_gateway.mjs
       - name: Native Windows I3 linked-window observation and real OS readback
         if: runner.os == 'Windows'
         shell: bash
