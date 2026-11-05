@@ -81,7 +81,14 @@ class WaylandPortTest(unittest.TestCase):
                             "stamp": request["stamp"]}
                 return {"approved": True, "executable": sys.executable, "args": args}
 
-            first = mod.WaylandPort(resolver, environ=env)
+            # Keep the Popen handle until fixture cleanup to reap the child.
+            children = []
+            def launcher(*args, **kwargs):
+                import subprocess
+                process = subprocess.Popen(*args, **kwargs)
+                children.append(process)
+                return process
+            first = mod.WaylandPort(resolver, environ=env, launcher=launcher)
             result = first.open("editor", "host", {})
             try:
                 self.assertEqual(result["status"], "LAUNCHED_NO_WINDOW")
@@ -109,9 +116,10 @@ class WaylandPortTest(unittest.TestCase):
                 self.assertEqual(second.reattach("editor", "host", True, stamp)["status"],
                                  "PROCESS_IDENTITY_INVALID")
             finally:
-                if pid:
-                    os.kill(pid, signal.SIGTERM)
-                    os.waitpid(pid, 0)
+                for process in children:
+                    if process.poll() is None:
+                        process.terminate()
+                    process.wait(timeout=8)
 
 
 if __name__ == "__main__":
