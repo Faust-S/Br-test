@@ -28,6 +28,15 @@ jobs:
         run: node --test u03-capability-sdk/tests/capability.test.mjs u03-capability-sdk/tests/u01-bridge.test.mjs u03-capability-sdk/tests/first-use-consumer.test.mjs u03-capability-sdk/tests/connection-epochs.test.mjs u03-capability-sdk/tests/t2-contract.test.mjs u03-capability-sdk/tests/host-binding.test.mjs
       - name: Live local HTTP API, host-owned credential loss and reattachment
         run: node u03-capability-sdk/qualification/real-u01-http.mjs
+      - name: Checkout pinned public K02 owner source (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/knowledge
+          ref: c027e8922e854685afc5a8809b9f31733bc24a43
+          path: k02-public
+          persist-credentials: false
+      - name: K02/U03 model declaration, first-use, stale receipt and pin compatibility
+        run: node --test u03-capability-sdk/qualification/k02-model-consumer.test.mjs
       - name: Python consumer (same public specification)
         run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v
       - name: Independently package and install SDK into clean Node and Python hosts
