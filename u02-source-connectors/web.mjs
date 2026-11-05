@@ -6,3 +6,4 @@ export {
 } from './port.mjs';
 export {captureSource, readPinnedSource} from './source-read.mjs';
 export {createHostSelectedSourcePort} from './host-source.mjs';
+export {TASK_SOURCE_SCHEMA,bindSourceObject,linkTaskSource,assessTaskSourceFreshness} from './task-object.mjs';

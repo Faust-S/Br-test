@@ -63,6 +63,9 @@ jobs:
       - name: U02 read-only native Center host source over canonical Atlas
         shell: bash
         run: node u02-source-connectors/qualification/center-native-host.mjs
+      - name: U02 exact object Task and Atlas revision qualification
+        shell: bash
+        run: node u02-source-connectors/qualification/task-object-atlas.mjs
       - name: Install actual Center Vite toolchain without running package scripts
         shell: bash
         run: npm install --prefix center-public --no-audit --no-fund --ignore-scripts

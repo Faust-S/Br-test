@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {empty,createProject,createItem,editItem,serialize} from '../../atlas-public/src/core.mjs';
+import {readAtlasPortfolio,linkableAtlasWork,atlasWorkReadback} from '../../center-public/src/atlas-integration.mjs';
+import {createLocalFileSourcePort} from '../local-file.mjs';
+import {bindSourceObject,linkTaskSource,assessTaskSourceFreshness} from '../task-object.mjs';
+import {readPinnedSource} from '../source-read.mjs';
+const root=await mkdtemp(join(tmpdir(),'u02-task-atlas-'));
+try {
+ const initial=createProject(empty(),{name:'Object link acceptance',type:'engineering'});
+ const work=createItem(initial.state,initial.id,{title:'Source object readback'});
+ await writeFile(join(root,'portfolio.json'),serialize(work.state));
+ const identity={programId:'ATLAS',instanceRef:'desktop-qualification',sourceId:'canonical-project-store',objectRef:`project/${initial.id}/work/${work.id}`,objectKind:'atlas.work',representation:'json'};
+ const port=()=>createLocalFileSourcePort({root,rootId:'atlas',relativePath:'portfolio.json'});
+ const first=await bindSourceObject(port(),identity);
+ const captured=await linkTaskSource(first,{taskRef:'TASK-ATLAS-QUALIFICATION',ownerRevision:work.state.revision});
+ assert.equal(captured.status,'OK');
+ const persisted=JSON.parse(JSON.stringify(captured.link));
+ const reopened=await bindSourceObject(port(),identity);
+ assert.equal((await assessTaskSourceFreshness(reopened,persisted)).status,'CURRENT');
+ const content=await readPinnedSource(reopened,persisted.pin);
+ const original=readAtlasPortfolio(Buffer.from(content.content.data,'base64').toString('utf8'));
+ const centerLink=linkableAtlasWork(original,initial.id,work.id);
+ assert.equal(atlasWorkReadback(original,centerLink),'SOURCE_REVISION_MATCHES');
+ const updated=editItem(work.state,initial.id,work.id,{state:'done'});
+ await writeFile(join(root,'portfolio.json'),serialize(updated));
+ assert.equal((await assessTaskSourceFreshness(reopened,persisted)).status,'STALE');
+ const stale=await readPinnedSource(reopened,persisted.pin);
+ assert.equal(stale.status,'REVISION_MISMATCH');assert.equal(stale.content,null);
+ const fresh=await linkTaskSource(reopened,{taskRef:persisted.taskRef,ownerRevision:updated.revision});
+ const projection=readAtlasPortfolio(Buffer.from((await readPinnedSource(reopened,fresh.link.pin)).content.data,'base64').toString('utf8'));
+ assert.equal(atlasWorkReadback(projection,centerLink),'SOURCE_REVISION_CHANGED');
+ assert.equal(projection.projects[0].workItems.find(item=>item.id===work.id).state,'done');
+ assert.equal(fresh.link.objectRef,persisted.objectRef);
+ console.log(JSON.stringify({schema:'IWXA_U02_TASK_OBJECT_ATLAS/1',status:'PASS',originalAtlasCore:true,centerReader:true,taskLinkPersisted:true,staleRefused:true,canonicalStorePreserved:true}));
+}finally{await rm(root,{recursive:true,force:true});}

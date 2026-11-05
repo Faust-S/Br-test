@@ -11,3 +11,4 @@ export {createHttpSourcePort} from './http-source.mjs';
 export {createProgramCapabilityView} from './program-view.mjs';
 export {createCliOutputSourcePort} from './cli-source.mjs';
 export {createHostSelectedSourcePort} from './host-source.mjs';
+export {TASK_SOURCE_SCHEMA,bindSourceObject,linkTaskSource,assessTaskSourceFreshness} from './task-object.mjs';

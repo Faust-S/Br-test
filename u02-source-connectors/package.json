@@ -9,7 +9,8 @@
   "exports": {
     ".": "./index.mjs",
     "./schema": "./source-connector-v1.schema.json",
-    "./web": "./web.mjs"
+    "./web": "./web.mjs",
+    "./task-source-schema": "./task-source-link-v1.schema.json"
   },
   "files": [
     "index.mjs",
@@ -24,6 +25,8 @@
     "http-source.mjs",
     "program-view.mjs",
     "cli-source.mjs",
-    "source-connector-v1.schema.json"
+    "source-connector-v1.schema.json",
+    "task-object.mjs",
+    "task-source-link-v1.schema.json"
   ]
 }
