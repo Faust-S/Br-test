@@ -76,15 +76,27 @@ def main():
             closed=original.close_binding(opened["bindingRef"],"u04-ci-host")
             check(closed.get("processTerminated") is False,"WAYLAND_DETACH_TERMINATED")
             check(mod.process_start(pid)==stamp,"WAYLAND_PROCESS_GONE_AFTER_DETACH")
-            second=mod.WaylandPort(approve,environ=env)
-            rebound=second.reattach("editor","u04-ci-host",pid,stamp)
-            check(rebound.get("status")=="BOUND_NO_WINDOW" and
-                  rebound.get("spawned") is False and rebound.get("processId")==pid,
-                  "WAYLAND_REATTACH_FAILED")
-            check(second.activate(rebound["bindingRef"],"u04-ci-host")
-                  ["status"]=="FOCUS_UNSUPPORTED","FALSE_REATTACH_FOCUS")
-            check(second.close_binding(rebound["bindingRef"],"u04-ci-host")
-                  ["processTerminated"] is False,"WAYLAND_REATTACH_DETACH_FAILED")
+            # A NEW OS process, not merely a new adapter object, reconnects.
+            receipt2=Path(tmp)/"second-host.json"
+            helper=ROOT/"u04-presentation"/"qualification"/"wayland_reattach_host.py"
+            proc=__import__("subprocess").run(
+                ["/usr/bin/python3",str(helper),str(pid),stamp,str(receipt2)],
+                env=env,capture_output=True,text=True,timeout=20,check=False)
+            check(proc.returncode==0,
+                  "WAYLAND_INDEPENDENT_HOST_FAILED:"+proc.stderr[-400:])
+            check(receipt2.is_file(),"WAYLAND_SECOND_HOST_RECEIPT_MISSING")
+            evidence=json.loads(receipt2.read_text(encoding="utf-8"))
+            check(evidence.get("status")=="PASS" and
+                  evidence.get("hostProcessId")!=os.getpid() and
+                  evidence.get("hostProcessId")!=pid and
+                  evidence.get("externalProcessId")==pid and
+                  evidence.get("processStamp")==stamp and
+                  evidence.get("spawned") is False and
+                  evidence.get("windowRef") is None and
+                  evidence.get("activationStatus")=="FOCUS_UNSUPPORTED" and
+                  evidence.get("focused") is False and
+                  evidence.get("processSurvived") is True,
+                  "WAYLAND_SECOND_HOST_IDENTITY_FAILED")
             check(mod.process_start(pid)==stamp,"WAYLAND_PROCESS_KILLED")
             check(document.read_text(encoding="utf-8")=="PRESERVE THIS WAYLAND DOCUMENT",
                   "WAYLAND_USER_DOCUMENT_CHANGED")
@@ -92,6 +104,9 @@ def main():
                           native_backend=gtk["native_backend"],
                           same_process_reattached=True,
                           no_second_spawn=True,document_preserved=True,
+                          second_host_independent_os_process=True,
+                          second_host_pid=evidence["hostProcessId"],
+                          second_host_reattach_status=evidence["reattachStatus"],
                           external_survived_detach=True,
                           focus_status="FOCUS_UNSUPPORTED",
                           linked_status="WAYLAND_FOREIGN_TOPLEVEL_NOT_AVAILABLE",
