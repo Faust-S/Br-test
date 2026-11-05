@@ -28,6 +28,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Assert exact candidate SHA on each runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          echo "U01_CANDIDATE_SHA=$GITHUB_SHA"
       - name: Native Rust host contract tests
         shell: bash
         run: |

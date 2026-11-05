@@ -82,6 +82,25 @@ jobs:
         shell: pwsh
         timeout-minutes: 5
         run: python universal-install/qualification/desktop-host/tests/installed_gui.py
+      - name: Verify installed Windows GUI receipt provenance
+        shell: pwsh
+        run: |
+          @'
+          import hashlib, json, os
+          from pathlib import Path
+          proof = Path("artifacts/universal-program/windows-gui/report.json")
+          data = json.loads(proof.read_text(encoding="utf-8"))
+          assert data["status"] == "PASS"
+          assert data["source_sha"] == os.environ["GITHUB_SHA"]
+          installed = Path(os.environ["IWXA_INSTALLED_GUI_EXE"])
+          assert hashlib.sha256(installed.read_bytes()).hexdigest() == data["installed_exe_sha256"]
+          installers = list(Path("universal-install/qualification/desktop-host/src-tauri/target/release/bundle/nsis").glob("*.exe"))
+          assert len(installers) == 1
+          assert hashlib.sha256(installers[0].read_bytes()).hexdigest() == data["installer_sha256"]
+          assert len(data["runs"]) == 2
+          assert all(r["receipt_data"]["status"] == "PASS" and r["receipt_data"]["real_cli_output"] == "42" for r in data["runs"])
+          print("U01_WINDOWS_GUI_PROVENANCE_AND_TWO_SESSIONS_PASS", data["source_sha"])
+          '@ | python -
       - name: Build identical Tauri/WebView2 baseline without CLI port
         shell: pwsh
         working-directory: universal-install/qualification/desktop-host/src-tauri
