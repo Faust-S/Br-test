@@ -43,8 +43,12 @@ def main():
         document=Path(home)/"editable.txt"
         document.write_text("PRESERVE REAL USER DOCUMENT",encoding="utf8")
         target=(sys.executable,[str(ROOT/"u04-presentation"/"qualification"/"external_editor.py"),str(document)])
-        port=mod.X11Port(lambda a,h,s:{"approved": a=="editor" and h=="gui-host",
-             "executable":target[0],"args":target[1]})
+        def approved_program(a,h,s):
+            allowed=a=="editor" and h=="gui-host"
+            if isinstance(s,dict) and s.get("operation")=="reattach":
+                return {"approved":allowed,"pid":s.get("pid"),"stamp":s.get("stamp")}
+            return {"approved":allowed,"executable":target[0],"args":target[1]}
+        port=mod.X11Port(approved_program)
         state={"binding":None,"external":None,"events":[]}
         gui=tk.Tk()
         gui.title("IWXA U04 Independent X11 Host")
@@ -95,9 +99,22 @@ def main():
             gui.destroy()
             check(mod._read_start(pid)==opened["processStamp"],"EDITOR_DIED_WITH_HOST")
             check(document.read_text(encoding="utf8")=="PRESERVE REAL USER DOCUMENT","USER_DOCUMENT_CHANGED")
+            # Fresh bridge instance: no inherited bindings and no second app spawn.
+            restored=mod.X11Port(approved_program)
+            reattached=restored.reattach("editor","gui-host",pid,opened["processStamp"])
+            check(reattached.get("spawned") is False and reattached.get("processId")==pid,
+                  "X11_REATTACH_NOT_SAME_PROCESS")
+            restored_focus=restored.activate(reattached["bindingRef"],"gui-host")
+            check(restored_focus.get("focused") is True and cmd("getactivewindow")==window,
+                  "X11_REATTACH_OS_FOCUS_FAILED")
+            check(restored.close_binding(reattached["bindingRef"],"gui-host")
+                  ["processTerminated"] is False,"X11_REATTACH_DETACH_FAILED")
+            check(mod._read_start(pid)==opened["processStamp"],"X11_REATTACH_KILLED_EDITOR")
             report.update(status="PASS",external_window=window,external_pid=pid,
                           actual_gui_clicks=4,focus_events=2,
                           independent_host_closed=True,external_survived=True,
+                          new_bridge_instance=True,reattached_same_pid=True,
+                          reattach_focus_os_confirmed=True,
                           user_document_preserved=True,embedding_supported=False)
             print("U04_REAL_X11_GUI_PASS",json.dumps(report),flush=True)
         finally:

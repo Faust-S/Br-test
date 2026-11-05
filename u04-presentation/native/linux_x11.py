@@ -97,6 +97,34 @@ class X11Port:
                 "bindingRef":ref,"processId":proc.pid,"processStamp":stamp,
                 "windowRef":window, "spawned":True}
 
+    def reattach(self, app_ref, host_ref, pid, stamp):
+        """Bind to a host-approved existing process, without launching a second copy.
+
+        A PID alone is not an identity. The host must explicitly approve both
+        the process and its /proc start time; the kernel identity is re-read.
+        """
+        supported, reason = self._supported()
+        if not supported:
+            return {"schema":SCHEMA, "status":"PLATFORM_UNSUPPORTED","reason":reason}
+        if type(pid) is not int or pid<=0 or pid>2147483647 or not isinstance(stamp,str) or (
+            not stamp.isdecimal() or len(stamp)>32
+        ):
+            return {"schema":SCHEMA,"status":"PROCESS_IDENTITY_INVALID"}
+        approval=self.resolver(app_ref, host_ref,
+            {"operation":"reattach","pid":pid,"stamp":stamp})
+        if not isinstance(approval,dict) or approval.get("approved") is not True or (
+            approval.get("pid") != pid or approval.get("stamp") != stamp
+        ):
+            return {"schema":SCHEMA,"status":"HOST_APPROVAL_REQUIRED"}
+        if _read_start(pid)!=stamp:
+            return {"schema":SCHEMA,"status":"PROCESS_IDENTITY_CHANGED"}
+        ref=uuid.uuid4().hex
+        self.bound[ref]={"pid":pid,"stamp":stamp,"hostRef":host_ref,"appRef":app_ref}
+        window=self._window(pid)
+        return {"schema":SCHEMA,"status":"WINDOW_OBSERVED" if window else "BOUND_NO_WINDOW",
+                "bindingRef":ref,"processId":pid,"processStamp":stamp,
+                "windowRef":window,"spawned":False}
+
     def activate(self, binding_ref, host_ref):
         bound=self.bound.get(binding_ref)
         if not bound or bound["hostRef"]!=host_ref:

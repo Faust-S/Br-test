@@ -48,6 +48,20 @@ jobs:
           swiftc -framework AppKit u04-presentation/native/appkit_process.swift -o /tmp/iwxa-u04-appkit-process
           /tmp/iwxa-u04-appkit-process inspect "1"
           python3 -m unittest discover -s u04-presentation/tests -p 'test_macos_appkit.py' -v
+      - name: Real macOS AppKit external window observation and focus
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          swiftc -framework AppKit u04-presentation/qualification/macos_editor.swift -o /tmp/iwxa-u04-external-editor
+          IWXA_U04_APPKIT_PORT=/tmp/iwxa-u04-appkit-process IWXA_U04_APPKIT_FIXTURE=/tmp/iwxa-u04-external-editor python3 u04-presentation/qualification/macos_gui.py
+      - name: Preserve real macOS AppKit GUI evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: u04-macos-gui-evidence
+          path: artifacts/u04/macos-gui/
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Native U04 Rust port negative contract
         if: runner.os == 'Windows'
         working-directory: universal-install/qualification/desktop-host/src-tauri
