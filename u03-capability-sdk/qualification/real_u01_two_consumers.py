@@ -81,6 +81,9 @@ def qualify():
            str(executable)],capture_output=True,text=True,timeout=40,check=True)
         report=json.loads(node.stdout.strip())
         assert report['status']=='PASS' and report['output']=='42'
+        from restart_host_qualification import qualify_restart_host
+        restart = qualify_restart_host(executable)
+        assert restart['status']=='PASS' and restart['result_readback']==[42, 56]
         assert backend.recover(spec,str(installed_root)).installed
         removal=ApprovedRemoval(spec.program_id,spec.fingerprint,
           'PINS-u03-remove',str(installed_root),True)
@@ -91,7 +94,7 @@ def qualify():
         print(json.dumps({'schema':'IWXA_U03_REAL_U01_QUALIFICATION/1',
           'status':'PASS','platform':platform,'binary_sha256':actual,'python_consumer':'PASS',
           'node_consumer':'PASS','installed':True,'executed':True,'removed':True,
-          'user_data_preserved':True,'product_hosts_modified':False},sort_keys=True))
+          'user_data_preserved':True,'packaged_restart_host':'PASS','product_hosts_modified':False},sort_keys=True))
 
 if __name__=='__main__':
     qualify()
