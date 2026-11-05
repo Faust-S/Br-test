@@ -3,14 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "engines": {"node": ">=22"},
+  "engines": {
+    "node": ">=22"
+  },
   "exports": {
     ".": "./index.mjs",
     "./schema": "./source-connector-v1.schema.json"
   },
   "files": [
-    "index.mjs", "source-read.mjs", "port.mjs", "local-file.mjs",
-    "local-git.mjs", "atlas-github.mjs", "authorized-github.mjs",
-    "http-source.mjs", "program-view.mjs", "source-connector-v1.schema.json"
+    "index.mjs",
+    "source-read.mjs",
+    "port.mjs",
+    "local-file.mjs",
+    "local-git.mjs",
+    "atlas-github.mjs",
+    "authorized-github.mjs",
+    "http-source.mjs",
+    "program-view.mjs",
+    "cli-source.mjs",
+    "source-connector-v1.schema.json"
   ]
 }
