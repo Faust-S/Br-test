@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import {createHash, randomBytes} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
 import {spawnSync} from 'node:child_process';
-import {dirname, join} from 'node:path';
+import {join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {
   sourceDescriptor, sourceObservation, captureSource, readPinnedSource, sourceChange
 } from '../web.mjs';
-const root = dirname(fileURLToPath(new URL('../', import.meta.url)));
+const root = fileURLToPath(new URL('../', import.meta.url));
 const revision = text => 'sha256:' + createHash('sha256').update(text).digest('hex');
 const now = '2026-11-05T00:00:00.000Z';
 const observe = (descriptor, status, value = null, opts = {}) => sourceObservation(descriptor, {
