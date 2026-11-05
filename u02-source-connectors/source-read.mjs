@@ -1,7 +1,13 @@
-import {createHash} from 'node:crypto';
 import {SOURCE_SCHEMA, OBSERVATION_AUTHORITY, pinSource, requirePinnedSource} from './port.mjs';
 
-const digest = bytes => 'sha256:' + createHash('sha256').update(bytes).digest('hex');
+// Shared validation for both Node hosts and embedded WebView consumers.
+// Web Crypto is available in Node 22+ and modern secure-context WebViews.
+async function digest(bytes) {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle || typeof subtle.digest !== 'function') throw Error('SOURCE_CRYPTO_UNAVAILABLE');
+  const hash = new Uint8Array(await subtle.digest('SHA-256', bytes));
+  return 'sha256:' + Array.from(hash, b => b.toString(16).padStart(2, '0')).join('');
+}
 const matches = (descriptor, observation) =>
   observation?.schema === SOURCE_SCHEMA &&
   observation.providerId === descriptor.providerId &&
@@ -20,7 +26,17 @@ function requirePort(port) {
   return descriptor;
 }
 
-// Read a previously saved pin without refreshing to the latest source revision.
+function decodeBase64(base64) {
+  if (typeof globalThis.atob !== 'function') throw Error('SOURCE_BASE64_UNAVAILABLE');
+  let binary;
+  try {binary = globalThis.atob(base64);}
+  catch {throw Error('SOURCE_READ_INTEGRITY_INVALID');}
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+// No refresh: preserve the exact source revision selected by the host.
 export async function readPinnedSource(port, pinned) {
   const descriptor = requirePort(port);
   if (!requirePinnedSource(descriptor, pinned))
@@ -42,13 +58,12 @@ export async function readPinnedSource(port, pinned) {
       base64.length % 4 !== 0 ||
       !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(base64))
     throw Error('SOURCE_READ_INTEGRITY_INVALID');
-  const bytes = Buffer.from(base64, 'base64');
-  if (bytes.length !== result.bytes || digest(bytes) !== result.contentRef.toLowerCase())
+  const bytes = decodeBase64(base64);
+  if (bytes.length !== result.bytes || await digest(bytes) !== result.contentRef.toLowerCase())
     throw Error('SOURCE_READ_INTEGRITY_INVALID');
   return result;
 }
 
-// A single read-only acquisition for Atlas/Knowledge/Center hosts; no storage or apply.
 export async function captureSource(port) {
   const descriptor = requirePort(port);
   const observation = await port.refresh();

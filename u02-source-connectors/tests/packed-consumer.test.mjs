@@ -46,7 +46,7 @@ test('npm tarball installs offline in a fresh host and reads a pinned source acr
     const included = packed.files.map(f => f.path);
     for (const required of [
       'package.json', 'index.mjs', 'port.mjs', 'source-read.mjs',
-      'local-file.mjs', 'source-connector-v1.schema.json'
+      'local-file.mjs', 'web.mjs', 'source-connector-v1.schema.json'
     ]) assert.ok(included.includes(required), required);
     assert.ok(included.every(path => !path.startsWith('tests/') &&
       !path.startsWith('qualification/') && !/README|\.md$/i.test(path)));

@@ -8,10 +8,12 @@
   },
   "exports": {
     ".": "./index.mjs",
-    "./schema": "./source-connector-v1.schema.json"
+    "./schema": "./source-connector-v1.schema.json",
+    "./web": "./web.mjs"
   },
   "files": [
     "index.mjs",
+    "web.mjs",
     "source-read.mjs",
     "port.mjs",
     "local-file.mjs",
