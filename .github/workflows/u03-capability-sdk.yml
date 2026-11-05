@@ -32,6 +32,15 @@ jobs:
         run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v
       - name: Independently package and install SDK into clean Node and Python hosts
         run: python u03-capability-sdk/qualification/package-smoke.py
+      - name: Checkout pinned public Atlas owner source (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Atlas
+          ref: ff7669a032419f64a8e709add178f29bf84e567b
+          path: atlas-owner-source
+          persist-credentials: false
+      - name: Real Atlas canonical owner port via installed U03 SDK and three host processes
+        run: python u03-capability-sdk/qualification/atlas_owner_qualification.py atlas-owner-source
       # T2 is not anonymously accessible in public CI. Its canonical source
       # must only be inspected through an independently authorized checkout.
       # The portable JS/Python contract fixtures above are the public CI gate.
