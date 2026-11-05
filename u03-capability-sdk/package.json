@@ -1,0 +1,20 @@
+{
+  "name": "@iwxa/capability-sdk",
+  "version": "0.1.0",
+  "description": "Portable IWXA U03 compatibility descriptor and host adapter",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./src/capability.mjs",
+    "./host-binding": "./src/host-binding.mjs",
+    "./u01-bridge": "./src/u01-bridge.mjs",
+    "./t2-manifest": "./src/t2-manifest.mjs"
+  },
+  "files": [
+    "src/"
+  ]
+}

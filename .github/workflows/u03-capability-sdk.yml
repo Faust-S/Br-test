@@ -30,6 +30,8 @@ jobs:
         run: node u03-capability-sdk/qualification/real-u01-http.mjs
       - name: Python consumer (same public specification)
         run: python -m unittest discover -s u03-capability-sdk/tests -p 'test_*.py' -v
+      - name: Independently package and install SDK into clean Node and Python hosts
+        run: python u03-capability-sdk/qualification/package-smoke.py
       # T2 is not anonymously accessible in public CI. Its canonical source
       # must only be inspected through an independently authorized checkout.
       # The portable JS/Python contract fixtures above are the public CI gate.

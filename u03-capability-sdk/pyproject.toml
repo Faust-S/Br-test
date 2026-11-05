@@ -1,0 +1,14 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "iwxa-u03-capability-sdk"
+version = "0.1.0"
+description = "Portable IWXA U03 capability and host interoperability SDK"
+requires-python = ">=3.10"
+license = "MIT"
+
+[tool.setuptools]
+package-dir = {"" = "python"}
+py-modules = ["iwxa_capability_sdk", "host_binding", "u01_bridge", "t2_manifest"]
