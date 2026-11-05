@@ -15,7 +15,7 @@ concurrency:
 jobs:
   two-host-programs:
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 18
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
@@ -37,6 +37,43 @@ jobs:
       - name: Existing generic install contract
         shell: bash
         run: python -m unittest discover -s universal-install/tests -v
+      - name: Real native DEB upgrade and old-version removal refusal
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/universal-program/native
+          sudo "$(command -v python)" universal-install/qualification/native_deb_smoke.py | tee artifacts/universal-program/native/deb.json
+      - name: Real native RPM upgrade and old-version removal refusal
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y rpm
+          mkdir -p artifacts/universal-program/native
+          sudo "$(command -v python)" universal-install/qualification/native_rpm_smoke.py | tee artifacts/universal-program/native/rpm.json
+      - name: Real native PKG upgrade with explicit vendor removal
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/universal-program/native
+          sudo "$(command -v python)" universal-install/qualification/native_pkg_smoke.py | tee artifacts/universal-program/native/pkg.json
+      - name: Real native MSI major upgrade with vendor UpgradeCode
+        if: matrix.os == 'windows-2022'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/universal-program/native
+          python universal-install/qualification/native_msi_smoke.py | tee artifacts/universal-program/native/msi.json
+      - name: Real vendor EXE update, corruption refusal and uninstall
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/universal-program/native
+          python universal-install/qualification/native_exe_smoke.py | tee artifacts/universal-program/native/vendor-exe.json
       - name: Two genuinely installed independent programs, two host runtimes
         shell: bash
         env:
@@ -70,6 +107,15 @@ jobs:
         if: matrix.os == 'windows-2022'
         shell: bash
         run: node universal-install/qualification/github_source_host.mjs
+
+      - name: Preserve real native package qualification receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: iwxa-u01-native-${{ matrix.os }}
+          path: artifacts/universal-program/native/
+          retention-days: 7
+          if-no-files-found: ignore
 
   tauri-native-ipc:
     runs-on: windows-2022

@@ -3,6 +3,7 @@
 A visible native HWND is not a loaded web page. Wait for a JS-armed, visually
 blue button before clicking. Never dispatch browser JS or mock native IPC.
 """
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,6 +29,11 @@ VISUAL_RESULT_TIMEOUT_S = 12
 def check(condition, code):
     if not condition:
         raise RuntimeError(code)
+
+
+def sha256_file(path):
+    with path.open('rb') as payload:
+        return hashlib.file_digest(payload, 'sha256').hexdigest()
 
 
 def color_region(image, target):
@@ -194,6 +200,12 @@ def main():
           str(Path(os.environ["LOCALAPPDATA"]).resolve()).lower() + os.sep),
           "NOT_INSTALLED_IN_ISOLATED_PROFILE")
     check(Path(os.environ["IWXA_CLI_EXECUTABLE"]).is_file(), "REAL_JQ_MISSING")
+    source_sha = os.environ.get("GITHUB_SHA", "")
+    check(len(source_sha) == 40 and all(ch in "0123456789abcdef" for ch in source_sha.lower()),
+          "GUI_SOURCE_SHA_NOT_PINNED")
+    installer_dir = ROOT / "universal-install/qualification/desktop-host/src-tauri/target/release/bundle/nsis"
+    installers = list(installer_dir.glob("*.exe"))
+    check(len(installers) == 1, "GUI_INSTALLER_PROVENANCE_AMBIGUOUS")
     receipt = Path(os.environ["IWXA_GUI_RECEIPT"]).resolve()
     check(receipt.parent.is_dir(), "RECEIPT_DIR_NOT_FOUND")
     user_file = receipt.parent / "persistent-user-file.txt"

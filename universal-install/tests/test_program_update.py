@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from dataclasses import replace
 import hashlib
+import json
 import os
+import subprocess
+import threading
+from unittest import mock
 from pathlib import Path
 import sys
 import tempfile
@@ -173,6 +177,97 @@ class ManagedUpdateTest(unittest.TestCase):
         self.assertEqual(removed.status, "REMOVED")
         self.assertEqual(self.backend.recover_update(self.old, self.new,
                          str(self.software)).status, "UPDATE_AVAILABLE")
+        self.assert_preserved()
+
+
+    def test_write_failure_and_permission_denial_preserve_old(self):
+        self.install_old()
+        self.backend.prepare(self.new, str(self.stage), archive_path=str(self.new_source))
+        with mock.patch("iwxa_universal_install.managed.os.fsync",
+                        side_effect=OSError(28, "disk full")):
+            with self.assertRaisesRegex(InstallError, "INSTALL_WRITE_FAILED"):
+                self.backend.apply_update(self.old, self.new, str(self.stage), self.approve())
+        self.assertEqual(self.backend.verify(self.new, str(self.software)).status, "NOT_INSTALLED")
+        self.assert_preserved()
+        with mock.patch.object(Path, "mkdir", side_effect=PermissionError("access denied")):
+            with self.assertRaisesRegex(InstallError, "INSTALL_DESTINATION_UNAVAILABLE"):
+                self.backend.apply_update(self.old, self.new, str(self.stage), self.approve())
+        self.assertEqual(self.backend.verify(self.new, str(self.software)).status, "NOT_INSTALLED")
+        self.assert_preserved()
+
+    def test_process_crash_after_owner_marker_can_be_recovered_and_removed(self):
+        self.install_old()
+        self.backend.prepare(self.new, str(self.stage), archive_path=str(self.new_source))
+        # Child terminates after the marker fsync, before executable copying.
+        script = """
+import json, os, sys
+sys.path.insert(0, sys.argv[1])
+from iwxa_universal_install import ManagedArtifactBackend, ManagedArtifactSpec, ApprovedInstall
+import iwxa_universal_install.managed as managed
+original = managed.os.fsync
+def crash_after_marker(fd):
+    original(fd)
+    os._exit(87)
+managed.os.fsync = crash_after_marker
+spec = ManagedArtifactSpec.from_mapping(json.loads(sys.argv[2]))
+ManagedArtifactBackend().apply(
+    spec, sys.argv[3], ApprovedInstall(
+        spec.program_id, spec.fingerprint, "PINS-crash-update", sys.argv[4], True))
+"""
+        child = subprocess.run(
+            [sys.executable, "-c", script, str(ROOT / "universal-install"),
+             json.dumps(self.new.as_dict()), str(self.stage), str(self.software)],
+            check=False, capture_output=True, text=True, timeout=20)
+        self.assertEqual(child.returncode, 87, child.stderr)
+        target = self.software / self.new.slug / self.new.release_id / self.new.platform
+        self.assertTrue((target / ".iwxa-installed.json").is_file())
+        self.assertEqual(self.backend.recover_update(self.old, self.new,
+                         str(self.software)).status, "UPDATE_TARGET_INVALID")
+        removed = self.backend.remove(self.new, ApprovedRemoval(
+            self.new.program_id, self.new.fingerprint, "PINS-crash-cleanup",
+            str(self.software), True))
+        self.assertEqual(removed.status, "REMOVED")
+        self.assertEqual(self.backend.recover_update(self.old, self.new,
+                         str(self.software)).status, "UPDATE_AVAILABLE")
+        self.assert_preserved()
+
+    def test_concurrent_install_rejects_second_writer(self):
+        self.install_old()
+        self.backend.prepare(self.new, str(self.stage), archive_path=str(self.new_source))
+        entered, resume = threading.Event(), threading.Event()
+        original_fsync = os.fsync
+        errors = []
+
+        def blocked_fsync(fd):
+            original_fsync(fd)
+            if threading.current_thread() is worker:
+                entered.set()
+                if not resume.wait(10):
+                    raise OSError("writer gate timed out")
+
+        def first_writer():
+            try:
+                self.backend.apply_update(self.old, self.new,
+                                          str(self.stage), self.approve())
+            except Exception as error:
+                errors.append(error)
+
+        worker = threading.Thread(target=first_writer, name="u01-first-writer")
+        with mock.patch("iwxa_universal_install.managed.os.fsync",
+                        side_effect=blocked_fsync):
+            try:
+                worker.start()
+                self.assertTrue(entered.wait(10), "first writer did not reach marker")
+                with self.assertRaisesRegex(InstallError, "UPDATE_TARGET_CONFLICT"):
+                    self.backend.apply_update(self.old, self.new,
+                                              str(self.stage), self.approve())
+            finally:
+                resume.set()
+                worker.join(12)
+        self.assertFalse(worker.is_alive(), "first writer did not finish")
+        self.assertEqual(errors, [])
+        self.assertEqual(self.backend.recover_update(self.old, self.new,
+                         str(self.software)).status, "UPDATE_READY_FOR_ACTIVATION")
         self.assert_preserved()
 
 
