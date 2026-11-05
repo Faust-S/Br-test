@@ -213,7 +213,10 @@ def main():
     result = {"schema": "IWXA_INSTALLED_WINDOWS_GUI_QUALIFICATION/1",
               "status": "FAIL", "actual_gui": True, "real_install": True,
               "timestamp": datetime.now(timezone.utc).isoformat(),
-              "executable": str(exe), "runs": RUNS}
+              "executable": str(exe), "source_sha": source_sha,
+              "installer_sha256": sha256_file(installers[0]),
+              "installed_exe_sha256": sha256_file(exe),
+              "runs": RUNS}
     try:
         for attempt in (1, 2):
             launch_and_click(exe, receipt, attempt)
