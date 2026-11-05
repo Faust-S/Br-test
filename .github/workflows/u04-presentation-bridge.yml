@@ -33,6 +33,35 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq xvfb xdotool x11-utils openbox python3-tk
           xvfb-run -a -s '-screen 0 1280x800x24' bash -c 'openbox >/tmp/u04-openbox.log 2>&1 & sleep 2; /usr/bin/python3 u04-presentation/qualification/linux_x11_gui.py'
+      - name: Real Wayland compositor and native GTK GUI qualification
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get install -y -qq weston python3-gi gir1.2-gtk-3.0
+          mkdir -p "$RUNNER_TEMP/u04-runtime"
+          chmod 700 "$RUNNER_TEMP/u04-runtime"
+          export XDG_RUNTIME_DIR="$RUNNER_TEMP/u04-runtime"
+          export WAYLAND_DISPLAY="wayland-u04"
+          export XDG_SESSION_TYPE="wayland"
+          weston --backend=headless-backend.so --renderer=pixman --socket=wayland-u04 --no-config --idle-time=0 >"$RUNNER_TEMP/u04-weston.log" 2>&1 &
+          WESTON_PID=$!
+          trap 'kill "$WESTON_PID" 2>/dev/null || true' EXIT
+          for i in $(seq 1 60); do
+            if [ -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" ]; then break; fi
+            if ! kill -0 "$WESTON_PID" 2>/dev/null; then cat "$RUNNER_TEMP/u04-weston.log"; exit 1; fi
+            sleep 0.2
+          done
+          test -S "$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY"
+          /usr/bin/python3 -m unittest discover -s u04-presentation/tests -p 'test_linux_wayland.py' -v
+          /usr/bin/python3 u04-presentation/qualification/wayland_native.py
+      - name: Upload native Wayland evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: u04-linux-wayland-evidence
+          path: artifacts/u04/wayland/
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Upload X11 real GUI report
         if: always() && runner.os == 'Linux'
         uses: actions/upload-artifact@v4
