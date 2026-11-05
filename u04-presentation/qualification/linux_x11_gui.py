@@ -73,6 +73,7 @@ def main():
             matches=cmd("search","--name","^IWXA U04 Independent X11 Host$")
             return matches.splitlines()[0] if matches else None
         host_window=wait_for(host_observation)
+        second_host=None
         try:
             def real_click(name):
                 index={"open":0,"activate":1,"closeBinding":2}[name]
@@ -99,25 +100,71 @@ def main():
             gui.destroy()
             check(mod._read_start(pid)==opened["processStamp"],"EDITOR_DIED_WITH_HOST")
             check(document.read_text(encoding="utf8")=="PRESERVE REAL USER DOCUMENT","USER_DOCUMENT_CHANGED")
-            # Fresh bridge instance: no inherited bindings and no second app spawn.
-            restored=mod.X11Port(approved_program)
-            reattached=restored.reattach("editor","gui-host",pid,opened["processStamp"])
-            check(reattached.get("spawned") is False and reattached.get("processId")==pid,
-                  "X11_REATTACH_NOT_SAME_PROCESS")
-            restored_focus=restored.activate(reattached["bindingRef"],"gui-host")
-            check(restored_focus.get("focused") is True and cmd("getactivewindow")==window,
-                  "X11_REATTACH_OS_FOCUS_FAILED")
-            check(restored.close_binding(reattached["bindingRef"],"gui-host")
-                  ["processTerminated"] is False,"X11_REATTACH_DETACH_FAILED")
-            check(mod._read_start(pid)==opened["processStamp"],"X11_REATTACH_KILLED_EDITOR")
+            # The first visible Tk host has been destroyed. Start an entirely
+            # separate OS process with an independent GUI and independent port.
+            def first_host_closed():
+                return not bool(cmd("search","--name","^IWXA U04 Independent X11 Host$"))
+            wait_for(first_host_closed)
+            second_receipt=Path(home)/"second-host-receipt.json"
+            second_script=ROOT/"u04-presentation"/"qualification"/"linux_reattach_host.py"
+            second_host=subprocess.Popen([sys.executable,str(second_script),str(pid),
+                                          opened["processStamp"],str(second_receipt)],
+                                          stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,
+                                          start_new_session=True)
+            second_title="^IWXA U04 Reattached X11 Host$"
+            def observe_second():
+                matches=cmd("search","--name",second_title)
+                return matches.splitlines()[0] if matches else None
+            second_window=wait_for(observe_second)
+            def second_click(operation,index):
+                cmd("windowactivate","--sync",second_window)
+                cmd("mousemove","--window",second_window,170,43+index*31)
+                if second_receipt.exists(): second_receipt.unlink()
+                cmd("click","1")
+                def read_receipt():
+                    if not second_receipt.exists(): return None
+                    try: return json.loads(second_receipt.read_text(encoding="utf-8"))
+                    except (ValueError,OSError): return None
+                result=wait_for(read_receipt)
+                check(result["operation"]==operation,"SECOND_HOST_RECEIPT_OPERATION_MISMATCH")
+                check(result["host_pid"]==second_host.pid and
+                      result["host_pid"]!=os.getpid() and result["host_pid"]!=pid,
+                      "SECOND_HOST_NOT_INDEPENDENT_OS_PROCESS")
+                check(result["processId"]==pid and
+                      result["processStamp"]==opened["processStamp"] and
+                      result["spawned"] is False,
+                      "SECOND_HOST_CREATED_DIFFERENT_PROGRAM")
+                return result
+            restored_focus=second_click("focus",0)
+            check(restored_focus["status"]=="WINDOW_FOCUSED" and
+                  restored_focus["focused"] is True and
+                  restored_focus["windowRef"]==window and
+                  cmd("getactivewindow")==window,"SECOND_HOST_OS_FOCUS_FAILED")
+            restored_detached=second_click("detach",1)
+            check(restored_detached["status"]=="BINDING_CLOSED" and
+                  restored_detached["processTerminated"] is False,
+                  "SECOND_HOST_DETACH_FAILED")
+            cmd("windowclose",second_window)
+            second_host.wait(timeout=10)
+            check(second_host.returncode==0,"SECOND_HOST_EXIT_NONZERO")
+            second_host=None
+            check(mod._read_start(pid)==opened["processStamp"],"SECOND_HOST_KILLED_EDITOR")
+            check(document.read_text(encoding="utf8")=="PRESERVE REAL USER DOCUMENT",
+                  "SECOND_HOST_CHANGED_USER_DOCUMENT")
             report.update(status="PASS",external_window=window,external_pid=pid,
-                          actual_gui_clicks=4,focus_events=2,
+                          actual_gui_clicks=6,focus_events=3,
                           independent_host_closed=True,external_survived=True,
                           new_bridge_instance=True,reattached_same_pid=True,
+                          second_host_independent_os_process=True,
+                          second_host_gui_closed=True,
                           reattach_focus_os_confirmed=True,
                           user_document_preserved=True,embedding_supported=False)
             print("U04_REAL_X11_GUI_PASS",json.dumps(report),flush=True)
         finally:
+            if second_host is not None and second_host.poll() is None:
+                second_host.terminate()
+                try: second_host.wait(timeout=7)
+                except subprocess.TimeoutExpired: second_host.kill()
             if state["external"]:
                 # Disposable test fixture cleanup, not a U04 closeBinding operation.
                 try:os.kill(state["external"],15)
