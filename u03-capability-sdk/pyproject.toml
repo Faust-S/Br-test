@@ -11,4 +11,4 @@ license = "MIT"
 
 [tool.setuptools]
 package-dir = {"" = "python"}
-py-modules = ["iwxa_capability_sdk", "host_binding", "u01_bridge", "t2_manifest"]
+py-modules = ["iwxa_capability_sdk", "host_binding", "u01_bridge", "t2_manifest", "program_card"]

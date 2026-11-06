@@ -1,0 +1,741 @@
+[
+  {
+    "case": "obsidian_data_only",
+    "args": {
+      "programId": "OBSIDIAN_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.obsidian_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW"
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "OBSIDIAN_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "capabilities": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "OBSIDIAN_V1",
+          "transport": "cli",
+          "status": "DECLARED",
+          "connected": true,
+          "connection_epoch": "epoch0000000000001",
+          "operations": []
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": false
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I1",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "OBSIDIAN_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": false,
+              "reason": "NO_OFFICIAL_TOOLKIT_EMBED_API"
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "iwxa.program.discovery": "AVAILABLE",
+      "iwxa.program.data.read": "AVAILABLE",
+      "iwxa.program.operation.execute": "BLOCKED",
+      "iwxa.program.window.linked": "BLOCKED",
+      "iwxa.program.surface.embedded": "BLOCKED",
+      "iwxa.program.surface.shared": "BLOCKED",
+      "iwxa.program.native.contract": "DECLARED"
+    },
+    "targets": {
+      "iwxa.program.surface.shared": "TARGET_NOT_QUALIFIED"
+    }
+  },
+  {
+    "case": "obsidian_native_window",
+    "args": {
+      "programId": "OBSIDIAN_NATIVE_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.obsidian_native_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW"
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "OBSIDIAN_NATIVE_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "capabilities": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "OBSIDIAN_NATIVE_V1",
+          "transport": "cli",
+          "status": "DECLARED",
+          "connected": true,
+          "connection_epoch": "epoch0000000000001",
+          "operations": [
+            {
+              "name": "evaluate",
+              "declared": true,
+              "verified": false
+            }
+          ]
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": false
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I1",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "OBSIDIAN_NATIVE_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": true
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": false,
+              "reason": "NO_OFFICIAL_TOOLKIT_EMBED_API"
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "iwxa.program.discovery": "AVAILABLE",
+      "iwxa.program.data.read": "AVAILABLE",
+      "iwxa.program.operation.execute": "INTEGRATED",
+      "iwxa.program.window.linked": "DECLARED",
+      "iwxa.program.surface.embedded": "BLOCKED",
+      "iwxa.program.surface.shared": "BLOCKED",
+      "iwxa.program.native.contract": "DECLARED"
+    },
+    "checks": {
+      "iwxa.program.operation.execute": {
+        "firstUseCandidate": true,
+        "executionConfirmed": false
+      },
+      "iwxa.program.window.linked": {
+        "verified": false,
+        "target": true,
+        "reason": "TARGET_NOT_QUALIFIED"
+      }
+    }
+  },
+  {
+    "case": "atlas_embedded_ui",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "capabilities": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DECLARED",
+          "connected": true,
+          "connection_epoch": "epoch0000000000001",
+          "operations": [
+            {
+              "name": "evaluate",
+              "declared": true,
+              "verified": true
+            }
+          ]
+        },
+        "receipts": {
+          "evaluate": {
+            "observation": {
+              "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+              "program_id": "ATLAS_UI_V1",
+              "transport": "cli",
+              "connection_epoch": "epoch0000000000001",
+              "status": "EXECUTED",
+              "executed": true,
+              "operation": "evaluate",
+              "output": "42"
+            },
+            "observationRef": "owner:atlas:operation:1"
+          }
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "iwxa.program.discovery": "AVAILABLE",
+      "iwxa.program.data.read": "AVAILABLE",
+      "iwxa.program.operation.execute": "EXECUTABLE",
+      "iwxa.program.window.linked": "BLOCKED",
+      "iwxa.program.surface.embedded": "DECLARED",
+      "iwxa.program.surface.shared": "BLOCKED",
+      "iwxa.program.native.contract": "DECLARED"
+    },
+    "checks": {
+      "iwxa.program.operation.execute": {
+        "executionConfirmed": true,
+        "verified": true
+      },
+      "iwxa.program.surface.embedded": {
+        "verified": false,
+        "target": true,
+        "reason": "TARGET_NOT_QUALIFIED"
+      }
+    }
+  },
+  {
+    "case": "browser_shared_live_target",
+    "args": {
+      "programId": "BROWSER_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.browser_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW"
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "BROWSER_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "capabilities": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "BROWSER_UI_V1",
+          "transport": "cli",
+          "status": "DECLARED",
+          "connected": true,
+          "connection_epoch": "epoch0000000000001",
+          "operations": []
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": false
+          },
+          {
+            "level": "I2",
+            "verified": false
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I0",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "BROWSER_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": false,
+              "reason": "NO_OFFICIAL_TOOLKIT_EMBED_API"
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": true
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "iwxa.program.discovery": "AVAILABLE",
+      "iwxa.program.data.read": "DECLARED",
+      "iwxa.program.operation.execute": "BLOCKED",
+      "iwxa.program.window.linked": "BLOCKED",
+      "iwxa.program.surface.embedded": "BLOCKED",
+      "iwxa.program.surface.shared": "DECLARED",
+      "iwxa.program.native.contract": "DECLARED"
+    },
+    "checks": {
+      "iwxa.program.surface.shared": {
+        "verified": false,
+        "target": true,
+        "reason": "TARGET_NOT_QUALIFIED"
+      }
+    }
+  }
+]

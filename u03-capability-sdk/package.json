@@ -12,7 +12,8 @@
     ".": "./src/capability.mjs",
     "./host-binding": "./src/host-binding.mjs",
     "./u01-bridge": "./src/u01-bridge.mjs",
-    "./t2-manifest": "./src/t2-manifest.mjs"
+    "./t2-manifest": "./src/t2-manifest.mjs",
+    "./program-card": "./src/program-card.mjs"
   },
   "files": [
     "src/"
