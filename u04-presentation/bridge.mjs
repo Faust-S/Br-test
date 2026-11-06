@@ -69,7 +69,8 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
   async function reattach({appRef,hostRef,pid,processStamp}) {
     if(!token(appRef)||!token(hostRef)||!Number.isSafeInteger(pid)||pid<=0||
        !token(processStamp))return {schema:SCHEMA,status:"PRESENTATION_BINDING_INVALID"};
-    if(!nativeReady||typeof adapter.reattach!=="function" ||
+    if(!nativeReady||adapter.reattachAvailable===false ||
+       typeof adapter.reattach!=="function" ||
        typeof adapter.verifyProcessIdentity!=="function")
       return {schema:SCHEMA,status:"REATTACH_UNSUPPORTED"};
     let bindingRef;
@@ -77,6 +78,10 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
     let result;
     try {result=await adapter.reattach({appRef,hostRef,pid,processStamp});}
     catch {return {schema:SCHEMA,status:"REATTACH_FAILED"};}
+    if(result?.status==="REATTACH_UNSUPPORTED")
+      return {schema:SCHEMA,status:"REATTACH_UNSUPPORTED"};
+    if(result?.status==="PROCESS_IDENTITY_CHANGED")
+      return {schema:SCHEMA,status:"PROCESS_IDENTITY_CHANGED"};
     if(result?.status!=="REATTACHED"||result.pid!==pid ||
        result.processStamp!==processStamp || result.spawned!==false)
       return {schema:SCHEMA,status:"PROCESS_IDENTITY_UNVERIFIED"};
