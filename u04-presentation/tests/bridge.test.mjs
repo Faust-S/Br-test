@@ -145,5 +145,5 @@ test("Agent 0.3 Windows reattach remains unavailable without host-provided nativ
    pid:1,processStamp:"native"})).status,"REATTACH_UNSUPPORTED");
  assert.equal((await createPresentationBridge(adapter).reattach({
    appRef:"obsidian",hostRef:"agent",pid:1,processStamp:"native"
- })).status,"PROCESS_IDENTITY_UNVERIFIED");
+ })).status,"REATTACH_UNSUPPORTED");
 });
