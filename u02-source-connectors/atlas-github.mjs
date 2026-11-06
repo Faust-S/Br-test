@@ -51,8 +51,11 @@ export function createGitHubSourcePort({repository, branch, relativePath,
         return observe('REVISION_REQUIRED');
       const url = `https://api.github.com/repos/${repository}/contents/${encodePath(relativePath)}?ref=${pinned.revision}`;
       let response;
-      try {response = await fetcher(url, {headers: {Accept: 'application/vnd.github+json'}});}
+      try {response = await fetcher(url, {headers: {Accept: 'application/vnd.github+json'}, redirect: 'error'});}
       catch {return observe('SOURCE_UNAVAILABLE');}
+      if (response?.redirected === true ||
+          (typeof response?.url === 'string' && response.url && response.url !== url))
+        return observe('SOURCE_UNAVAILABLE');
       if (response?.status === 404) return observe(access === 'authorized' ? 'ACCESS_UNKNOWN' : 'SOURCE_MISSING');
       if (response?.status === 429 || (response?.status === 403 &&
             response?.headers?.get?.('x-ratelimit-remaining') === '0'))
