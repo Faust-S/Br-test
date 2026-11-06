@@ -1,5 +1,7 @@
 """Ephemeral, read-only discovery and CLI capability connection for multiple hosts."""
+import hashlib
 import os
+import secrets
 from pathlib import Path
 import re
 import shutil
@@ -27,6 +29,13 @@ def validate_spec(data):
     ops = data.get("operations")
     if not isinstance(ops, dict) or not ops:
         raise ValueError("CLI_OPERATIONS_INVALID")
+    expected = data.get("executable_sha256")
+    if expected is not None and (
+        not isinstance(expected, str) or re.fullmatch(r"[a-f0-9]{64}", expected) is None
+    ):
+        raise ValueError("CLI_DIGEST_INVALID")
+    if "requires_running" in data and not isinstance(data["requires_running"], bool):
+        raise ValueError("CLI_RUNNING_POLICY_INVALID")
     for args in [data.get("version_args"), *ops.values()]:
         if not isinstance(args, list) or len(args) > 24 or any(
             not isinstance(x, str) or len(x) > 2048 or "\0" in x for x in args
@@ -40,14 +49,17 @@ def bind_arguments(args, params):
         params = {}
     if not isinstance(params, dict) or len(params) > 8:
         raise ProgramError("CLI_INPUT_INVALID")
-    declared = {arg[1:-1] for arg in args if re.fullmatch(r"\{[a-z][a-z0-9_]*\}", arg)}
+    def key(arg):
+        match = re.fullmatch(r"(?:[a-z][a-z0-9_-]*=)?\{([a-z][a-z0-9_]*)\}", arg)
+        return match.group(1) if match else None
+    declared = {key(arg) for arg in args if key(arg) is not None}
     if set(params) != declared or any(
         not isinstance(value, str) or len(value) > 16384 or "\0" in value
         for value in params.values()
     ):
         raise ProgramError("CLI_INPUT_INVALID")
-    return [params[arg[1:-1]] if arg[1:-1] in declared and
-            re.fullmatch(r"\{[a-z][a-z0-9_]*\}", arg) else arg for arg in args]
+    return [((arg.partition("=")[0] + "=") if not arg.startswith("{") else "") +
+            params[key(arg)] if key(arg) is not None else arg for arg in args]
 
 
 def version_matches(output, target):
@@ -124,16 +136,73 @@ def run_command(path, args):
 
 class CliConnection:
     """Host owns executable selection, consent, receipts, storage and install."""
-    def __init__(self, spec, executable=None):
+    def __init__(self, spec, executable=None, *, process_probe=None):
         self.spec = validate_spec(spec)
         self.requested = executable
         self.path = None
         self._identity = None
         self._verified = set()
+        self._epoch = None
+        self._process_probe = process_probe
+        self._unavailable = None
 
     def observation(self, status, **extra):
+        epoch = ({"connection_epoch": self._epoch} if self._epoch and
+                 status in ("CONNECTED", "DECLARED", "EXECUTED") else {})
         return dict(schema=SCHEMA, program_id=self.spec["program_id"],
-                    transport="cli", status=status, **extra)
+                    transport="cli", status=status, **epoch, **extra)
+
+    def process_observation(self):
+        if not callable(self._process_probe):
+            return {"process": "UNKNOWN", "running": None}
+        try:
+            proof = self._process_probe(self.spec["program_id"])
+        except Exception:
+            return {"process": "UNKNOWN", "running": None}
+        if not isinstance(proof, dict) or proof.get("verified") is not True or (
+            proof.get("program_id") != self.spec["program_id"]
+        ):
+            return {"process": "UNKNOWN", "running": None}
+        if proof.get("status") == "NOT_RUNNING":
+            return {"process": "NOT_RUNNING", "running": False}
+        pid, stamp = proof.get("pid"), proof.get("processStamp")
+        if (proof.get("status") != "RUNNING" or proof.get("spawned") is not False or
+                type(pid) is not int or pid <= 0 or not isinstance(stamp, str) or
+                not 8 <= len(stamp) <= 256 or any(ord(char) < 32 for char in stamp)):
+            return {"process": "UNKNOWN", "running": None}
+        return {"process": "RUNNING", "running": True, "process_id": pid,
+                "process_stamp": stamp, "process_proof": "HOST_OS_OBSERVATION"}
+
+    def installation_identity(self, path):
+        expected = self.spec.get("executable_sha256")
+        if expected is None:
+            return {"installation_verified": False, "installation_reason": "PIN_NOT_PROVIDED"}
+        try:
+            before = os.stat(path, follow_symlinks=False)
+            if before.st_size > 1_073_741_824:
+                return {"installation_verified": False, "installation_reason": "BINARY_TOO_LARGE"}
+            digest = hashlib.sha256()
+            with open(path, "rb") as stream:
+                for part in iter(lambda: stream.read(65536), b""):
+                    digest.update(part)
+            after = os.stat(path, follow_symlinks=False)
+            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
+                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
+            ):
+                return {"installation_verified": False,
+                        "installation_reason": "INSTALLATION_CHANGED_DURING_READBACK"}
+            value = digest.hexdigest()
+        except OSError:
+            return {"installation_verified": False,
+                    "installation_reason": "INSTALLATION_READBACK_FAILED"}
+        if value != expected:
+            return {"installation_verified": False,
+                    "installation_reason": "EXECUTABLE_DIGEST_MISMATCH"}
+        return {"installation_verified": True, "installation_identity": {
+            "program_id": self.spec["program_id"], "executable": str(path),
+            "sha256": value, "identity_source": "PINNED_BINARY_SHA256_READBACK",
+            "verified": True}}
+
 
     def inspect(self):
         """Never runs the program or modifies its installation."""
@@ -143,25 +212,39 @@ class CliConnection:
             if file.is_file() and not file.is_symlink() and (
                 os.name == "nt" or os.access(file, os.X_OK)
             ):
-                return self.observation("DISCOVERED", installed=True,
-                                        path=str(file.resolve()), connected=False,
-                                        architecture="UNKNOWN", ownership="UNKNOWN",
-                                        interfaces=["cli"], process="UNKNOWN")
+                resolved = str(file.resolve())
+                identity = self.installation_identity(resolved)
+                return self.observation(
+                    "INSTALLATION_MISMATCH" if self.spec.get("executable_sha256") and
+                    not identity["installation_verified"] else "DISCOVERED",
+                    installed=True, path=resolved, connected=False,
+                    architecture="UNKNOWN", ownership="UNKNOWN",
+                    interfaces=["cli"], **identity, **self.process_observation())
         return self.observation("NOT_FOUND", installed=False, connected=False,
                                 architecture="UNKNOWN", ownership="UNKNOWN",
-                                interfaces=[], process="UNKNOWN")
+                                interfaces=[], installation_verified=False,
+                                **self.process_observation())
 
     def connect(self):
         found = self.inspect()
-        if not found["installed"]:
+        if found["status"] != "DISCOVERED":
             self.disconnect()
+            self._unavailable = found["status"]
             return found
+        if self.spec.get("requires_running") and found.get("running") is not True:
+            self.disconnect()
+            status = ("PROCESS_NOT_RUNNING" if found.get("running") is False
+                      else "RUNNING_PROCESS_UNVERIFIED")
+            self._unavailable = status
+            return self.observation(status, installed=True, connected=False,
+                                    **self.process_observation())
         identity = executable_identity(found["path"])
         if identity is None:
             self.disconnect()
             return self.observation("NOT_FOUND", installed=False, connected=False)
         if self.path != found["path"] or self._identity != identity:
             self._verified.clear()
+            self._epoch = None
         try:
             code, version = run_command(found["path"], self.spec["version_args"])
         except ProgramError as error:
@@ -173,8 +256,13 @@ class CliConnection:
                                     connected=False)
         self.path = found["path"]
         self._identity = identity
+        if self._epoch is None:
+            self._epoch = secrets.token_hex(16)
+        self._unavailable = None
         return self.observation("CONNECTED", installed=True, connected=True,
-                                path=self.path, version=version.strip()[:256])
+                                path=self.path, version=version.strip()[:256],
+                                **self.installation_identity(self.path),
+                                **self.process_observation())
 
     def verify(self):
         if not self.path:
@@ -188,9 +276,23 @@ class CliConnection:
         lost = bool(self.path) and executable_identity(self.path) != self._identity
         if lost:
             self.disconnect()
+        identity = self.installation_identity(self.path) if self.path else {}
+        mismatch = bool(self.path) and bool(self.spec.get("executable_sha256")) and not (
+            identity["installation_verified"])
+        running = self.process_observation()
+        process_lost = bool(self.path) and bool(self.spec.get("requires_running")) and (
+            running["running"] is not True)
+        if mismatch or process_lost:
+            self.disconnect()
+        if process_lost:
+            self._unavailable = ("PROCESS_NOT_RUNNING" if running["running"] is False
+                                 else "RUNNING_PROCESS_UNVERIFIED")
         return self.observation(
-            "CONNECTION_LOST" if lost else ("DECLARED" if self.path else "NOT_CONNECTED"),
-            connected=bool(self.path),
+            "CONNECTION_LOST" if lost else "INSTALLATION_MISMATCH" if mismatch else
+            self._unavailable if process_lost else
+            "DECLARED" if self.path else "NOT_CONNECTED",
+            connected=bool(self.path), **identity, **running,
+            **({"unavailable_reason": self._unavailable} if self._unavailable else {}),
             operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])
 
@@ -200,6 +302,20 @@ class CliConnection:
         if executable_identity(self.path) != self._identity:
             self.disconnect()
             return self.observation("CONNECTION_LOST", executed=False)
+        if self.spec.get("executable_sha256") and not (
+            self.installation_identity(self.path)["installation_verified"]
+        ):
+            self.disconnect()
+            self._unavailable = "INSTALLATION_MISMATCH"
+            return self.observation("INSTALLATION_MISMATCH", executed=False)
+        if self.spec.get("requires_running"):
+            observation = self.process_observation()
+            if observation["running"] is not True:
+                self.disconnect()
+                status = ("PROCESS_NOT_RUNNING" if observation["running"] is False
+                          else "RUNNING_PROCESS_UNVERIFIED")
+                self._unavailable = status
+                return self.observation(status, executed=False, **observation)
         args = self.spec["operations"].get(operation)
         if args is None:
             return self.observation("OPERATION_UNSUPPORTED", executed=False)
@@ -214,12 +330,14 @@ class CliConnection:
                                     exit_code=code)
         self._verified.add(operation)
         return self.observation("EXECUTED", executed=True, operation=operation,
-                                output=output,
+                                **self.installation_identity(self.path),
+                                **self.process_observation(), output=output,
                                 elapsed_ms=round((time.perf_counter()-start)*1000, 3))
 
     def disconnect(self):
         self.path = None
         self._identity = None
+        self._epoch = None
         self._verified.clear()
         return self.observation("DISCONNECTED", connected=False)
 

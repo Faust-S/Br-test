@@ -1,4 +1,5 @@
 """Cross-platform native CLI invocation and real Windows no-console verification."""
+import hashlib
 import os
 import sys
 import time
@@ -37,6 +38,90 @@ class CliProcessHostTest(unittest.TestCase):
         self.assertEqual(connection.disconnect()["status"], "DISCONNECTED")
         self.assertEqual(connection.recover()["status"], "CONNECTED")
         self.assertEqual(connection.capabilities()["operations"][0]["verified"], False)
+
+    def test_pinned_installed_identity_and_two_stable_sessions(self):
+        executable = str(Path(sys.executable).resolve())
+        digest = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {
+            "schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_EXISTING_APP",
+            "executable_name": Path(executable).name,
+            "executable_sha256": digest, "requires_running": True,
+            "version_args": ["--version"], "version_contains": version,
+            "operations": {"compute": ["-c", "print(6*7)"],
+                           "with_value": ["-c", "import sys;print(sys.argv[1])",
+                                          "file={note}"]}
+        }
+        evidence = {"program_id": "PYTHON_EXISTING_APP", "verified": True,
+                    "status": "RUNNING", "spawned": False,
+                    "pid": os.getpid(), "processStamp": "os-process-stamp-1"}
+        observe = lambda _program_id: dict(evidence)
+        first = CliConnection(spec, executable, process_probe=observe)
+        second = CliConnection(spec, executable, process_probe=observe)
+        inspection = first.inspect()
+        self.assertEqual(inspection["status"], "DISCOVERED")
+        self.assertTrue(inspection["installation_verified"])
+        self.assertEqual(inspection["installation_identity"]["sha256"], digest)
+        self.assertTrue(inspection["running"])
+        connected = first.connect()
+        self.assertEqual(connected["status"], "CONNECTED")
+        self.assertEqual(connected["process_id"], os.getpid())
+        self.assertEqual(second.connect()["status"], "CONNECTED")
+        self.assertEqual(second.capabilities()["status"], "DECLARED")
+        self.assertNotEqual(first.capabilities()["connection_epoch"],
+                            second.capabilities()["connection_epoch"])
+        result = first.invoke("compute")
+        self.assertEqual(result["output"].strip(), "42")
+        self.assertEqual(result["connection_epoch"], connected["connection_epoch"])
+        self.assertEqual(second.invoke("with_value",
+                                       {"note": "a b.md"})["output"].strip(),
+                         "file=a b.md")
+        self.assertEqual(first.capabilities()["status"], "DECLARED")
+        self.assertEqual(first.capabilities()["operations"][0]["verified"], True)
+        self.assertEqual(first.verify()["connection_epoch"], connected["connection_epoch"])
+        self.assertEqual(first.disconnect()["status"], "DISCONNECTED")
+        self.assertEqual(second.invoke("compute")["status"], "EXECUTED")
+        self.assertEqual(second.recover()["status"], "CONNECTED")
+        self.assertEqual(second.capabilities()["status"], "DECLARED")
+        evidence["status"] = "NOT_RUNNING"
+        self.assertEqual(second.invoke("compute")["status"], "PROCESS_NOT_RUNNING")
+        self.assertEqual(second.capabilities()["status"], "NOT_CONNECTED")
+        self.assertEqual(second.connect()["status"], "PROCESS_NOT_RUNNING")
+        evidence["status"] = "RUNNING"
+        self.assertEqual(second.recover()["status"], "CONNECTED")
+        self.assertNotEqual(second.capabilities()["connection_epoch"],
+                            connected["connection_epoch"])
+
+    def test_pinned_installation_digest_mismatch_is_not_a_connected_program(self):
+        executable = str(Path(sys.executable).resolve())
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_PIN_MISMATCH",
+                "executable_name": Path(executable).name,
+                "executable_sha256": "0"*64,
+                "version_args": ["--version"], "version_contains": "Python",
+                "operations": {"compute": ["-c", "print(42)"]}}
+        conn = CliConnection(spec, executable)
+        self.assertEqual(conn.inspect()["status"], "INSTALLATION_MISMATCH")
+        self.assertFalse(conn.inspect()["installation_verified"])
+        self.assertEqual(conn.connect()["status"], "INSTALLATION_MISMATCH")
+        self.assertEqual(conn.capabilities()["status"], "NOT_CONNECTED")
+        self.assertEqual(conn.invoke("compute")["status"], "NOT_CONNECTED")
+
+    def test_running_process_proof_must_be_supplied_by_host(self):
+        executable = str(Path(sys.executable).resolve())
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_NEEDS_RUNNING",
+                "executable_name": Path(executable).name,
+                "requires_running": True, "version_args": ["--version"],
+                "version_contains": "Python",
+                "operations": {"compute": ["-c", "print(42)"]}}
+        missing = CliConnection(spec, executable)
+        self.assertEqual(missing.connect()["status"], "RUNNING_PROCESS_UNVERIFIED")
+        self.assertEqual(missing.capabilities()["unavailable_reason"],
+                         "RUNNING_PROCESS_UNVERIFIED")
+        spoofed = CliConnection(spec, executable, process_probe=lambda _: {
+            "program_id": "PYTHON_NEEDS_RUNNING", "status": "RUNNING",
+            "verified": False, "spawned": False, "pid": os.getpid(),
+            "processStamp": "os-stamp-123456"})
+        self.assertEqual(spoofed.connect()["status"], "RUNNING_PROCESS_UNVERIFIED")
 
     def test_excessive_output_is_rejected_before_timeout(self):
         for stream in ("stdout", "stderr"):
