@@ -30,7 +30,7 @@ test("launch, real observed window identity, re-observed repeated focus and harm
 test("capabilities refuse unsupported official embedding, no speculative I4",()=>{
  const bridge=fixture().bridge;
  const modes=bridge.capabilities().capabilities;
- assert.deepEqual(modes.map(x=>x.mode),["LAUNCH","FOCUS","LINKED_WINDOW","EMBEDDED_VIEW"]);
+ assert.deepEqual(modes.map(x=>x.mode),["LAUNCH","FOCUS","LINKED_WINDOW","EMBEDDED_VIEW","SHARED_LIVE_SURFACE"]);
  assert.equal(modes.at(-1).supported,false);
  assert.equal(modes.at(-1).reason,"NO_OFFICIAL_TOOLKIT_EMBED_API");
 });
