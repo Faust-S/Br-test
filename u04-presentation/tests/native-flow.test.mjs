@@ -56,7 +56,7 @@ test("native reattach refuses missing OS verifier and false process identity",as
     processStamp,spawned:true}}};
  const bridge=createPresentationBridge(a);
  assert.equal((await bridge.reattach({appRef:"obsidian",hostRef:"agent",
-   pid:12,processStamp:"stamp"})).status,"PROCESS_IDENTITY_UNVERIFIED");
+   pid:12,processStamp:"stamp"})).status,"REATTACH_UNSUPPORTED");
  assert.equal((await bridge.reattach({appRef:"obsidian",hostRef:"agent",
    pid:12,processStamp:""})).status,"PRESENTATION_BINDING_INVALID");
 });
