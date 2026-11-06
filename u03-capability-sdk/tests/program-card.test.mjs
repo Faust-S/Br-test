@@ -52,7 +52,7 @@ test('stale U01 receipts and lost UI window cannot appear as current execution',
  assert.equal(by.OPERATION.reason,'execution-receipt-missing');
  assert.equal(by.EMBEDDED_VIEW.state,'DECLARED');
  const linked=structuredClone(cases.find(c=>c.case==='obsidian_native_window').args);
- linked.presentation.observations.LINKED_WINDOW.status='WINDOW_NOT_FOUND';
+ linked.presentation.observations.LINKED_WINDOW={schema:'IWXA_PRESENTATION_BRIDGE/1.0.0',status:'WINDOW_NOT_FOUND',binding:{appRef:'OBSIDIAN_NATIVE_V1',hostRef:'agent-host',bindingRef:'window:lost',windowRef:'native:lost',processId:12}};
  const by2=Object.fromEntries(projectProgramCard(linked).capabilities.map(x=>[x.kind,x]));
  assert.equal(by2.LINKED_WINDOW.state,'BLOCKED');
  assert.equal(by2.LINKED_WINDOW.verified,false);

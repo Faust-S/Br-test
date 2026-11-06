@@ -41,12 +41,12 @@ class ProgramCardConsumers(unittest.TestCase):
         result=by_kind(project_program_card(**sample))
         self.assertEqual(result['OPERATION']['state'],'BLOCKED')
         self.assertEqual(result['OPERATION']['reason'],'execution-receipt-missing')
-        self.assertEqual(result['EMBEDDED_VIEW']['state'],'AVAILABLE')
+        self.assertEqual(result['EMBEDDED_VIEW']['state'],'DECLARED')
 
     def test_window_does_not_imply_embed(self):
         case=next(c for c in CASES if c['case']=='obsidian_native_window')
         rows=by_kind(project(case))
-        self.assertEqual(rows['LINKED_WINDOW']['state'],'AVAILABLE')
+        self.assertEqual(rows['LINKED_WINDOW']['state'],'DECLARED')
         self.assertEqual(rows['EMBEDDED_VIEW']['state'],'BLOCKED')
         self.assertFalse(rows['OPERATION']['executionConfirmed'])
 
