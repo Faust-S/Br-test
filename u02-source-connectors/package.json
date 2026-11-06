@@ -10,7 +10,8 @@
     ".": "./index.mjs",
     "./schema": "./source-connector-v1.schema.json",
     "./web": "./web.mjs",
-    "./task-source-schema": "./task-source-link-v1.schema.json"
+    "./task-source-schema": "./task-source-link-v1.schema.json",
+    "./agent03": "./consumers/agent03-evidence.mjs"
   },
   "files": [
     "index.mjs",
@@ -27,6 +28,7 @@
     "cli-source.mjs",
     "source-connector-v1.schema.json",
     "task-object.mjs",
-    "task-source-link-v1.schema.json"
+    "task-source-link-v1.schema.json",
+    "consumers/agent03-evidence.mjs"
   ]
 }
