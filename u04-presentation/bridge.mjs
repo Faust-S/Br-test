@@ -69,7 +69,8 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
   async function reattach({appRef,hostRef,pid,processStamp}) {
     if(!token(appRef)||!token(hostRef)||!Number.isSafeInteger(pid)||pid<=0||
        !token(processStamp))return {schema:SCHEMA,status:"PRESENTATION_BINDING_INVALID"};
-    if(!nativeReady||typeof adapter.reattach!=="function")
+    if(!nativeReady||typeof adapter.reattach!=="function" ||
+       typeof adapter.verifyProcessIdentity!=="function")
       return {schema:SCHEMA,status:"REATTACH_UNSUPPORTED"};
     let bindingRef;
     try {bindingRef=randomUUID();} catch {return {schema:SCHEMA,status:"BINDING_ID_UNAVAILABLE"};}
@@ -80,7 +81,7 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
        result.processStamp!==processStamp || result.spawned!==false)
       return {schema:SCHEMA,status:"PROCESS_IDENTITY_UNVERIFIED"};
     const binding={bindingRef,appRef,hostRef,pid,
-      processStamp,windowRef:null};
+      processStamp,revalidated:true,windowRef:null};
     bindings.set(binding.bindingRef,binding);
     let observed;
     try{observed=await adapter.observe({pid,appRef,processStamp});}
@@ -94,7 +95,10 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
   async function activate({bindingRef,hostRef}) {
     const binding=bindings.get(bindingRef);
     if (!binding || binding.hostRef !== hostRef) return {schema:SCHEMA,status:"BINDING_NOT_FOUND",focused:false};
-    if(binding.processStamp && typeof adapter.verifyProcessIdentity==="function") {
+    if(binding.processStamp && (binding.revalidated===true ||
+       typeof adapter.verifyProcessIdentity==="function")) {
+      if(typeof adapter.verifyProcessIdentity!=="function")
+        return view(binding,"PROCESS_IDENTITY_UNVERIFIED",{focused:false});
       const proof=await (async()=>{try{return await adapter.verifyProcessIdentity({
         pid:binding.pid,processStamp:binding.processStamp});}catch{return null}})();
       if(proof?.verified!==true) return view(binding,"PROCESS_IDENTITY_CHANGED",{focused:false});
