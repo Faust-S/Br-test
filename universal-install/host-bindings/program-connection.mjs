@@ -127,6 +127,8 @@ export class CliConnection {
     this.processProbe=processProbe;
     this.verified=new Set();
     this.lastUnavailable=null;
+    this.processRef=null;
+    this.pinCache=null;
   }
   observation(status,detail={}) {return {schema:SCHEMA,program_id:this.spec.program_id,
     transport:"cli",status,
@@ -136,14 +138,32 @@ export class CliConnection {
   installationIdentity(path){
     if(!this.spec.executable_sha256)return {installation_verified:false,
       installation_reason:"PIN_NOT_PROVIDED"};
-    let digest;
-    try{digest=pinnedHash(path);}catch{return {installation_verified:false,
+    const identity=executableIdentity(path);
+    if(!identity){this.pinCache=null;return {installation_verified:false,
       installation_reason:"INSTALLATION_READBACK_FAILED"};}
-    if(digest!==this.spec.executable_sha256)return {installation_verified:false,
-      installation_reason:"EXECUTABLE_DIGEST_MISMATCH"};
+    const key=path+"|"+identity+"|"+this.spec.executable_sha256;
+    let digest;
+    if(this.pinCache===key)digest=this.spec.executable_sha256;
+    else {
+      this.pinCache=null;
+      try{digest=pinnedHash(path);}catch{return {installation_verified:false,
+        installation_reason:"INSTALLATION_READBACK_FAILED"};}
+      if(executableIdentity(path)!==identity)return {installation_verified:false,
+        installation_reason:"INSTALLATION_CHANGED_DURING_READBACK"};
+      if(digest!==this.spec.executable_sha256)return {installation_verified:false,
+        installation_reason:"EXECUTABLE_DIGEST_MISMATCH"};
+      this.pinCache=key;
+    }
     return {installation_verified:true,installation_identity:{
       program_id:this.spec.program_id,executable:path,sha256:digest,
       identity_source:"PINNED_BINARY_SHA256_READBACK",verified:true}};
+  }
+  processKey(observation){
+    return observation.running===true?String(observation.process_id)+":"+
+      observation.process_stamp:null;
+  }
+  processReason(observation){
+    return observation.running===false?"PROCESS_NOT_RUNNING":"RUNNING_PROCESS_UNVERIFIED";
   }
   inspect() {
     let path=this.requested??located(this.spec.executable_name);
@@ -167,20 +187,23 @@ export class CliConnection {
   }
   connect() {
     const found=this.inspect();
-    if(found.status!=="DISCOVERED"){this.disconnect();
-      this.lastUnavailable=found.status;
-      return found;}
-    if(this.spec.requires_running&&found.running!==true){
+    if(found.status!=="DISCOVERED"){
+      this.disconnect();this.lastUnavailable=found.status;return found;
+    }
+    const required=this.spec.requires_running===true;
+    const initialProcess=required?this.processKey(found):null;
+    if(required&&!initialProcess){
       this.disconnect();
-      const status=found.running===false?"PROCESS_NOT_RUNNING":"RUNNING_PROCESS_UNVERIFIED";
+      const status=this.processReason(found);
       this.lastUnavailable=status;
       return this.observation(status,{installed:true,connected:false,
-        installation_verified:found.installation_verified,...this.processObservation()});
+        ...this.processObservation()});
     }
     const identity=executableIdentity(found.path);
     if(!identity){this.disconnect();
       return this.observation("NOT_FOUND",{installed:false,connected:false});}
-    if(this.path!==found.path||this.identity!==identity){
+    if(this.path!==found.path||this.identity!==identity||
+       (required&&this.processRef!==initialProcess)){
       this.verified.clear();this.epoch=null;
     }
     const r=run(found.path,this.spec.version_args);
@@ -188,74 +211,109 @@ export class CliConnection {
       this.disconnect();this.lastUnavailable="VERSION_UNVERIFIED";
       return this.observation("VERSION_UNVERIFIED",{installed:true,connected:false});
     }
-    this.path=found.path;
-    this.identity=identity;
+    if(executableIdentity(found.path)!==identity){
+      this.disconnect();this.lastUnavailable="CONNECTION_LOST";
+      return this.observation("CONNECTION_LOST",{installed:true,connected:false});
+    }
+    if(required){
+      const running=this.processObservation();
+      if(this.processKey(running)!==initialProcess){
+        this.disconnect();
+        const status=this.processKey(running)?"PROCESS_CHANGED":this.processReason(running);
+        this.lastUnavailable=status;
+        return this.observation(status,{installed:true,connected:false,...running});
+      }
+    }
+    const installation=this.installationIdentity(found.path);
+    if(this.spec.executable_sha256&&!installation.installation_verified){
+      this.disconnect();this.lastUnavailable="INSTALLATION_MISMATCH";
+      return this.observation("INSTALLATION_MISMATCH",{installed:true,connected:false});
+    }
+    this.path=found.path;this.identity=identity;this.processRef=initialProcess;
     if(!this.epoch)this.epoch=randomUUID();
     this.lastUnavailable=null;
     return this.observation("CONNECTED",{installed:true,connected:true,
       path:this.path,version:r.output.trim().slice(0,256),
-      ...this.installationIdentity(this.path),...this.processObservation()});
+      ...installation,...this.processObservation()});
   }
   verify(){
     if(!this.path)return this.observation("NOT_CONNECTED",{connected:false});
     if(executableIdentity(this.path)!==this.identity){
       this.disconnect();return this.observation("CONNECTION_LOST",{connected:false});
     }
+    this.pinCache=null; // An explicit verify rechecks bytes, not only metadata.
     return this.connect();
   }
   capabilities(){
-    const lost=!!this.path && executableIdentity(this.path)!==this.identity;
+    const lost=!!this.path&&executableIdentity(this.path)!==this.identity;
     if(lost)this.disconnect();
     const installed=this.path?this.installationIdentity(this.path):null;
-    const mismatch=!!installed&&!!this.spec.executable_sha256&&!installed.installation_verified;
+    const mismatch=!!this.path&&!!this.spec.executable_sha256&&!installed.installation_verified;
     const running=this.processObservation();
-    const processLost=!!this.path&&this.spec.requires_running&&running.running!==true;
-    if(mismatch||processLost)this.disconnect();
-    if(processLost)this.lastUnavailable=running.running===false?"PROCESS_NOT_RUNNING":"RUNNING_PROCESS_UNVERIFIED";
-    return this.observation(lost?"CONNECTION_LOST":mismatch?"INSTALLATION_MISMATCH":
-      processLost?this.lastUnavailable:this.path?"DECLARED":"NOT_CONNECTED",{
-      connected:!!this.path, ...(installed??{}),...running,
+    const processStatus=this.path&&this.spec.requires_running&&
+      this.processKey(running)!==this.processRef?
+      (this.processKey(running)?"PROCESS_CHANGED":this.processReason(running)):null;
+    if(mismatch||processStatus){
+      this.disconnect();this.lastUnavailable=mismatch?"INSTALLATION_MISMATCH":processStatus;
+    }
+    const status=lost?"CONNECTION_LOST":mismatch?"INSTALLATION_MISMATCH":
+      processStatus??(this.path?"DECLARED":"NOT_CONNECTED");
+    return this.observation(status,{connected:!!this.path,
+      ...(installed??{}),...running,
       ...(this.lastUnavailable?{unavailable_reason:this.lastUnavailable}:{}),
       operations:Object.keys(this.spec.operations).sort()
-       .map(name=>({name,declared:true,verified:this.verified.has(name)}))});
+        .map(name=>({name,declared:true,verified:this.verified.has(name)}))});
   }
   invoke(operation,params={}) {
-    if(!this.path) return this.observation("NOT_CONNECTED",{executed:false,
+    if(!this.path)return this.observation("NOT_CONNECTED",{executed:false,
+      executionOutcome:"NONE",
       ...(this.lastUnavailable?{unavailable_reason:this.lastUnavailable}:{})});
     if(executableIdentity(this.path)!==this.identity){
-      this.disconnect();return this.observation("CONNECTION_LOST",{executed:false});
+      this.disconnect();return this.observation("CONNECTION_LOST",
+        {executed:false,executionOutcome:"NONE"});
     }
     if(this.spec.executable_sha256&&!this.installationIdentity(this.path).installation_verified){
       this.disconnect();this.lastUnavailable="INSTALLATION_MISMATCH";
-      return this.observation("INSTALLATION_MISMATCH",{executed:false});
+      return this.observation("INSTALLATION_MISMATCH",{executed:false,executionOutcome:"NONE"});
     }
     if(this.spec.requires_running){
-      const running=this.processObservation();
-      if(running.running!==true){
+      const running=this.processObservation(),key=this.processKey(running);
+      if(key!==this.processRef){
         this.disconnect();
-        const status=running.running===false?"PROCESS_NOT_RUNNING":"RUNNING_PROCESS_UNVERIFIED";
+        const status=key?"PROCESS_CHANGED":this.processReason(running);
         this.lastUnavailable=status;
-        return this.observation(status,{executed:false,...running});
+        return this.observation(status,{executed:false,executionOutcome:"NONE",...running});
       }
     }
-    // Only own manifest entries are allowed. Inherited Object methods such as
-    // "constructor" or "toString" must never be treated as CLI operations.
     if(typeof operation!=="string"||!Object.hasOwn(this.spec.operations,operation))
-      return this.observation("OPERATION_UNSUPPORTED",{executed:false});
-    const args=this.spec.operations[operation];
+      return this.observation("OPERATION_UNSUPPORTED",{executed:false,
+        executionOutcome:"NONE"});
     let bound;
-    try{bound=bindArgs(args,params)}catch{
-      return this.observation("CLI_INPUT_INVALID",{executed:false});
+    try{bound=bindArgs(this.spec.operations[operation],params);}catch{
+      return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
     }
     const begin=performance.now(),r=run(this.path,bound);
-    if(r.status!=="EXECUTED")return this.observation(r.status,{
-      executed:false,exit_code:r.code});
+    if(r.status!=="EXECUTED")return this.observation(r.status,
+      {executed:false,executionOutcome:"UNKNOWN",exit_code:r.code});
+    const installation=this.installationIdentity(this.path);
+    if(this.spec.executable_sha256&&!installation.installation_verified){
+      this.disconnect();this.lastUnavailable="INSTALLATION_MISMATCH";
+      return this.observation("INSTALLATION_MISMATCH",
+        {executed:false,executionOutcome:"UNKNOWN"});
+    }
+    const process=this.processObservation();
+    if(this.spec.requires_running&&this.processKey(process)!==this.processRef){
+      const status=this.processKey(process)?"PROCESS_CHANGED":this.processReason(process);
+      this.disconnect();this.lastUnavailable=status;
+      return this.observation(status,{executed:false,executionOutcome:"UNKNOWN",...process});
+    }
     this.verified.add(operation);
     return this.observation("EXECUTED",{executed:true,operation,
-      ...this.installationIdentity(this.path),...this.processObservation(),
+      executionOutcome:"ACKNOWLEDGED",...installation,...process,
       output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
   }
-  disconnect(){this.path=null;this.identity=null;this.epoch=null;this.verified.clear();
+  disconnect(){this.path=null;this.identity=null;this.epoch=null;
+    this.processRef=null;this.pinCache=null;this.verified.clear();
     return this.observation("DISCONNECTED",{connected:false});}
   recover(){return this.connect();}
 }

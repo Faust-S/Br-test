@@ -1,6 +1,7 @@
 """Cross-platform native CLI invocation and real Windows no-console verification."""
 import hashlib
 import os
+from unittest import mock
 import sys
 import time
 from pathlib import Path
@@ -122,6 +123,99 @@ class CliProcessHostTest(unittest.TestCase):
             "verified": False, "spawned": False, "pid": os.getpid(),
             "processStamp": "os-stamp-123456"})
         self.assertEqual(spoofed.connect()["status"], "RUNNING_PROCESS_UNVERIFIED")
+
+    def test_agent03_preflight_and_post_execution_outcomes(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_EFFECT_RESULT",
+                "executable_name": Path(executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"echo": ["-c", "print('42')"],
+                               "failed": ["-c", "raise SystemExit(3)"]}}
+        conn = CliConnection(spec, executable)
+        self.assertEqual(conn.invoke("echo")["executionOutcome"], "NONE")
+        connected = conn.connect()
+        self.assertEqual(connected["status"], "CONNECTED")
+        self.assertEqual(conn.invoke("missing")["executionOutcome"], "NONE")
+        self.assertEqual(conn.invoke("echo", {"unexpected": "value"})["executionOutcome"], "NONE")
+        failed = conn.invoke("failed")
+        self.assertEqual((failed["status"], failed["executionOutcome"], failed["exit_code"]),
+                         ("EXECUTION_FAILED", "UNKNOWN", 3))
+        result = conn.invoke("echo")
+        self.assertEqual((result["status"], result["output"].strip(),
+                          result["executionOutcome"]), ("EXECUTED", "42", "ACKNOWLEDGED"))
+        self.assertEqual(result["connection_epoch"], connected["connection_epoch"])
+
+    def test_hash_cached_for_polling_but_explicit_verify_rehashes(self):
+        executable = str(Path(sys.executable).resolve())
+        digest = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_PIN_CACHE",
+                "executable_name": Path(executable).name, "executable_sha256": digest,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"echo": ["-c", "print('42')"]}}
+        conn = CliConnection(spec, executable)
+        original = hashlib.sha256
+        calls = []
+        def counted(*args, **kwargs):
+            calls.append(1)
+            return original(*args, **kwargs)
+        with mock.patch("iwxa_universal_install.program_connection.hashlib.sha256",
+                        side_effect=counted):
+            connected = conn.connect()
+            self.assertEqual(connected["status"], "CONNECTED")
+            self.assertTrue(conn.capabilities()["installation_verified"])
+            self.assertTrue(conn.capabilities()["installation_verified"])
+            self.assertEqual(conn.invoke("echo")["output"].strip(), "42")
+            self.assertEqual(len(calls), 1, "polling rehashed an unchanged executable")
+            self.assertEqual(conn.verify()["connection_epoch"], connected["connection_epoch"])
+            self.assertEqual(len(calls), 2, "explicit verify did not rehash")
+            self.assertTrue(conn.capabilities()["installation_verified"])
+            self.assertEqual(len(calls), 2)
+
+    def test_existing_process_restart_invalidates_epoch_and_capabilities(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_APP_REUSE",
+                "executable_name": Path(executable).name, "requires_running": True,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"echo": ["-c", "print('42')"]}}
+        identity = {"program_id": "PYTHON_APP_REUSE", "verified": True,
+                    "status": "RUNNING", "spawned": False,
+                    "pid": os.getpid(), "processStamp": "stamp-before-restart"}
+        conn = CliConnection(spec, executable, process_probe=lambda _: dict(identity))
+        first = conn.connect()
+        self.assertEqual(first["status"], "CONNECTED")
+        self.assertEqual(conn.invoke("echo")["status"], "EXECUTED")
+        identity["processStamp"] = "stamp-after-restart"
+        changed = conn.capabilities()
+        self.assertEqual(changed["status"], "PROCESS_CHANGED")
+        self.assertFalse(changed["connected"])
+        self.assertFalse(changed["operations"][0]["verified"])
+        self.assertEqual(conn.invoke("echo")["executionOutcome"], "NONE")
+        after = conn.recover()
+        self.assertEqual(after["status"], "CONNECTED")
+        self.assertNotEqual(after["connection_epoch"], first["connection_epoch"])
+        identity["status"] = "NOT_RUNNING"
+        self.assertEqual(conn.invoke("echo")["status"], "PROCESS_NOT_RUNNING")
+        self.assertEqual(conn.connect()["status"], "PROCESS_NOT_RUNNING")
+
+    def test_process_changing_during_version_probe_cannot_connect(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_PROBE_SWAP",
+                "executable_name": Path(executable).name, "requires_running": True,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"echo": ["-c", "print('42')"]}}
+        n = [0]
+        def probe(_):
+            n[0] += 1
+            return {"program_id": "PYTHON_PROBE_SWAP", "verified": True,
+                    "status": "RUNNING", "spawned": False, "pid": os.getpid(),
+                    "processStamp": "initial-process" if n[0] == 1 else "other-process"}
+        conn = CliConnection(spec, executable, process_probe=probe)
+        self.assertEqual(conn.connect()["status"], "PROCESS_CHANGED")
+        self.assertEqual(conn.capabilities()["status"], "NOT_CONNECTED")
 
     def test_excessive_output_is_rejected_before_timeout(self):
         for stream in ("stdout", "stderr"):

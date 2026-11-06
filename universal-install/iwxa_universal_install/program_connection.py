@@ -145,6 +145,8 @@ class CliConnection:
         self._epoch = None
         self._process_probe = process_probe
         self._unavailable = None
+        self._process_ref = None
+        self._pin_cache = None  # (path, filesystem-identity, approved SHA)
 
     def observation(self, status, **extra):
         epoch = ({"connection_epoch": self._epoch} if self._epoch and
@@ -174,34 +176,61 @@ class CliConnection:
                 "process_stamp": stamp, "process_proof": "HOST_OS_OBSERVATION"}
 
     def installation_identity(self, path):
+        """Read the approved binary digest once per unchanged file identity.
+
+        Capability polling is common in Agent 0.3; re-reading an entire
+        executable on every poll is unnecessary. Explicit verify() rehashes.
+        """
         expected = self.spec.get("executable_sha256")
         if expected is None:
             return {"installation_verified": False, "installation_reason": "PIN_NOT_PROVIDED"}
-        try:
-            before = os.stat(path, follow_symlinks=False)
-            if before.st_size > 1_073_741_824:
-                return {"installation_verified": False, "installation_reason": "BINARY_TOO_LARGE"}
-            digest = hashlib.sha256()
-            with open(path, "rb") as stream:
-                for part in iter(lambda: stream.read(65536), b""):
-                    digest.update(part)
-            after = os.stat(path, follow_symlinks=False)
-            if (before.st_dev, before.st_ino, before.st_size, before.st_mtime_ns) != (
-                after.st_dev, after.st_ino, after.st_size, after.st_mtime_ns
-            ):
-                return {"installation_verified": False,
-                        "installation_reason": "INSTALLATION_CHANGED_DURING_READBACK"}
-            value = digest.hexdigest()
-        except OSError:
+        identity = executable_identity(path)
+        if identity is None:
+            self._pin_cache = None
             return {"installation_verified": False,
                     "installation_reason": "INSTALLATION_READBACK_FAILED"}
-        if value != expected:
-            return {"installation_verified": False,
-                    "installation_reason": "EXECUTABLE_DIGEST_MISMATCH"}
+        cache_key = (str(path), identity, expected)
+        if self._pin_cache == cache_key:
+            value = expected
+        else:
+            self._pin_cache = None
+            try:
+                before = os.stat(path, follow_symlinks=False)
+                if before.st_size > 1_073_741_824:
+                    return {"installation_verified": False,
+                            "installation_reason": "BINARY_TOO_LARGE"}
+                digest = hashlib.sha256()
+                with open(path, "rb") as stream:
+                    for part in iter(lambda: stream.read(65536), b""):
+                        digest.update(part)
+                after = executable_identity(path)
+                if after != identity:
+                    return {"installation_verified": False,
+                            "installation_reason": "INSTALLATION_CHANGED_DURING_READBACK"}
+                value = digest.hexdigest()
+            except OSError:
+                return {"installation_verified": False,
+                        "installation_reason": "INSTALLATION_READBACK_FAILED"}
+            if value != expected:
+                return {"installation_verified": False,
+                        "installation_reason": "EXECUTABLE_DIGEST_MISMATCH"}
+            self._pin_cache = cache_key
         return {"installation_verified": True, "installation_identity": {
             "program_id": self.spec["program_id"], "executable": str(path),
             "sha256": value, "identity_source": "PINNED_BINARY_SHA256_READBACK",
             "verified": True}}
+
+    @staticmethod
+    def _process_key(observation):
+        if observation.get("running") is not True:
+            return None
+        return observation["process_id"], observation["process_stamp"]
+
+    @staticmethod
+    def _process_reason(observation):
+        if observation.get("running") is False:
+            return "PROCESS_NOT_RUNNING"
+        return "RUNNING_PROCESS_UNVERIFIED"
 
 
     def inspect(self):
@@ -231,10 +260,11 @@ class CliConnection:
             self.disconnect()
             self._unavailable = found["status"]
             return found
-        if self.spec.get("requires_running") and found.get("running") is not True:
+        required = self.spec.get("requires_running")
+        initial_process = self._process_key(found) if required else None
+        if required and initial_process is None:
             self.disconnect()
-            status = ("PROCESS_NOT_RUNNING" if found.get("running") is False
-                      else "RUNNING_PROCESS_UNVERIFIED")
+            status = self._process_reason(found)
             self._unavailable = status
             return self.observation(status, installed=True, connected=False,
                                     **self.process_observation())
@@ -242,27 +272,46 @@ class CliConnection:
         if identity is None:
             self.disconnect()
             return self.observation("NOT_FOUND", installed=False, connected=False)
-        if self.path != found["path"] or self._identity != identity:
+        if (self.path != found["path"] or self._identity != identity or
+                (required and self._process_ref != initial_process)):
             self._verified.clear()
             self._epoch = None
         try:
             code, version = run_command(found["path"], self.spec["version_args"])
         except ProgramError as error:
             self.disconnect()
+            self._unavailable = error.code
             return self.observation(error.code, installed=True, connected=False)
         if code or not version_matches(version, self.spec["version_contains"]):
             self.disconnect()
-            return self.observation("VERSION_UNVERIFIED", installed=True,
-                                    connected=False)
+            self._unavailable = "VERSION_UNVERIFIED"
+            return self.observation("VERSION_UNVERIFIED", installed=True, connected=False)
+        if executable_identity(found["path"]) != identity:
+            self.disconnect()
+            self._unavailable = "CONNECTION_LOST"
+            return self.observation("CONNECTION_LOST", installed=True, connected=False)
+        if required:
+            current = self.process_observation()
+            if self._process_key(current) != initial_process:
+                self.disconnect()
+                status = ("PROCESS_CHANGED" if self._process_key(current) is not None
+                          else self._process_reason(current))
+                self._unavailable = status
+                return self.observation(status, installed=True, connected=False, **current)
+        installation = self.installation_identity(found["path"])
+        if self.spec.get("executable_sha256") and not installation["installation_verified"]:
+            self.disconnect()
+            self._unavailable = "INSTALLATION_MISMATCH"
+            return self.observation("INSTALLATION_MISMATCH", installed=True, connected=False)
         self.path = found["path"]
         self._identity = identity
+        self._process_ref = initial_process
         if self._epoch is None:
             self._epoch = secrets.token_hex(16)
         self._unavailable = None
         return self.observation("CONNECTED", installed=True, connected=True,
                                 path=self.path, version=version.strip()[:256],
-                                **self.installation_identity(self.path),
-                                **self.process_observation())
+                                **installation, **self.process_observation())
 
     def verify(self):
         if not self.path:
@@ -270,73 +319,104 @@ class CliConnection:
         if executable_identity(self.path) != self._identity:
             self.disconnect()
             return self.observation("CONNECTION_LOST", connected=False)
+        self._pin_cache = None  # Explicit verify always rehashes the approved file.
         return self.connect()
 
     def capabilities(self):
         lost = bool(self.path) and executable_identity(self.path) != self._identity
         if lost:
             self.disconnect()
-        identity = self.installation_identity(self.path) if self.path else {}
+        installation = self.installation_identity(self.path) if self.path else {}
         mismatch = bool(self.path) and bool(self.spec.get("executable_sha256")) and not (
-            identity["installation_verified"])
+            installation["installation_verified"])
         running = self.process_observation()
-        process_lost = bool(self.path) and bool(self.spec.get("requires_running")) and (
-            running["running"] is not True)
-        if mismatch or process_lost:
+        process_status = None
+        if self.path and self.spec.get("requires_running"):
+            observed_key = self._process_key(running)
+            process_status = ("PROCESS_CHANGED" if observed_key is not None
+                              else self._process_reason(running)) if (
+                              observed_key != self._process_ref) else None
+        if mismatch or process_status:
             self.disconnect()
-        if process_lost:
-            self._unavailable = ("PROCESS_NOT_RUNNING" if running["running"] is False
-                                 else "RUNNING_PROCESS_UNVERIFIED")
+            self._unavailable = "INSTALLATION_MISMATCH" if mismatch else process_status
+        status = ("CONNECTION_LOST" if lost else
+                  "INSTALLATION_MISMATCH" if mismatch else
+                  process_status if process_status else
+                  "DECLARED" if self.path else "NOT_CONNECTED")
         return self.observation(
-            "CONNECTION_LOST" if lost else "INSTALLATION_MISMATCH" if mismatch else
-            self._unavailable if process_lost else
-            "DECLARED" if self.path else "NOT_CONNECTED",
-            connected=bool(self.path), **identity, **running,
+            status, connected=bool(self.path), **installation, **running,
             **({"unavailable_reason": self._unavailable} if self._unavailable else {}),
             operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])
 
     def invoke(self, operation, params=None):
+        # A denied preflight must not be classified as an unknown external effect.
         if not self.path:
-            return self.observation("NOT_CONNECTED", executed=False)
+            return self.observation("NOT_CONNECTED", executed=False,
+                                    executionOutcome="NONE",
+                                    **({"unavailable_reason": self._unavailable}
+                                       if self._unavailable else {}))
         if executable_identity(self.path) != self._identity:
             self.disconnect()
-            return self.observation("CONNECTION_LOST", executed=False)
+            return self.observation("CONNECTION_LOST", executed=False, executionOutcome="NONE")
         if self.spec.get("executable_sha256") and not (
             self.installation_identity(self.path)["installation_verified"]
         ):
             self.disconnect()
             self._unavailable = "INSTALLATION_MISMATCH"
-            return self.observation("INSTALLATION_MISMATCH", executed=False)
+            return self.observation("INSTALLATION_MISMATCH", executed=False,
+                                    executionOutcome="NONE")
         if self.spec.get("requires_running"):
-            observation = self.process_observation()
-            if observation["running"] is not True:
+            running = self.process_observation()
+            current_key = self._process_key(running)
+            if current_key != self._process_ref:
+                status = ("PROCESS_CHANGED" if current_key is not None
+                          else self._process_reason(running))
                 self.disconnect()
-                status = ("PROCESS_NOT_RUNNING" if observation["running"] is False
-                          else "RUNNING_PROCESS_UNVERIFIED")
                 self._unavailable = status
-                return self.observation(status, executed=False, **observation)
+                return self.observation(status, executed=False,
+                                        executionOutcome="NONE", **running)
         args = self.spec["operations"].get(operation)
         if args is None:
-            return self.observation("OPERATION_UNSUPPORTED", executed=False)
-        start = time.perf_counter()
+            return self.observation("OPERATION_UNSUPPORTED", executed=False,
+                                    executionOutcome="NONE")
         try:
             bound = bind_arguments(args, params)
+        except ProgramError as exc:
+            return self.observation(exc.code, executed=False, executionOutcome="NONE")
+        start = time.perf_counter()
+        try:
             code, output = run_command(self.path, bound)
-        except ProgramError as e:
-            return self.observation(e.code, executed=False)
+        except ProgramError as exc:
+            return self.observation(exc.code, executed=False, executionOutcome="UNKNOWN")
         if code:
             return self.observation("EXECUTION_FAILED", executed=False,
-                                    exit_code=code)
+                                    executionOutcome="UNKNOWN", exit_code=code)
+        installation = self.installation_identity(self.path)
+        if self.spec.get("executable_sha256") and not installation["installation_verified"]:
+            self.disconnect()
+            self._unavailable = "INSTALLATION_MISMATCH"
+            return self.observation("INSTALLATION_MISMATCH", executed=False,
+                                    executionOutcome="UNKNOWN")
+        process = self.process_observation()
+        if self.spec.get("requires_running") and self._process_key(process) != self._process_ref:
+            status = ("PROCESS_CHANGED" if self._process_key(process) is not None
+                      else self._process_reason(process))
+            self.disconnect()
+            self._unavailable = status
+            return self.observation(status, executed=False,
+                                    executionOutcome="UNKNOWN", **process)
         self._verified.add(operation)
         return self.observation("EXECUTED", executed=True, operation=operation,
-                                **self.installation_identity(self.path),
-                                **self.process_observation(), output=output,
+                                executionOutcome="ACKNOWLEDGED",
+                                **installation, **process, output=output,
                                 elapsed_ms=round((time.perf_counter()-start)*1000, 3))
 
     def disconnect(self):
         self.path = None
         self._identity = None
+        self._process_ref = None
+        self._pin_cache = None
         self._epoch = None
         self._verified.clear()
         return self.observation("DISCONNECTED", connected=False)

@@ -89,6 +89,9 @@ jobs:
         shell: bash
         timeout-minutes: 6
         run: python universal-install/qualification/real_program_update.py
+      - name: Agent 0.3 two independent host consumers with real executable and readback
+        shell: bash
+        run: node universal-install/qualification/agent03_existing_program_hosts.mjs
       - name: Real local HTTP API connection with host-owned authorization
         shell: bash
         run: node universal-install/qualification/http_program_host.mjs
