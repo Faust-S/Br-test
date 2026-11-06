@@ -62,7 +62,7 @@ function initial(row,version){
   const [level,owner]=CHANNELS[row.kind];
   return {id:row.id,kind:row.kind,level,version,owner,
     state:'DECLARED',verified:false,executionConfirmed:false,
-    firstUseCandidate:false,observationSource:null,observationRef:null,
+    firstUseCandidate:false,canOfferInvocation:false,observationSource:null,observationRef:null,
     reason:row.target===true?'TARGET_NOT_QUALIFIED':'OBSERVATION_MISSING',
     target:row.target===true};
 }
@@ -100,6 +100,7 @@ function invocation(row,observed,status,operation,programId){
     scoped.test(observed.connection_epoch)&&Array.isArray(observed.operations);
   const found=sourceValid?observed.operations.find(x=>x?.name===operation):null;
   row.firstUseCandidate=Boolean(found?.declared===true&&found.verified===false);
+  row.canOfferInvocation=row.firstUseCandidate;
   if(status.available){
     if(status.version!==row.version)return setState(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',PROGRAM);
     row.executionConfirmed=true;
@@ -109,6 +110,51 @@ function invocation(row,observed,status,operation,programId){
     return setState(row,'INTEGRATED','operation-unverified',PROGRAM);
   return setState(row,'BLOCKED',status.reason??'OPERATION_UNAVAILABLE',PROGRAM);
 }
+
+// Consume a SINGLE Core-owned U01/U03 readback, not raw receipts or a new probe.
+// This shape is already returned by Personal Agent 0.3 program_use_projection().
+function ownerOperationState(row,owner,operation,programId){
+  const source=owner.source;
+  if(!object(source)||source.schema!==PROGRAM||source.program_id!==programId)
+    return setState(row,'BLOCKED','SOURCE_IDENTITY_MISMATCH',PROGRAM);
+  const live=source.status==='DECLARED'&&source.connected===true&&
+    typeof source.connection_epoch==='string'&&scoped.test(source.connection_epoch)&&
+    Array.isArray(source.operations);
+  if(!live)return setState(row,'BLOCKED','source-unavailable',PROGRAM);
+  const raw=source.operations.filter(x=>x?.name===operation);
+  if(raw.length!==1||raw[0].declared!==true)
+    return setState(row,'BLOCKED',raw.length>1?'OWNER_OPERATION_AMBIGUOUS':'operation-unsupported',PROGRAM);
+  const matched=owner.operations.filter(x=>x?.operation===operation||x?.capability_id===row.id);
+  if(matched.length!==1||matched[0].operation!==operation||matched[0].capability_id!==row.id)
+    return setState(row,'BLOCKED','OWNER_OPERATION_MISMATCH',STATUS);
+  const entry=matched[0],status=entry.observation;
+  if(typeof entry.can_offer_invocation!=='boolean'||
+     typeof entry.execution_verified!=='boolean'||
+     !validateStatus(status)||status.id!==row.id)
+    return setState(row,'BLOCKED','OWNER_OBSERVATION_INVALID',STATUS);
+  if(entry.execution_verified!==status.available)
+    return setState(row,'BLOCKED','OWNER_OBSERVATION_INCONSISTENT',STATUS);
+  const declared=raw[0];
+  const canOffer=entry.can_offer_invocation===true;
+  if(status.available){
+    if(declared.verified!==true||!canOffer)
+      return setState(row,'BLOCKED','OWNER_OBSERVATION_INCONSISTENT',STATUS);
+    if(status.version!==row.version)return setState(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',STATUS);
+    if(!ref(status.observationRef))
+      return setState(row,'BLOCKED','CAPABILITY_UNVERIFIED',STATUS);
+    row.executionConfirmed=true;
+    row.canOfferInvocation=true; // Display hint; P01 still owns execution.
+    return setState(row,'EXECUTABLE',null,STATUS,status.observationRef);
+  }
+  if(canOffer&&((declared.verified===false&&status.reason==='operation-unverified')||
+       (declared.verified===true&&status.reason==='execution-receipt-missing'))){
+    row.canOfferInvocation=true;
+    row.firstUseCandidate=declared.verified===false;
+    return setState(row,'INTEGRATED',status.reason,STATUS);
+  }
+  return setState(row,'BLOCKED',status.reason??'OPERATION_UNAVAILABLE',STATUS);
+}
+
 function present(row,presentation){
   const mode=row.kind;
   if(!object(presentation)||!object(presentation.capabilities)||
@@ -153,7 +199,7 @@ function present(row,presentation){
  * descriptor: existing U03 ModuleDescriptor
  * channels: host display metadata, one row for each declared provides[]
  * statuses: current U03 CapabilityStatus observations for DATA/NATIVE
- * u01: {inspect,capabilities,receipts}; operations are re-projected through U01 bridge
+ * u01: {inspect,capabilities,receipts} OR {inspect,ownerProjection} already\n *      checked by the Core owner; no second U01 read or receipt transfer
  * ui: existing integrationObservation() output; never used to certify a capability
  * presentation: {appRef,hostRef,capabilities,observations} from U04 owner
  */
@@ -167,6 +213,14 @@ export function projectProgramCard({programId,descriptor,channels,statuses=[],
   const statusIndex=new Map(statuses.map(x=>[x.id,x]));
   const declared=new Map(descriptor.provides.map(x=>[x.id,x.version]));
   const operations=channels.filter(x=>x.kind==='OPERATION');
+  const owner=u01?.ownerProjection;
+  if(owner!==undefined){
+    if(u01?.capabilities!==undefined||u01?.receipts!==undefined||
+       !object(owner)||owner.program_id!==programId||
+       owner.execution_authority_granted!==false||
+       !Array.isArray(owner.operations)||owner.operations.length>128)
+      invalid();
+  }
   const opStatus=new Map();
   if(operations.length&&u01?.capabilities){
     const config={programId,bindings:operations.map(x=>({
@@ -181,6 +235,7 @@ export function projectProgramCard({programId,descriptor,channels,statuses=[],
     if(binding.kind==='DATA'||binding.kind==='NATIVE_CONTRACT')
       return dataState(row,statusIndex.get(binding.id),ui);
     if(binding.kind==='OPERATION'){
+      if(owner!==undefined)return ownerOperationState(row,owner,binding.operation,programId);
       if(!opStatus.has(binding.id))return row;
       return invocation(row,u01.capabilities,opStatus.get(binding.id),binding.operation,programId);
     }

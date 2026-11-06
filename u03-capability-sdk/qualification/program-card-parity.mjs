@@ -8,7 +8,8 @@ import {fileURLToPath} from 'node:url';
 import {projectProgramCard} from '../src/program-card.mjs';
 
 const root=resolve(fileURLToPath(new URL('..',import.meta.url)));
-const data=JSON.parse(readFileSync(resolve(root,'fixtures/program-card-scenarios.json'),'utf8'));
+const data=['program-card-scenarios.json','agent03-owner-projection.json'].flatMap(name=>
+ JSON.parse(readFileSync(resolve(root,'fixtures',name),'utf8')));
 const expected=data.map(entry=>({case:entry.case,projection:projectProgramCard(entry.args)}));
 const python=process.env.PYTHON??(process.platform==='win32'?'python':'python3');
 const command=spawnSync(python,[resolve(root,'qualification/program_card_parity.py')],{

@@ -87,6 +87,7 @@ def _initial(row,version):
     return {'id':row['id'],'kind':row['kind'],'level':level,
             'version':version,'owner':owner,'state':'DECLARED','verified':False,
             'executionConfirmed':False,'firstUseCandidate':False,
+            'canOfferInvocation':False,
             'observationSource':None,'observationRef':None,
             'reason':'TARGET_NOT_QUALIFIED' if target else 'OBSERVATION_MISSING',
             'target':target}
@@ -135,6 +136,7 @@ def _invocation(row,observed,status,operation,program_id):
                 if isinstance(x,dict) and x.get('name')==operation),None) if valid else None
     row['firstUseCandidate']=bool(found and found.get('declared') is True and
                                   found.get('verified') is False)
+    row['canOfferInvocation']=row['firstUseCandidate']
     if status['available']:
         if status.get('version')!=row['version']:
             return _state(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',PROGRAM)
@@ -143,6 +145,57 @@ def _invocation(row,observed,status,operation,program_id):
     if status.get('reason')=='operation-unverified' and row['firstUseCandidate']:
         return _state(row,'INTEGRATED','operation-unverified',PROGRAM)
     return _state(row,'BLOCKED',status.get('reason','OPERATION_UNAVAILABLE'),PROGRAM)
+
+
+
+def _owner_operation(row, owner, operation, program_id):
+    """Display the current Core-owned projection without calling U01 twice."""
+    source=owner.get('source')
+    if not isinstance(source,dict) or source.get('schema')!=PROGRAM or \
+            source.get('program_id')!=program_id:
+        return _state(row,'BLOCKED','SOURCE_IDENTITY_MISMATCH',PROGRAM)
+    live=source.get('status')=='DECLARED' and source.get('connected') is True and \
+        isinstance(source.get('connection_epoch'),str) and \
+        _EPOCH.fullmatch(source['connection_epoch']) is not None and \
+        isinstance(source.get('operations'),list)
+    if not live:return _state(row,'BLOCKED','source-unavailable',PROGRAM)
+    raw=[x for x in source['operations'] if isinstance(x,dict) and x.get('name')==operation]
+    if len(raw)!=1 or raw[0].get('declared') is not True:
+        return _state(row,'BLOCKED','OWNER_OPERATION_AMBIGUOUS' if len(raw)>1 else
+                      'operation-unsupported',PROGRAM)
+    matched=[x for x in owner['operations'] if isinstance(x,dict) and
+             (x.get('operation')==operation or x.get('capability_id')==row['id'])]
+    if len(matched)!=1 or matched[0].get('operation')!=operation or \
+            matched[0].get('capability_id')!=row['id']:
+        return _state(row,'BLOCKED','OWNER_OPERATION_MISMATCH',STATUS)
+    item=matched[0]
+    observation=item.get('observation')
+    if type(item.get('can_offer_invocation')) is not bool or \
+            type(item.get('execution_verified')) is not bool or \
+            not validate_status(observation) or observation['id']!=row['id']:
+        return _state(row,'BLOCKED','OWNER_OBSERVATION_INVALID',STATUS)
+    if item['execution_verified'] != observation['available']:
+        return _state(row,'BLOCKED','OWNER_OBSERVATION_INCONSISTENT',STATUS)
+    declared=raw[0]
+    can_offer=item['can_offer_invocation'] is True
+    if observation['available']:
+        if declared.get('verified') is not True or not can_offer:
+            return _state(row,'BLOCKED','OWNER_OBSERVATION_INCONSISTENT',STATUS)
+        if observation.get('version')!=row['version']:
+            return _state(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',STATUS)
+        if not _reference(observation.get('observationRef')):
+            return _state(row,'BLOCKED','CAPABILITY_UNVERIFIED',STATUS)
+        row['executionConfirmed']=True
+        row['canOfferInvocation']=True  # Display hint only; P01 owns execution.
+        return _state(row,'EXECUTABLE',None,STATUS,observation['observationRef'])
+    if can_offer and ((declared.get('verified') is False and
+                       observation.get('reason')=='operation-unverified') or
+                      (declared.get('verified') is True and
+                       observation.get('reason')=='execution-receipt-missing')):
+        row['canOfferInvocation']=True
+        row['firstUseCandidate']=declared.get('verified') is False
+        return _state(row,'INTEGRATED',observation['reason'],STATUS)
+    return _state(row,'BLOCKED',observation.get('reason','OPERATION_UNAVAILABLE'),STATUS)
 
 
 def _present(row,presentation):
@@ -204,6 +257,13 @@ def project_program_card(*,programId,descriptor,channels,statuses=None,u01=None,
     status_index={row['id']:row for row in statuses}
     declared={row['id']:row['version'] for row in descriptor['provides']}
     ops=[row for row in channels if row['kind']=='OPERATION']
+    owner=u01.get('ownerProjection') if isinstance(u01,dict) else None
+    if isinstance(u01,dict) and 'ownerProjection' in u01:
+        if 'capabilities' in u01 or 'receipts' in u01 or \
+                not isinstance(owner,dict) or owner.get('program_id')!=programId or \
+                owner.get('execution_authority_granted') is not False or \
+                not isinstance(owner.get('operations'),list) or len(owner['operations'])>128:
+            _invalid()
     projected={}
     if ops and isinstance(u01,dict) and u01.get('capabilities') is not None:
         source=u01['capabilities']
@@ -221,8 +281,11 @@ def project_program_card(*,programId,descriptor,channels,statuses=None,u01=None,
         elif binding['kind'] in ('DATA','NATIVE_CONTRACT'):
             result.append(_data(row,status_index.get(binding['id']),ui))
         elif binding['kind']=='OPERATION':
-            result.append(_invocation(row,u01['capabilities'],projected[binding['id']],
-                        binding['operation'],programId) if binding['id'] in projected else row)
+            if owner is not None:
+                result.append(_owner_operation(row,owner,binding['operation'],programId))
+            else:
+                result.append(_invocation(row,u01['capabilities'],projected[binding['id']],
+                             binding['operation'],programId) if binding['id'] in projected else row)
         else:
             result.append(_present(row,presentation))
     return {'programId':programId,'levels':deepcopy(ui['levels']) if ui is not None else None,

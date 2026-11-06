@@ -31,6 +31,10 @@ jobs:
           node --test u03-capability-sdk/tests/program-card.test.mjs
           python -m unittest discover -s u03-capability-sdk/tests -p 'test_program_card.py' -v
           node u03-capability-sdk/qualification/program-card-parity.mjs
+      - name: Agent 0.3 Core-owned U01 projection consumers (without Core changes)
+        run: |
+          node --test u03-capability-sdk/tests/agent03-owner-consumer.test.mjs
+          python -m unittest discover -s u03-capability-sdk/tests -p 'test_agent03_owner_consumer.py' -v
       - name: Live local HTTP API, host-owned credential loss and reattachment
         run: node u03-capability-sdk/qualification/real-u01-http.mjs
       - name: Checkout pinned public K02 owner source (read-only)

@@ -1,0 +1,1180 @@
+[
+  {
+    "case": "agent03_verified_execution",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "ownerProjection": {
+          "program_id": "ATLAS_UI_V1",
+          "source": {
+            "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+            "program_id": "ATLAS_UI_V1",
+            "transport": "cli",
+            "status": "DECLARED",
+            "connected": true,
+            "connection_epoch": "epoch0000000000001",
+            "operations": [
+              {
+                "name": "evaluate",
+                "declared": true,
+                "verified": true
+              }
+            ]
+          },
+          "operations": [
+            {
+              "operation": "evaluate",
+              "capability_id": "iwxa.program.operation.execute",
+              "can_offer_invocation": true,
+              "execution_verified": true,
+              "observation": {
+                "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+                "id": "iwxa.program.operation.execute",
+                "available": true,
+                "version": "1.0.0",
+                "observationRef": "TXR-agent03-verified"
+              }
+            }
+          ],
+          "execution_authority_granted": false
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "state": "EXECUTABLE",
+      "verified": true,
+      "executionConfirmed": true,
+      "firstUseCandidate": false,
+      "canOfferInvocation": true,
+      "reason": null,
+      "observationRef": "TXR-agent03-verified"
+    }
+  },
+  {
+    "case": "agent03_first_use",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "ownerProjection": {
+          "program_id": "ATLAS_UI_V1",
+          "source": {
+            "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+            "program_id": "ATLAS_UI_V1",
+            "transport": "cli",
+            "status": "DECLARED",
+            "connected": true,
+            "connection_epoch": "epoch0000000000001",
+            "operations": [
+              {
+                "name": "evaluate",
+                "declared": true,
+                "verified": false
+              }
+            ]
+          },
+          "operations": [
+            {
+              "operation": "evaluate",
+              "capability_id": "iwxa.program.operation.execute",
+              "can_offer_invocation": true,
+              "execution_verified": false,
+              "observation": {
+                "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+                "id": "iwxa.program.operation.execute",
+                "available": false,
+                "reason": "operation-unverified"
+              }
+            }
+          ],
+          "execution_authority_granted": false
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "state": "INTEGRATED",
+      "verified": false,
+      "executionConfirmed": false,
+      "firstUseCandidate": true,
+      "canOfferInvocation": true,
+      "reason": "operation-unverified",
+      "observationRef": null
+    }
+  },
+  {
+    "case": "agent03_receipt_missing",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "ownerProjection": {
+          "program_id": "ATLAS_UI_V1",
+          "source": {
+            "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+            "program_id": "ATLAS_UI_V1",
+            "transport": "cli",
+            "status": "DECLARED",
+            "connected": true,
+            "connection_epoch": "epoch0000000000001",
+            "operations": [
+              {
+                "name": "evaluate",
+                "declared": true,
+                "verified": true
+              }
+            ]
+          },
+          "operations": [
+            {
+              "operation": "evaluate",
+              "capability_id": "iwxa.program.operation.execute",
+              "can_offer_invocation": true,
+              "execution_verified": false,
+              "observation": {
+                "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+                "id": "iwxa.program.operation.execute",
+                "available": false,
+                "reason": "execution-receipt-missing"
+              }
+            }
+          ],
+          "execution_authority_granted": false
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "state": "INTEGRATED",
+      "verified": false,
+      "executionConfirmed": false,
+      "firstUseCandidate": false,
+      "canOfferInvocation": true,
+      "reason": "execution-receipt-missing",
+      "observationRef": null
+    }
+  },
+  {
+    "case": "agent03_unknown",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "ownerProjection": {
+          "program_id": "ATLAS_UI_V1",
+          "source": {
+            "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+            "program_id": "ATLAS_UI_V1",
+            "transport": "cli",
+            "status": "UNKNOWN",
+            "connected": false,
+            "connection_epoch": "epoch0000000000001",
+            "operations": [
+              {
+                "name": "evaluate",
+                "declared": true,
+                "verified": true
+              }
+            ]
+          },
+          "operations": [
+            {
+              "operation": "evaluate",
+              "capability_id": "iwxa.program.operation.execute",
+              "can_offer_invocation": false,
+              "execution_verified": false,
+              "observation": {
+                "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+                "id": "iwxa.program.operation.execute",
+                "available": false,
+                "reason": "source-unavailable"
+              }
+            }
+          ],
+          "execution_authority_granted": false
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "state": "BLOCKED",
+      "verified": false,
+      "executionConfirmed": false,
+      "firstUseCandidate": false,
+      "canOfferInvocation": false,
+      "reason": "source-unavailable",
+      "observationRef": null
+    }
+  },
+  {
+    "case": "agent03_stale_reconnected",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "ownerProjection": {
+          "program_id": "ATLAS_UI_V1",
+          "source": {
+            "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+            "program_id": "ATLAS_UI_V1",
+            "transport": "cli",
+            "status": "DECLARED",
+            "connected": true,
+            "connection_epoch": "epoch0000000000002",
+            "operations": [
+              {
+                "name": "evaluate",
+                "declared": true,
+                "verified": false
+              }
+            ]
+          },
+          "operations": [
+            {
+              "operation": "evaluate",
+              "capability_id": "iwxa.program.operation.execute",
+              "can_offer_invocation": false,
+              "execution_verified": false,
+              "observation": {
+                "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+                "id": "iwxa.program.operation.execute",
+                "available": false,
+                "reason": "operation-unverified"
+              }
+            }
+          ],
+          "execution_authority_granted": false
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "state": "BLOCKED",
+      "verified": false,
+      "executionConfirmed": false,
+      "firstUseCandidate": false,
+      "canOfferInvocation": false,
+      "reason": "operation-unverified",
+      "observationRef": null
+    }
+  },
+  {
+    "case": "agent03_inconsistent_evidence",
+    "args": {
+      "programId": "ATLAS_UI_V1",
+      "descriptor": {
+        "schema": "IWXA_MODULE_DESCRIPTOR/1.0.0",
+        "id": "iwxa.card.atlas_ui_v1",
+        "version": "0.1.0",
+        "provides": [
+          {
+            "id": "iwxa.program.discovery",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.data.read",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.operation.execute",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.window.linked",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.embedded",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.surface.shared",
+            "version": "1.0.0"
+          },
+          {
+            "id": "iwxa.program.native.contract",
+            "version": "1.0.0"
+          }
+        ],
+        "requires": [],
+        "hostCompatibility": [
+          {
+            "hostId": "iwxa.agent",
+            "range": "=0.3.0"
+          }
+        ]
+      },
+      "channels": [
+        {
+          "id": "iwxa.program.discovery",
+          "kind": "DISCOVERY"
+        },
+        {
+          "id": "iwxa.program.data.read",
+          "kind": "DATA"
+        },
+        {
+          "id": "iwxa.program.operation.execute",
+          "kind": "OPERATION",
+          "operation": "evaluate"
+        },
+        {
+          "id": "iwxa.program.window.linked",
+          "kind": "LINKED_WINDOW"
+        },
+        {
+          "id": "iwxa.program.surface.embedded",
+          "kind": "EMBEDDED_VIEW",
+          "target": true
+        },
+        {
+          "id": "iwxa.program.surface.shared",
+          "kind": "SHARED_LIVE_SURFACE"
+        },
+        {
+          "id": "iwxa.program.native.contract",
+          "kind": "NATIVE_CONTRACT"
+        }
+      ],
+      "statuses": [
+        {
+          "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+          "id": "iwxa.program.data.read",
+          "available": true,
+          "version": "1.0.0",
+          "observationRef": "owner:source:rev1"
+        }
+      ],
+      "u01": {
+        "inspect": {
+          "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+          "program_id": "ATLAS_UI_V1",
+          "transport": "cli",
+          "status": "DISCOVERED",
+          "installed": true,
+          "connected": false
+        },
+        "ownerProjection": {
+          "program_id": "ATLAS_UI_V1",
+          "source": {
+            "schema": "IWXA_PROGRAM_CONNECTION/1.0.0",
+            "program_id": "ATLAS_UI_V1",
+            "transport": "cli",
+            "status": "DECLARED",
+            "connected": true,
+            "connection_epoch": "epoch0000000000001",
+            "operations": [
+              {
+                "name": "evaluate",
+                "declared": true,
+                "verified": true
+              }
+            ]
+          },
+          "operations": [
+            {
+              "operation": "evaluate",
+              "capability_id": "iwxa.program.operation.execute",
+              "can_offer_invocation": false,
+              "execution_verified": true,
+              "observation": {
+                "schema": "IWXA_CAPABILITY_STATUS/1.0.0",
+                "id": "iwxa.program.operation.execute",
+                "available": true,
+                "version": "1.0.0",
+                "observationRef": "TXR-inconsistent"
+              }
+            }
+          ],
+          "execution_authority_granted": false
+        }
+      },
+      "ui": {
+        "schema": "IWXA_UI_INTEGRATION/1.0.0",
+        "levels": [
+          {
+            "level": "I0",
+            "verified": true
+          },
+          {
+            "level": "I1",
+            "verified": true
+          },
+          {
+            "level": "I2",
+            "verified": true
+          },
+          {
+            "level": "I3",
+            "verified": false
+          },
+          {
+            "level": "I4",
+            "verified": false
+          },
+          {
+            "level": "I5",
+            "verified": false
+          }
+        ],
+        "highestVerified": "I2",
+        "verifiedOperations": []
+      },
+      "presentation": {
+        "appRef": "ATLAS_UI_V1",
+        "hostRef": "agent-host",
+        "capabilities": {
+          "schema": "IWXA_PRESENTATION_BRIDGE/1.0.0",
+          "capabilities": [
+            {
+              "mode": "LINKED_WINDOW",
+              "supported": false,
+              "reason": "NATIVE_WINDOW_OBSERVATION_UNAVAILABLE"
+            },
+            {
+              "mode": "EMBEDDED_VIEW",
+              "supported": true
+            },
+            {
+              "mode": "SHARED_LIVE_SURFACE",
+              "supported": false,
+              "reason": "SHARED_RUNTIME_SURFACE_UNAVAILABLE"
+            }
+          ]
+        },
+        "observations": {}
+      }
+    },
+    "expected": {
+      "state": "BLOCKED",
+      "verified": false,
+      "executionConfirmed": false,
+      "firstUseCandidate": false,
+      "canOfferInvocation": false,
+      "reason": "OWNER_OBSERVATION_INCONSISTENT",
+      "observationRef": null
+    }
+  }
+]
