@@ -132,7 +132,7 @@ test("Agent 0.3 native reattach requires exact host approval and OS process iden
    hostRef:"agent"})).processTerminated,false);
  const denied=await bridge.reattach({appRef:"obsidian",hostRef:"agent",
    pid:4512,processStamp:"stale-start"});
- assert.equal(denied.status,"PROCESS_IDENTITY_UNVERIFIED");
+ assert.equal(denied.status,"PROCESS_IDENTITY_CHANGED");
  assert.equal(approvals,2);
  assert.ok(observations>=2);
 });
