@@ -1,4 +1,4 @@
-import {randomUUID} from "node:crypto";
+import {presentationBindingId as randomUUID} from "./id.mjs";
 import {createPresentationSurfaceController} from "./surface.mjs";
 
 export const SCHEMA = "IWXA_PRESENTATION_BRIDGE/1.0.0";
@@ -45,12 +45,14 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
         Array.isArray(launchSpec)) throw Error("PRESENTATION_BINDING_INVALID");
     // Only the owning host may approve an executable. Never infer an executable from appRef.
     if(!nativeReady)return {schema:SCHEMA,status:"LAUNCH_UNAVAILABLE",reason:"NATIVE_ADAPTER_UNAVAILABLE"};
+    let bindingRef;
+    try {bindingRef=randomUUID();} catch {return {schema:SCHEMA,status:"BINDING_ID_UNAVAILABLE"};}
     let launched;
     try {launched = await adapter.launch({appRef,hostRef,launchSpec});}
     catch {return {schema:SCHEMA,status:"LAUNCH_UNAVAILABLE",reason:"NATIVE_LAUNCH_FAILED"};}
     if (!launched || launched.status !== "LAUNCHED" || !Number.isSafeInteger(launched.pid) ||
         launched.pid <= 0) return {schema:SCHEMA,status:"LAUNCH_UNAVAILABLE",reason:launched?.status??"NO_PROCESS"};
-    const binding = {bindingRef:randomUUID(),appRef,hostRef,pid:launched.pid,
+    const binding = {bindingRef,appRef,hostRef,pid:launched.pid,
       processStamp:token(launched.processStamp)?launched.processStamp:null,windowRef:null};
     bindings.set(binding.bindingRef,binding);
     let observed;
@@ -69,13 +71,15 @@ export function createPresentationBridge(adapter,{surfaceProvider=null,surfaceHo
        !token(processStamp))return {schema:SCHEMA,status:"PRESENTATION_BINDING_INVALID"};
     if(!nativeReady||typeof adapter.reattach!=="function")
       return {schema:SCHEMA,status:"REATTACH_UNSUPPORTED"};
+    let bindingRef;
+    try {bindingRef=randomUUID();} catch {return {schema:SCHEMA,status:"BINDING_ID_UNAVAILABLE"};}
     let result;
     try {result=await adapter.reattach({appRef,hostRef,pid,processStamp});}
     catch {return {schema:SCHEMA,status:"REATTACH_FAILED"};}
     if(result?.status!=="REATTACHED"||result.pid!==pid ||
        result.processStamp!==processStamp || result.spawned!==false)
       return {schema:SCHEMA,status:"PROCESS_IDENTITY_UNVERIFIED"};
-    const binding={bindingRef:randomUUID(),appRef,hostRef,pid,
+    const binding={bindingRef,appRef,hostRef,pid,
       processStamp,windowRef:null};
     bindings.set(binding.bindingRef,binding);
     let observed;

@@ -1,7 +1,7 @@
 // U04 host-neutral presentation of a vendor-provided existing live surface.
 // The provider owns its runtime, session and exclusive input arbitration.
 // U04 neither creates a second program runtime nor mounts an unapproved HWND.
-import {randomUUID} from "node:crypto";
+import {presentationBindingId as randomUUID} from "./id.mjs";
 
 export const SURFACE_SCHEMA = "IWXA_PRESENTATION_SURFACE/1.0.0";
 export const SURFACE_MODES = Object.freeze(["EMBEDDED_VIEW", "SHARED_LIVE_SURFACE"]);
@@ -92,6 +92,8 @@ export function createPresentationSurfaceController(provider, host) {
         (surfaceRef!==null&&!name(surfaceRef)) ||
         (sessionRef!==null&&!name(sessionRef))) return fail("SURFACE_REQUEST_INVALID");
     if (!supported(mode)) return fail("SURFACE_UNSUPPORTED",capabilities().find(c=>c.mode===mode)?.reason);
+    let bindingRef;
+    try {bindingRef=randomUUID();} catch {return fail("BINDING_ID_UNAVAILABLE");}
     const receipt=await call(provider.attachSurface.bind(provider),{
       appRef,hostRef,mode,surfaceRef,sessionRef
     });
@@ -109,7 +111,7 @@ export function createPresentationSurfaceController(provider, host) {
       });
       return fail("SURFACE_PROOF_REJECTED");
     }
-    const b={bindingRef:randomUUID(),connectionRef:receipt.connectionRef,
+    const b={bindingRef,connectionRef:receipt.connectionRef,
       appRef,hostRef,mode,runtimeRef:receipt.runtimeRef,
       sessionRef:receipt.sessionRef,surfaceRef:receipt.surfaceRef,
       presentation:structuredClone(receipt.presentation),mountRef:null,
