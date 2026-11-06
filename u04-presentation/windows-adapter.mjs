@@ -3,7 +3,8 @@ import {isAbsolute} from "node:path";
 
 // A host-selected native executable; no shell and no U01 installation/connection.
 export function createWindowsPresentationAdapter({
-  observeWindow,focusWindow,resolveApprovedProgram,platform=process.platform
+  observeWindow,focusWindow,resolveApprovedProgram,approveExistingProcess,
+  verifyNativeProcessIdentity,captureProcessStamp,platform=process.platform
 }={}) {
   if (typeof observeWindow !== "function" || typeof focusWindow !== "function")
     throw Error("WINDOW_PORT_REQUIRED");
@@ -12,6 +13,9 @@ export function createWindowsPresentationAdapter({
     launchAvailable:platform==="win32"&&typeof resolveApprovedProgram==="function",
     launchReason:platform!=="win32"?"PLATFORM_UNSUPPORTED":"HOST_APPROVAL_REQUIRED",
     focusAvailable:platform==="win32",
+    reattachAvailable:platform==="win32" &&
+      typeof approveExistingProcess==="function" &&
+      typeof verifyNativeProcessIdentity==="function",
     embeddedView:false,
     async launch({appRef,hostRef,launchSpec}) {
       if(platform!=="win32") return {status:"PLATFORM_UNSUPPORTED"};
@@ -33,8 +37,43 @@ export function createWindowsPresentationAdapter({
           child.once("spawn",()=>resolve({status:"LAUNCHED",pid:child.pid}));
         });
         child.unref();
+        if (result.status==="LAUNCHED" && typeof captureProcessStamp==="function") {
+          try {
+            const stamp=await captureProcessStamp(result.pid);
+            if(typeof stamp==="string" && stamp.length>0 && stamp.length<=256)
+              return {...result,processStamp:stamp};
+          } catch {/* PID observation is optional, not a fabricated identity. */}
+        }
         return result;
       } catch {return {status:"LAUNCH_FAILED"};}
+    },
+    async verifyProcessIdentity({pid,processStamp}) {
+      if(platform!=="win32" || typeof verifyNativeProcessIdentity!=="function")
+        return {verified:false,status:"PROCESS_IDENTITY_UNAVAILABLE"};
+      if(!Number.isSafeInteger(pid)||pid<=0||typeof processStamp!=="string"||
+         !processStamp || processStamp.length>256)
+        return {verified:false,status:"PROCESS_IDENTITY_INVALID"};
+      try {
+        const observation=await verifyNativeProcessIdentity({pid,processStamp});
+        return {verified:observation?.verified===true};
+      } catch {return {verified:false,status:"PROCESS_IDENTITY_UNAVAILABLE"};}
+    },
+    async reattach({appRef,hostRef,pid,processStamp}) {
+      if(platform!=="win32")return {status:"PLATFORM_UNSUPPORTED"};
+      if(typeof approveExistingProcess!=="function" ||
+         typeof verifyNativeProcessIdentity!=="function")
+        return {status:"REATTACH_UNSUPPORTED"};
+      if(!Number.isSafeInteger(pid)||pid<=0||typeof processStamp!=="string"||
+         !processStamp||processStamp.length>256)return {status:"PROCESS_IDENTITY_INVALID"};
+      try {
+        const approved=await approveExistingProcess({appRef,hostRef,pid,processStamp});
+        if(approved?.approved!==true||approved.pid!==pid||
+           approved.processStamp!==processStamp)
+          return {status:"HOST_APPROVAL_REQUIRED"};
+        const native=await verifyNativeProcessIdentity({pid,processStamp});
+        if(native?.verified!==true)return {status:"PROCESS_IDENTITY_CHANGED"};
+        return {status:"REATTACHED",pid,processStamp,spawned:false};
+      } catch {return {status:"REATTACH_FAILED"};}
     },
     async observe({pid}) {
       if(platform!=="win32") return {observed:false,status:"PLATFORM_UNSUPPORTED"};
