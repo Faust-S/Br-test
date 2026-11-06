@@ -99,3 +99,51 @@ test("closing binding during pending focus does not return a stale success",asyn
  resolve({focused:true});
  assert.equal((await pending).status,"BINDING_NOT_FOUND");
 });
+
+test("Agent 0.3 native reattach requires exact host approval and OS process identity",async()=>{
+ let approvals=0,observations=0;
+ const port=createWindowsPresentationAdapter({
+  platform:"win32",
+  observeWindow:async pid=>{observations++;return {observed:true,
+    windows:[{handle:1234}]};},
+  focusWindow:async(pid,handle)=>({focused:pid===4512&&handle===1234}),
+  approveExistingProcess:async({appRef,hostRef,pid,processStamp})=>{
+    approvals++;return {approved:appRef==="obsidian"&&hostRef==="agent",
+      pid,processStamp};
+  },
+  verifyNativeProcessIdentity:async({pid,processStamp})=>({
+    verified:pid===4512&&processStamp==="native-start-4512"
+  })
+ });
+ const bridge=createPresentationBridge(port);
+ const connected=await bridge.reattach({appRef:"obsidian",hostRef:"agent",
+   pid:4512,processStamp:"native-start-4512"});
+ assert.equal(connected.status,"WINDOW_OBSERVED");
+ assert.equal(connected.spawned,false);
+ assert.equal(connected.binding.processId,4512);
+ assert.equal(connected.binding.processStamp,"native-start-4512");
+ const focus=await bridge.activate({bindingRef:connected.binding.bindingRef,
+   hostRef:"agent"});
+ assert.equal(focus.status,"WINDOW_FOCUSED");
+ assert.equal(focus.focused,true);
+ assert.equal((await bridge.activate({bindingRef:connected.binding.bindingRef,
+   hostRef:"wrong-host"})).status,"BINDING_NOT_FOUND");
+ assert.equal((await bridge.closeBinding({bindingRef:connected.binding.bindingRef,
+   hostRef:"agent"})).processTerminated,false);
+ const denied=await bridge.reattach({appRef:"obsidian",hostRef:"agent",
+   pid:4512,processStamp:"stale-start"});
+ assert.equal(denied.status,"PROCESS_IDENTITY_UNVERIFIED");
+ assert.equal(approvals,2);
+ assert.ok(observations>=2);
+});
+
+test("Agent 0.3 Windows reattach remains unavailable without host-provided native verifier",async()=>{
+ const adapter=createWindowsPresentationAdapter({platform:"win32",
+   observeWindow:async()=>({observed:false}),focusWindow:async()=>({focused:false})});
+ assert.equal(adapter.reattachAvailable,false);
+ assert.equal((await adapter.reattach({appRef:"obsidian",hostRef:"agent",
+   pid:1,processStamp:"native"})).status,"REATTACH_UNSUPPORTED");
+ assert.equal((await createPresentationBridge(adapter).reattach({
+   appRef:"obsidian",hostRef:"agent",pid:1,processStamp:"native"
+ })).status,"PROCESS_IDENTITY_UNVERIFIED");
+});
