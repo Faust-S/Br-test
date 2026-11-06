@@ -31,6 +31,7 @@ import {assess} from '@iwxa/capability-sdk';
 import {bindModuleToU01Host} from '@iwxa/capability-sdk/host-binding';
 import {projectU01Capabilities} from '@iwxa/capability-sdk/u01-bridge';
 import {inspectT2Contract} from '@iwxa/capability-sdk/t2-manifest';
+import {projectProgramCard} from '@iwxa/capability-sdk/program-card';
 const descriptor={schema:'IWXA_MODULE_DESCRIPTOR/1.0.0',id:'iwxa.packaged.node',
  version:'0.1.0',provides:[],requires:[{id:'iwxa.cli.evaluate',range:'=1.0.0'}],
  hostCompatibility:[{hostId:'iwxa.node.consumer',range:'=0.1.0'}]};
@@ -58,6 +59,7 @@ assert.equal((await bridge.detach(attached.hostReceipt.bindingRef)).detached,tru
 assert.equal(attachCalls,1);assert.equal(detachCalls,1);
 assert.equal(assess(descriptor,{...host,version:'0.2.0'},projectU01Capabilities(current,bindings)).compatible,false);
 assert.equal(typeof inspectT2Contract,'function');
+assert.equal(typeof projectProgramCard,'function');
 console.log(JSON.stringify({consumer:'node',packaged:true,status:'PASS'}));
 """
 
@@ -67,6 +69,7 @@ from iwxa_capability_sdk import assess
 from host_binding import U03HostBinding
 from u01_bridge import observe_u01_capabilities
 from t2_manifest import inspect_t2_contract
+from program_card import project_program_card
 epoch='packagedhostepoch0001'
 descriptor={'schema':'IWXA_MODULE_DESCRIPTOR/1.0.0','id':'iwxa.packaged.python',
  'version':'0.1.0','provides':[],
@@ -99,6 +102,7 @@ assert binding.detach(receipt['hostReceipt']['bindingRef'])['detached']
 assert len(attached)==1 and detached==['host:python:binding']
 assert not assess(descriptor,{**host,'version':'0.2.0'},observe_u01_capabilities(conn,config))['compatible']
 assert callable(inspect_t2_contract)
+assert callable(project_program_card)
 print(json.dumps({'consumer':'python','packaged':True,'status':'PASS'}))
 """
 

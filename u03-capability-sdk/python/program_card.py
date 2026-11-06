@@ -94,8 +94,7 @@ def _initial(row,version):
 
 def _state(row,state,reason=None,source=None,reference=None):
     row.update({'state':state,'reason':reason,
-                'verified':state in ('AVAILABLE','EXECUTABLE') or
-                (state=='INTEGRATED' and _reference(reference)),
+                'verified':state in ('AVAILABLE','EXECUTABLE'),
                 'observationSource':source,
                 'observationRef':reference if _reference(reference) else None})
     return row

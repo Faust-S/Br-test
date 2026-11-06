@@ -68,7 +68,7 @@ function initial(row,version){
 }
 function setState(value,state,reason=null,source=null,reference=null){
   value.state=state;value.reason=reason;
-  value.verified=state==='AVAILABLE'||state==='EXECUTABLE'||state==='INTEGRATED'&&ref(reference);
+  value.verified=state==='AVAILABLE'||state==='EXECUTABLE';
   value.observationSource=source;
   value.observationRef=ref(reference)?reference:null;
   return value;
