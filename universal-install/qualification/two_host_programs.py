@@ -63,6 +63,14 @@ def qualify():
             if not installed.installed:
                 raise RuntimeError("INSTALL_FAILED")
             program=Path(installed.executable)
+            original_stat=program.stat()
+            reapproval=backend.apply(package,str(stage),approved)
+            if not reapproval.installed or reapproval.executable!=str(program):
+                raise RuntimeError("SECOND_INSTALL_NOT_REUSED")
+            after_stat=program.stat()
+            if (original_stat.st_size,original_stat.st_mtime_ns)!=(
+                after_stat.st_size,after_stat.st_mtime_ns):
+                raise RuntimeError("SECOND_INSTALL_REPLACED_EXISTING_BINARY")
             installed_binary_bytes=program.stat().st_size
             # A prefix such as jq-1.8 must not qualify jq-1.8.1.
             prefix_spec={**manifest,"version_contains":manifest["version_contains"].rsplit(".",1)[0]}
@@ -173,7 +181,8 @@ def qualify():
                            "node_process_with_connection_ms":round(node_ms,3),
                            "rust_host_qualified":rust_qualified,
                            "rust_binary_bytes":rust_binary_bytes,
-                           "installed_binary_bytes":installed_binary_bytes})
+                           "installed_binary_bytes":installed_binary_bytes,
+                           "existing_install_reused":True,"reinstalled":False})
     print(json.dumps({"schema":"IWXA_PROGRAM_INTEGRATION_QUALIFICATION/1",
                       "status":"PASS","platform":platform,"results":report},sort_keys=True))
 
