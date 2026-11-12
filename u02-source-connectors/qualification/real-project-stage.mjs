@@ -10,10 +10,11 @@ import {createLocalFileSourcePort} from '../local-file.mjs';
 import {readSelectedProjectSources,checkpointSelectedProjectSources,
   projectSourceObservationsForKnowledge,inspectSelectedProjectSources} from '../selected-project.mjs';
 import {revalidateSelectedProjectRead} from '../selected-project-revalidate.mjs';
+import {prepareSelectedTaskSources} from '../selected-task-inputs.mjs';
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
-if(!root||!['initial','reopen','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
+if(!root||!['initial','reopen','task','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
 const paths=[
  {key:'plan',format:'markdown',path:'docs/project-plan.md'},
  {key:'requirements',format:'markdown',path:'docs/requirements.md'},
@@ -135,6 +136,32 @@ if(phase==='initial'){
     key:s.key,revision:s.revision,contentRef:s.contentRef,change:s.change})),reopenMetrics:again.metrics}));
   console.log(JSON.stringify({schema:'IWXA_U02_REAL_PROJECT/1',phase,status:'PASS',
     restartedIndependentProcess:true,githubChange:gh.change,metrics:again.metrics}));
+}else if(phase==='task'){
+  const checkpoint=JSON.parse(await readFile(save,'utf8'));
+  const result=await prepareSelectedTaskSources({
+    scopeId:'iwxa_selected_project',
+    sources:[...local(),github()],
+    previous:checkpoint,
+    isCurrent:()=>true
+  });
+  assert.equal(result.status,'READY',JSON.stringify(result.issues));
+  assert.equal(result.ready,true);
+  assert.equal(result.authority,'OBSERVATION_ONLY');
+  assert.equal(result.observations.length,5);
+  assert.equal(result.checkpoint.sources.length,5);
+  assert.equal(result.metrics.read.refreshCalls,5);
+  assert.equal(result.metrics.read.pinnedReadCalls,5);
+  assert.equal(result.metrics.revalidation.refreshCalls,5);
+  assert.equal(result.metrics.revalidation.pinnedReadCalls,0);
+  assert.ok(result.observations.find(s=>s.key==='plan').text.includes('proposal'));
+  assert.ok(result.observations.find(s=>s.key==='github-license').text.includes('MIT License'));
+  const original=JSON.parse(await readFile(view,'utf8'));
+  await writeFile(view,JSON.stringify({...original,taskSources:result.observations.map(s=>({
+    key:s.key,sourceRef:s.sourceRef,revision:s.revision,contentRef:s.contentRef
+  })),taskMetrics:result.metrics}));
+  console.log(JSON.stringify({schema:'IWXA_U02_REAL_TASK_INPUTS/1',phase,status:'PASS',
+    exactSourceCount:5,finalRevalidated:true,taskReady:true,
+    additionalPinnedReads:0,metrics:result.metrics}));
 }else if(phase==='inspect'){
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
   let accidentalReads=0;

@@ -9,3 +9,4 @@ export {createHostSelectedSourcePort} from './host-source.mjs';
 export {TASK_SOURCE_SCHEMA,bindSourceObject,linkTaskSource,assessTaskSourceFreshness} from './task-object.mjs';
 export {PROJECT_FRESHNESS_SCHEMA,inspectSelectedProjectSources} from './selected-project.mjs';
 export {PROJECT_REVALIDATION_SCHEMA,revalidateSelectedProjectRead} from './selected-project-revalidate.mjs';
+export {TASK_INPUTS_SCHEMA,prepareSelectedTaskSources} from './selected-task-inputs.mjs';

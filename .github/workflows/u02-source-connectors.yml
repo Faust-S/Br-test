@@ -91,5 +91,6 @@ jobs:
           mkdir -p "$U02_PROJECT_ROOT"
           node u02-source-connectors/qualification/real-project-stage.mjs initial
           node u02-source-connectors/qualification/real-project-stage.mjs reopen
+          node u02-source-connectors/qualification/real-project-stage.mjs task
           node u02-source-connectors/qualification/real-project-stage.mjs inspect
           node u02-source-connectors/qualification/real-project-stage.mjs change

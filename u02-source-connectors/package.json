@@ -31,6 +31,7 @@
     "task-source-link-v1.schema.json",
     "consumers/agent03-evidence.mjs",
     "selected-project.mjs",
-    "selected-project-revalidate.mjs"
+    "selected-project-revalidate.mjs",
+    "selected-task-inputs.mjs"
   ]
 }

@@ -15,3 +15,4 @@ export {TASK_SOURCE_SCHEMA,bindSourceObject,linkTaskSource,assessTaskSourceFresh
 export {PROJECT_VIEW_SCHEMA, PROJECT_CHECKPOINT_SCHEMA, readSelectedProjectSources, checkpointSelectedProjectSources, projectSourceObservationsForKnowledge} from './selected-project.mjs';
 export {PROJECT_FRESHNESS_SCHEMA,inspectSelectedProjectSources} from './selected-project.mjs';
 export {PROJECT_REVALIDATION_SCHEMA,revalidateSelectedProjectRead} from './selected-project-revalidate.mjs';
+export {TASK_INPUTS_SCHEMA,prepareSelectedTaskSources} from './selected-task-inputs.mjs';

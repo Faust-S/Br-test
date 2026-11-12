@@ -24,13 +24,14 @@ test('standalone U02 package imports without U01/Atlas/Center sibling sources', 
     const script = `import {sourceDescriptor, captureSource, readPinnedSource,
       createHttpSourcePort, createLocalFileSourcePort, createAtlasGitHubSourcePort,
       createLocalGitSourcePort, createProgramCapabilityView, inspectSelectedProjectSources,
-      revalidateSelectedProjectRead} from '@iwxa/u02-source-connectors';
+      revalidateSelectedProjectRead,prepareSelectedTaskSources} from '@iwxa/u02-source-connectors';
       if (typeof captureSource !== 'function' || typeof readPinnedSource !== 'function' ||
         typeof createHttpSourcePort !== 'function' || typeof createLocalFileSourcePort !== 'function' ||
         typeof createAtlasGitHubSourcePort !== 'function' || typeof createLocalGitSourcePort !== 'function' ||
         typeof createProgramCapabilityView !== 'function' ||
         typeof inspectSelectedProjectSources !== 'function' ||
         typeof revalidateSelectedProjectRead !== 'function' ||
+        typeof prepareSelectedTaskSources !== 'function' ||
         sourceDescriptor({providerId:'file.local',sourceRef:'file://a/b'}).authority !== 'OBSERVATION_ONLY')
         process.exit(3);
       const agent = await import('@iwxa/u02-source-connectors/agent03');
@@ -39,7 +40,8 @@ test('standalone U02 package imports without U01/Atlas/Center sibling sources', 
         typeof agent.compareAgent03P04AtlasReference !== 'function' ||
         typeof web.assessTaskSourceFreshness !== 'function' ||
         typeof web.inspectSelectedProjectSources !== 'function' ||
-        typeof web.revalidateSelectedProjectRead !== 'function') process.exit(4);
+        typeof web.revalidateSelectedProjectRead !== 'function' ||
+        typeof web.prepareSelectedTaskSources !== 'function') process.exit(4);
       console.log('U02_PACKAGE_IMPORT_PASS');`;
     const ran = spawnSync(process.execPath, ['--input-type=module', '-e', script], {
       cwd: root, encoding: 'utf8', timeout: 10000, windowsHide: true
