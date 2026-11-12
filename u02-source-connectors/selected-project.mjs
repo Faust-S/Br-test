@@ -12,6 +12,9 @@ const validDescriptor = d => d?.schema === SOURCE_SCHEMA && d.authority === OBSE
   && typeof d.providerId === 'string' && typeof d.sourceRef === 'string'
   && Array.isArray(d.capabilities);
 const hasRead = d => d.capabilities.some(c => c.id === 'source.read' && c.available === true);
+const sameSource = (a, b) => validDescriptor(a) && validDescriptor(b) &&
+  a.providerId === b.providerId && a.sourceRef === b.sourceRef &&
+  a.observationType === b.observationType;
 const limit = 16 * 1024 * 1024;
 const elapsed = begin => Math.round((performance.now() - begin) * 1000) / 1000;
 
@@ -84,6 +87,14 @@ export async function readSelectedProjectSources({scopeId, sources, previous = n
       continue;
     }
     if (capture.observation?.status === 'OK') metrics.pinnedReadCalls++;
+    // The host may change its selected source while an async read is pending.
+    // Do not attribute newly selected bytes to the original source identity.
+    let afterRead;
+    try {afterRead = port.describe();} catch {}
+    if (!sameSource(d, capture?.descriptor) || !sameSource(d, afterRead)) {
+      rows.push(row('SOURCE_REBIND_REQUIRED', 'REBIND_REQUIRED'));
+      continue;
+    }
     if (capture.status !== 'OK' || capture.read?.status !== 'OK') {
       rows.push(row(capture.status, capture.status === 'SOURCE_MISSING' ? 'MISSING'
         : capture.status === 'REVISION_MISMATCH' ? 'CHANGED_DURING_READ' : 'UNKNOWN'));
@@ -190,6 +201,12 @@ export async function inspectSelectedProjectSources({scopeId, sources, previous 
     try {observed = await port.refresh();}
     catch {
       rows.push(row('SOURCE_UNAVAILABLE', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    let afterRefresh;
+    try {afterRefresh = port.describe();} catch {}
+    if (!sameSource(descriptor, afterRefresh)) {
+      rows.push(row('SOURCE_REBIND_REQUIRED', 'UNKNOWN', 'REBIND_REQUIRED'));
       continue;
     }
     if (observed?.schema !== SOURCE_SCHEMA ||
