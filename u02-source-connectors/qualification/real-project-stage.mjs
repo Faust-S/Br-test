@@ -39,10 +39,65 @@ const retry=async fn=>{
 if(phase==='initial'){
   await mkdir(join(root,'docs'),{recursive:true});
   await mkdir(join(root,'data'),{recursive:true});
-  await writeFile(join(root,paths[0].path),'# IWXA project\nMilestone: proposal\n');
-  await writeFile(join(root,paths[1].path),'# Requirements\nPinned sources and repeatable evidence\n');
-  await writeFile(join(root,paths[2].path),'item,cost\nreview,400\nsource-verify,300\n');
-  await writeFile(join(root,paths[3].path),JSON.stringify({project:'IWXA',revision:1,status:'draft'}));
+  const plan=[
+    '# IWXA U02 source project',
+    'Project ID: U02-CHECK-001',
+    'Objective: provide an Agent with current, traceable project materials.',
+    'Milestone: proposal',
+    'Owner: product integration; source ownership remains with each host.',
+    'Dependencies:',
+    '- requirements.md controls what an observation can claim;',
+    '- budget.csv records the labor estimate;',
+    '- project.json contains the progress state;',
+    '- the publicly observed Atlas LICENSE confirms external GitHub provenance.',
+    'Delivery steps:',
+    '1. Read and pin every explicitly selected source.',
+    '2. Save source refs and hashes in the existing host Task context.',
+    '3. Resume with new source ports in a fresh process.',
+    '4. Detect a changed document and a renamed source before preparing a result.',
+    'Acceptance: no old document content may be described as current after a change.',
+    'Acceptance: no source may grant write/apply/execute authority.',
+    'Acceptance: missing or unauthorized sources must remain visible as incomplete.'
+  ].join('\n')+'\n';
+  const requirements=[
+    '# Requirements for U02-CHECK-001',
+    'R-001: read the four selected local documents and the public Atlas GitHub file.',
+    'R-002: bind every source to host scope and exact provider/sourceRef.',
+    'R-003: record SHA-256 of actual bytes and exact pinned revision.',
+    'R-004: return historical references only as historical evidence.',
+    'R-005: detect changed, missing and inaccessible documents.',
+    'R-006: reject source rebindings until the host reselects them.',
+    'R-007: do not discover user home directories or inspect other projects.',
+    'R-008: do not transfer GitHub credentials to U02 or a public runner.',
+    'R-009: allow K01 to revalidate evidence at the point of Task use.',
+    'R-010: publish elapsed time, source reads and byte counts as measured.',
+    'Acceptance: independent processes agree on unchanged source revisions.',
+    'Acceptance: subsequent edits change the returned project material.'
+  ].join('\n')+'\n';
+  const budget=[
+    'workstream,hours,rate,total,owner',
+    'source_selection,3,100,300,agent_host',
+    'github_readback,4,105,420,u02',
+    'local_revisions,5,95,475,u02',
+    'knowledge_revalidation,4,110,440,k01',
+    'final_review,2,90,180,product',
+    'TOTAL,18,,1815,'
+  ].join('\n')+'\n';
+  const state={
+    projectId:'U02-CHECK-001',revision:1,status:'draft',
+    requirementsVersion:'R-010',documentCount:4,externalSource:'Faust-S/Atlas',
+    milestones:[
+      {name:'Initial observation',state:'planned',requiredSources:5},
+      {name:'Independent readback',state:'planned',requiredSources:5},
+      {name:'Revision change',state:'planned',requiredSources:4},
+      {name:'Knowledge revalidation',state:'planned',requiredSources:1}
+    ],
+    acceptance:{noSilentStale:true,readOnly:true,checkpointOwner:'host'}
+  };
+  await writeFile(join(root,paths[0].path),plan);
+  await writeFile(join(root,paths[1].path),requirements);
+  await writeFile(join(root,paths[2].path),budget);
+  await writeFile(join(root,paths[3].path),JSON.stringify(state,null,2));
   const first=await retry(()=>readSelectedProjectSources({scopeId:'iwxa_selected_project',sources:[...local(),github()]}));
   assert.equal(first.complete,true,JSON.stringify(first.sources.map(s=>({key:s.key,status:s.status}))));
   assert.equal(first.sources.length,5);
@@ -76,7 +131,11 @@ if(phase==='initial'){
 }else{
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
   // A real second local revision and a renamed file; previous bytes remain historical.
-  await writeFile(join(root,paths[0].path),'# IWXA project\nMilestone: approved, execution ready\n');
+  const priorPlan=await readFile(join(root,paths[0].path),'utf8');
+  assert.match(priorPlan,/Milestone: proposal/);
+  await writeFile(join(root,paths[0].path),priorPlan.replace('Milestone: proposal',
+    'Milestone: approved, execution ready'));
+
   await rename(join(root,paths[1].path),join(root,'docs','requirements-renamed.md'));
   const changed=await readSelectedProjectSources({scopeId:'iwxa_selected_project',
     sources:local(),previous:checkpoint});
