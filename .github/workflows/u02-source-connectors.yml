@@ -72,6 +72,18 @@ jobs:
       - name: Verify U02 WebView source entry with Center Vite
         shell: bash
         run: node u02-source-connectors/qualification/webview-bundle.mjs
+      - uses: actions/checkout@v4
+        with:
+          repository: Faust-S/knowledge
+          ref: 81de619f09f4393945ce5073fda5514729a67414
+          path: knowledge-public
+          persist-credentials: false
+      - name: Install public K01 source adapter runtime
+        shell: bash
+        run: npm install --prefix knowledge-public/modules/k01-context --ignore-scripts --no-audit --no-fund
+      - name: Verify U02 source evidence in actual K01 context and revalidation
+        shell: bash
+        run: node u02-source-connectors/qualification/k01-real-source.mjs
       - name: Real selected project with public GitHub and local documents
         shell: bash
         run: |
