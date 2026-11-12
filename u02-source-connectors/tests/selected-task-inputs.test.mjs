@@ -193,7 +193,7 @@ test('Task inputs: switching project during first read prevents all later host s
  });
  const later=createHostSelectedSourcePort({
   hostId:'agent',scopeId:'workspace_1',sourceId:'remote',bindingId:'a',
-  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('Remote document')}};
+  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('Remote document')}}
  });
  const result=await prepareSelectedTaskSources({scopeId:'workspace_1',
   sources:[{key:'first',format:'text',port:first},
@@ -221,7 +221,7 @@ test('Task inputs: cancel after first refresh prevents first pinned read and all
  });
  const second=createHostSelectedSourcePort({
   hostId:'agent',scopeId:'workspace_1',sourceId:'second',bindingId:'b',
-  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('second source')}};
+  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('second source')}}
  });
  const result=await prepareSelectedTaskSources({
   scopeId:'workspace_1',
@@ -249,7 +249,7 @@ test('Task inputs: cancellation in revalidation skips later owner refreshes',asy
  });
  const second=createHostSelectedSourcePort({
   hostId:'agent',scopeId:'workspace_1',sourceId:'second',bindingId:'c',
-  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('second source')}};
+  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('second source')}}
  });
  const result=await prepareSelectedTaskSources({
   scopeId:'workspace_1',
