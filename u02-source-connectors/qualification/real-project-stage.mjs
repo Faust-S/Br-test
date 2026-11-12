@@ -14,7 +14,7 @@ import {prepareSelectedTaskSources} from '../selected-task-inputs.mjs';
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
-if(!root||!['initial','reopen','task','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
+if(!root||!['initial','reopen','task','cancel','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
 const paths=[
  {key:'plan',format:'markdown',path:'docs/project-plan.md'},
  {key:'requirements',format:'markdown',path:'docs/requirements.md'},
@@ -162,6 +162,44 @@ if(phase==='initial'){
   console.log(JSON.stringify({schema:'IWXA_U02_REAL_TASK_INPUTS/1',phase,status:'PASS',
     exactSourceCount:5,finalRevalidated:true,taskReady:true,
     additionalPinnedReads:0,metrics:result.metrics}));
+}else if(phase==='cancel'){
+  const checkpoint=JSON.parse(await readFile(save,'utf8'));
+  let active=true,firstReads=0,otherNativeCalls=0;
+  const selected=[...local(),github()];
+  const first=selected[0].port;
+  selected[0]={...selected[0],port:{
+    describe:()=>first.describe(),
+    refresh:()=>first.refresh(),
+    read:async pin=>{
+      firstReads++;
+      const response=await first.read(pin);
+      active=false;
+      return response;
+    }
+  }};
+  for(let i=1;i<selected.length;i++){
+    const port=selected[i].port;
+    selected[i]={...selected[i],port:{
+      describe:()=>port.describe(),
+      refresh:()=>{otherNativeCalls++;return port.refresh()},
+      read:pin=>{otherNativeCalls++;return port.read(pin)}
+    }};
+  }
+  const cancelled=await prepareSelectedTaskSources({
+    scopeId:'iwxa_selected_project',sources:selected,
+    previous:checkpoint,isCurrent:()=>active
+  });
+  assert.equal(cancelled.status,'SUPERSEDED');
+  assert.equal(cancelled.ready,false);
+  assert.equal(cancelled.checkpoint,null);
+  assert.deepEqual(cancelled.observations,[]);
+  assert.equal(cancelled.metrics.revalidation,null);
+  assert.equal(firstReads,1);
+  assert.equal(otherNativeCalls,0,'No later local or public GitHub source requests');
+  console.log(JSON.stringify({schema:'IWXA_U02_REAL_TASK_CANCELLATION/1',
+    phase,status:'PASS',actualFirstSourceReads:firstReads,
+    actualLaterSourceRequests:otherNativeCalls,remoteGitHubRequests:0,
+    noPartialTaskEvidence:true}));
 }else if(phase==='inspect'){
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
   let accidentalReads=0;

@@ -179,3 +179,88 @@ test('Task inputs: retained checkpoint cannot authorize a re-bound provider',asy
    assert.deepEqual(follow.observations,[]);
  } finally {await rm(p.root,{recursive:true,force:true});}
 });
+
+
+test('Task inputs: switching project during first read prevents all later host source reads',async()=>{
+ let active=true, firstCalls=0, laterCalls=0;
+ const first=createHostSelectedSourcePort({
+  hostId:'agent',scopeId:'workspace_1',sourceId:'first',bindingId:'a',
+  readSelected:()=>{
+   firstCalls++;
+   if(firstCalls===2)active=false;
+   return {status:'OK',bytes:enc('First document')};
+  }
+ });
+ const later=createHostSelectedSourcePort({
+  hostId:'agent',scopeId:'workspace_1',sourceId:'remote',bindingId:'a',
+  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('Remote document')}};
+ });
+ const result=await prepareSelectedTaskSources({scopeId:'workspace_1',
+  sources:[{key:'first',format:'text',port:first},
+   {key:'remote',format:'text',port:later}],
+  isCurrent:()=>active});
+ assert.equal(result.status,'SUPERSEDED');
+ assert.equal(result.ready,false);
+ assert.equal(result.checkpoint,null);
+ assert.deepEqual(result.observations,[]);
+ assert.equal(firstCalls,2);
+ assert.equal(laterCalls,0,'superseded selection must not open remote source');
+ assert.equal(result.metrics.revalidation,null);
+ assert.ok(!JSON.stringify(result).includes('First document'));
+});
+
+test('Task inputs: cancel after first refresh prevents first pinned read and all later I/O',async()=>{
+ let active=true,firstCalls=0,laterCalls=0;
+ const first=createHostSelectedSourcePort({
+  hostId:'agent',scopeId:'workspace_1',sourceId:'first',bindingId:'b',
+  readSelected:()=>{
+   firstCalls++;
+   active=false;
+   return {status:'OK',bytes:enc('first source')};
+  }
+ });
+ const second=createHostSelectedSourcePort({
+  hostId:'agent',scopeId:'workspace_1',sourceId:'second',bindingId:'b',
+  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('second source')}};
+ });
+ const result=await prepareSelectedTaskSources({
+  scopeId:'workspace_1',
+  sources:[{key:'first',format:'text',port:first},
+   {key:'second',format:'text',port:second}],
+  isCurrent:()=>active
+ });
+ assert.equal(result.status,'SUPERSEDED');
+ assert.deepEqual(result.observations,[]);
+ assert.equal(result.checkpoint,null);
+ assert.equal(firstCalls,1);
+ assert.equal(laterCalls,0);
+ assert.equal(result.metrics.read.pinnedReadCalls,0);
+});
+
+test('Task inputs: cancellation in revalidation skips later owner refreshes',async()=>{
+ let active=true,firstCalls=0,laterCalls=0;
+ const first=createHostSelectedSourcePort({
+  hostId:'agent',scopeId:'workspace_1',sourceId:'first',bindingId:'c',
+  readSelected:()=>{
+   firstCalls++;
+   if(firstCalls===3)active=false;
+   return {status:'OK',bytes:enc('first source')};
+  }
+ });
+ const second=createHostSelectedSourcePort({
+  hostId:'agent',scopeId:'workspace_1',sourceId:'second',bindingId:'c',
+  readSelected:()=>{laterCalls++;return {status:'OK',bytes:enc('second source')}};
+ });
+ const result=await prepareSelectedTaskSources({
+  scopeId:'workspace_1',
+  sources:[{key:'first',format:'text',port:first},
+   {key:'second',format:'text',port:second}],
+  isCurrent:()=>active
+ });
+ assert.equal(result.status,'SUPERSEDED');
+ assert.deepEqual(result.observations,[]);
+ assert.equal(result.checkpoint,null);
+ assert.equal(firstCalls,3,'one final revision observation is allowed');
+ assert.equal(laterCalls,2,'second source must not be reobserved after cancel');
+ assert.equal(result.metrics.revalidation.pinnedReadCalls,0);
+});

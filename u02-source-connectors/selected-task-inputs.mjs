@@ -16,7 +16,22 @@ export async function prepareSelectedTaskSources({scopeId,sources,previous=null,
     observations:[],checkpoint:null,issues,metrics
   });
   if (!current()) return blocked('SUPERSEDED',null,[]);
-  const read=await readSelectedProjectSources({scopeId,sources,previous,maxTotalBytes});
+  // Snapshot the host's selected entries. A superseded Task must not keep
+  // reading other files or fetch remote sources just to discard their output.
+  // Existing SourceConnectorPort methods still own every authorization check.
+  const selected=Array.isArray(sources)?sources.map(entry=>{
+    const port=entry?.port;
+    if(typeof port?.describe!=='function'||
+       typeof port?.refresh!=='function'||typeof port?.read!=='function')
+      return entry;
+    const guard=()=>{if(!current())throw Error('TASK_INPUTS_SUPERSEDED');};
+    return {...entry,port:{
+      describe:()=>port.describe(),
+      refresh:async()=>{guard();return port.refresh();},
+      read:async pin=>{guard();return port.read(pin);}
+    }};
+  }):sources;
+  const read=await readSelectedProjectSources({scopeId,sources:selected,previous,maxTotalBytes});
   const metrics={read:read.metrics,revalidation:null};
   if (!current()) return blocked('SUPERSEDED',metrics,[]);
   if (sources.length===0 || !read.complete) {
@@ -34,7 +49,7 @@ export async function prepareSelectedTaskSources({scopeId,sources,previous=null,
     // spend extra I/O revalidating the already-incomplete selection.
     return blocked('INCOMPLETE',metrics,issues);
   }
-  const final=await revalidateSelectedProjectRead({view:read,sources});
+  const final=await revalidateSelectedProjectRead({view:read,sources:selected});
   metrics.revalidation=final.revalidation;
   if (!current()) return blocked('SUPERSEDED',metrics,[]);
   const issues=final.sources.filter(row=>row.status!=='OK').map(row=>({
