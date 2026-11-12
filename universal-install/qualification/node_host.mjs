@@ -26,14 +26,17 @@ if(connected.status!=="CONNECTED")throw Error("NODE_CONNECT_FAILED");
 if(!connected.connection_epoch||connected.installation_verified!==true)
  throw Error("NODE_CONNECTED_IDENTITY_UNVERIFIED");
 const ready=connection.capabilities();
-if(ready.operations.length!==1 || ready.operations[0].verified!==false)throw Error("NODE_CAPABILITY_FALSE_CLAIM");
+if(JSON.stringify(ready.operations.map(x=>x.name))!==JSON.stringify(Object.keys(spec.operations).sort())||
+   !ready.operations.every(x=>x.declared===true&&x.verified===false))
+ throw Error("NODE_CAPABILITY_FALSE_CLAIM");
 const executed=connection.invoke("evaluate",{expression:"6 * 7"});
 if(executed.status!=="EXECUTED" || executed.output.trim()!=="42")throw Error("NODE_INVOKE_FAILED");
 if(executed.connection_epoch!==connected.connection_epoch||
    executed.installation_identity?.sha256!==spec.executable_sha256)
  throw Error("NODE_EXECUTION_SESSION_OR_PIN_MISMATCH");
 if(connection.invoke("evaluate",{expression:"7 * 8"}).output.trim()!=="56")throw Error("NODE_DYNAMIC_INPUT_FAILED");
-if(!connection.capabilities().operations[0].verified)throw Error("NODE_CAPABILITY_NOT_VERIFIED");
+if(!connection.capabilities().operations.find(x=>x.name==="evaluate")?.verified)
+ throw Error("NODE_CAPABILITY_NOT_VERIFIED");
 if(connection.invoke("unlisted").status!=="OPERATION_UNSUPPORTED")throw Error("NODE_UNLISTED_OPERATION");
 for(const inherited of ["constructor","toString","__proto__","valueOf"]){
  if(connection.invoke(inherited).status!=="OPERATION_UNSUPPORTED")
@@ -58,13 +61,13 @@ try {
  utimesSync(copy,st.atime,new Date(st.mtimeMs+10_000));
  if(test.capabilities().status!=="CONNECTION_LOST")
   throw Error("NODE_IDENTITY_CHANGE_NOT_DETECTED_ON_CAPABILITIES");
- if(test.capabilities().operations[0].verified)
+ if(test.capabilities().operations.some(x=>x.verified))
   throw Error("NODE_IDENTITY_STALE_CAPABILITY");
  if(test.verify().status!=="NOT_CONNECTED")
   throw Error("NODE_IDENTITY_VERIFY_AFTER_DISCONNECT");
  if(test.recover().status!=="CONNECTED")
   throw Error("NODE_IDENTITY_RECOVER_FAILED");
- if(test.capabilities().operations[0].verified)
+ if(test.capabilities().operations.some(x=>x.verified))
   throw Error("NODE_RECOVER_FALSE_CAPABILITY");
 } finally {rmSync(temp,{recursive:true,force:true});}
 const uiHost=createHostAdapter(async ({operation,request})=>

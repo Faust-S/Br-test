@@ -10,6 +10,11 @@ const HEX64=/^[a-f0-9]{64}$/;
 const name=/^[a-z][a-z0-9_]*$/;
 const slot=x=>/^\{([a-z][a-z0-9_]*)\}$/.exec(x)||
   /^[a-z][a-z0-9_-]*=\{([a-z][a-z0-9_]*)\}$/.exec(x);
+export function argumentParameterNames(args){
+  if(!Array.isArray(args)||args.some(x=>typeof x!=="string"))
+    throw Error("CLI_ARGUMENTS_INVALID");
+  return [...new Set(args.map(x=>slot(x)?.[1]).filter(Boolean))].sort();
+}
 function pinnedHash(path){
   const before=lstatSync(path,{bigint:true});
   if(!before.isFile()||before.isSymbolicLink()||before.size>1073741824n)
@@ -62,7 +67,7 @@ export function validateCliSpec(spec) {
 function bindArgs(args,params={}) {
   if(!params || typeof params!=="object" || Array.isArray(params) ||
      Object.keys(params).length>8)throw Error("CLI_INPUT_INVALID");
-  const names=new Set(args.map(x=>slot(x)?.[1]).filter(Boolean));
+  const names=new Set(argumentParameterNames(args));
   if(Object.keys(params).length!==names.size ||
      Object.keys(params).some(k=>!names.has(k) || typeof params[k]!=="string" ||
                               params[k].length>16384 || params[k].includes("\0")))

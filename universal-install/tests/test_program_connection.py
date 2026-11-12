@@ -1,5 +1,6 @@
 """Cross-platform native CLI invocation and real Windows no-console verification."""
 import hashlib
+import json
 import os
 from unittest import mock
 import sys
@@ -9,10 +10,29 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "universal-install"))
-from iwxa_universal_install.program_connection import run_command, CliConnection, ProgramError
+from iwxa_universal_install.program_connection import run_command, CliConnection, ProgramError, argument_parameter_names
 
 
 class CliProcessHostTest(unittest.TestCase):
+    def test_agent05_file_input_parameter_templates_are_discoverable(self):
+        catalog_path = ROOT / "universal-install" / "catalog" / "cli-connectors-1.json"
+        catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+        by_id = {p["program_id"]: p for p in catalog["programs"]}
+        jq = by_id["JQ_CLI_V1"]
+        yq = by_id["YQ_CLI_V1"]
+        self.assertEqual(argument_parameter_names(jq["operations"]["evaluate"]),
+                         ["expression"])
+        self.assertEqual(argument_parameter_names(jq["operations"]["transform_json"]),
+                         ["filter", "input"])
+        self.assertEqual(argument_parameter_names(yq["operations"]["read_yaml_json"]),
+                         ["input"])
+        self.assertEqual(argument_parameter_names(["--","file={path}","{expression}"]),
+                         ["expression","path"])
+        with self.assertRaisesRegex(ValueError, "CLI_ARGUMENTS_INVALID"):
+            argument_parameter_names(["{input}", None])
+        self.assertEqual(jq["version_contains"],"jq-1.8.1")
+        self.assertEqual(yq["version_contains"],"v4.54.1")
+
     def test_native_python_process_result(self):
         code, output = run_command(sys.executable, ["-c", "print(6 * 7)"])
         self.assertEqual(code, 0)

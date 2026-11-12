@@ -83,7 +83,10 @@ def qualify():
             if connected["status"]!="CONNECTED":
                 raise RuntimeError("PYTHON_CONNECT_FAILED")
             capabilities=connection.capabilities()
-            if capabilities["operations"]!=[{"name":"evaluate","declared":True,"verified":False}]:
+            if capabilities["operations"] != [
+                {"name":op,"declared":True,"verified":False}
+                for op in sorted(manifest["operations"])
+            ]:
                 raise RuntimeError("CAPABILITY_UNVERIFIED_LABEL_INVALID")
             direct_start=time.perf_counter()
             direct=subprocess.run([str(program),"-n","6 * 7"],capture_output=True,
@@ -95,8 +98,42 @@ def qualify():
             alternate=connection.invoke("evaluate",{"expression":"7 * 8"})
             if alternate["status"]!="EXECUTED" or alternate["output"].strip()!="56":
                 raise RuntimeError("DYNAMIC_PARAMETER_NOT_EXECUTED")
-            if not connection.capabilities()["operations"][0]["verified"]:
+            if not next(x for x in connection.capabilities()["operations"]
+                        if x["name"]=="evaluate")["verified"]:
                 raise RuntimeError("CAPABILITY_NOT_VERIFIED_AFTER_REAL_EXECUTION")
+            if any(x["verified"] for x in connection.capabilities()["operations"]
+                   if x["name"]!="evaluate"):
+                raise RuntimeError("UNINVOKED_FILE_CAPABILITY_FALSELY_VERIFIED")
+            # A user-selected source is actually read by the installed CLI.
+            source_path = root / ("file-source-" + name)
+            if name == "JQ_CLI_V1":
+                source_path = source_path.with_suffix(".json")
+                source_path.write_text('{"rows":[{"units":2,"price":19},{"units":3,"price":7}]}',
+                                       encoding="utf-8")
+                filter_path = root / "user-transform.jq"
+                filter_path.write_text(".rows | map(.units * .price) | add\n",encoding="utf-8")
+                document = connection.invoke("transform_json",{
+                    "filter":str(filter_path),"input":str(source_path)})
+                if document["status"]!="EXECUTED" or document["output"].strip()!="59":
+                    raise RuntimeError("JQ_REAL_FILE_OPERATION_FAILED")
+            else:
+                source_path = source_path.with_suffix(".yaml")
+                source_path.write_text('rows:\n  - units: 2\n    price: 19\n'
+                                       '  - units: 3\n    price: 7\n',encoding="utf-8")
+                document = connection.invoke("read_yaml_json",{"input":str(source_path)})
+                if document["status"]!="EXECUTED" or json.loads(document["output"])!={
+                    "rows":[{"units":2,"price":19},{"units":3,"price":7}]}:
+                    raise RuntimeError("YQ_REAL_FILE_OPERATION_FAILED")
+            file_readback = root / ("file-output-" + name + ".txt")
+            file_readback.write_text(document["output"],encoding="utf-8")
+            if file_readback.read_text(encoding="utf-8") != document["output"]:
+                raise RuntimeError("FILE_OPERATION_OUTPUT_NOT_READABLE")
+            if document.get("connection_epoch") != connected["connection_epoch"]:
+                raise RuntimeError("FILE_OPERATION_SESSION_CHANGED")
+            if not next(x for x in connection.capabilities()["operations"]
+                        if x["name"] != "evaluate")["verified"]:
+                raise RuntimeError("FILE_OPERATION_CAPABILITY_NOT_VERIFIED")
+            file_operation_pass=True
             if connection.invoke("not_declared")["status"]!="OPERATION_UNSUPPORTED":
                 raise RuntimeError("UNDECLARED_OPERATION_ACCEPTED")
             connection.disconnect()
@@ -118,13 +155,13 @@ def qualify():
             os.utime(shadow,ns=(st.st_atime_ns,st.st_mtime_ns+10_000_000_000))
             if shadow_connection.capabilities()["status"]!="CONNECTION_LOST":
                 raise RuntimeError("SHADOW_CAPABILITY_IDENTITY_CHANGE_UNDETECTED")
-            if shadow_connection.capabilities()["operations"][0]["verified"]:
+            if any(x["verified"] for x in shadow_connection.capabilities()["operations"]):
                 raise RuntimeError("SHADOW_STALE_CAPABILITY")
             if shadow_connection.verify()["status"]!="NOT_CONNECTED":
                 raise RuntimeError("SHADOW_VERIFY_AFTER_DISCONNECT_FAILED")
             if shadow_connection.recover()["status"]!="CONNECTED":
                 raise RuntimeError("SHADOW_RECOVER_FAILED")
-            if shadow_connection.capabilities()["operations"][0]["verified"]:
+            if any(x["verified"] for x in shadow_connection.capabilities()["operations"]):
                 raise RuntimeError("SHADOW_FALSE_CAPABILITY_AFTER_RECOVERY")
             node_start=time.perf_counter()
             node=subprocess.run(["node",str(ROOT/"universal-install"/"qualification"/"node_host.mjs"),
@@ -182,7 +219,8 @@ def qualify():
                            "rust_host_qualified":rust_qualified,
                            "rust_binary_bytes":rust_binary_bytes,
                            "installed_binary_bytes":installed_binary_bytes,
-                           "existing_install_reused":True,"reinstalled":False})
+                           "existing_install_reused":True,"reinstalled":False,
+                           "real_file_operation":file_operation_pass})
     print(json.dumps({"schema":"IWXA_PROGRAM_INTEGRATION_QUALIFICATION/1",
                       "status":"PASS","platform":platform,"results":report},sort_keys=True))
 

@@ -13,6 +13,11 @@
         "evaluate": [
           "-n",
           "{expression}"
+        ],
+        "transform_json": [
+          "-f",
+          "{filter}",
+          "{input}"
         ]
       }
     },
@@ -28,6 +33,12 @@
         "evaluate": [
           "-n",
           "{expression}"
+        ],
+        "read_yaml_json": [
+          "eval",
+          "-o=json",
+          ".",
+          "{input}"
         ]
       }
     }

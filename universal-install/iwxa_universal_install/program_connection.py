@@ -43,6 +43,18 @@ def validate_spec(data):
             raise ValueError("CLI_ARGUMENTS_INVALID")
     return data
 
+def argument_parameter_names(args):
+    """Names exposed by a reviewed CLI argv template, for product-host forms."""
+    if not isinstance(args, list) or any(not isinstance(arg, str) for arg in args):
+        raise ValueError("CLI_ARGUMENTS_INVALID")
+    names = set()
+    for arg in args:
+        match = re.fullmatch(r"(?:[a-z][a-z0-9_-]*=)?\{([a-z][a-z0-9_]*)\}", arg)
+        if match:
+            names.add(match.group(1))
+    return sorted(names)
+
+
 def bind_arguments(args, params):
     """Replace only declared whole-argument placeholders; never use a shell."""
     if params is None:
@@ -52,7 +64,7 @@ def bind_arguments(args, params):
     def key(arg):
         match = re.fullmatch(r"(?:[a-z][a-z0-9_-]*=)?\{([a-z][a-z0-9_]*)\}", arg)
         return match.group(1) if match else None
-    declared = {key(arg) for arg in args if key(arg) is not None}
+    declared = set(argument_parameter_names(args))
     if set(params) != declared or any(
         not isinstance(value, str) or len(value) > 16384 or "\0" in value
         for value in params.values()
