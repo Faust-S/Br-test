@@ -335,9 +335,17 @@ def run_case(destination):
             if corrupt.returncode==0 or "EVIDENCE_CHANGED" not in corrupt.stderr:
                 raise RuntimeError("TAMPERED_READBACK_ACCEPTED")
             csv.write_bytes(valid)
+            normalized_catalog=work/"catalog.json"
+            original_catalog=normalized_catalog.read_bytes()
+            normalized_catalog.write_bytes(original_catalog+b" ")
+            stale_source,_=call_node("verify",jq_executable,work,jq_digest,check=False)
+            if stale_source.returncode==0 or "EVIDENCE_SOURCE_CHANGED" not in stale_source.stderr:
+                raise RuntimeError("STALE_SOURCE_READBACK_ACCEPTED")
+            normalized_catalog.write_bytes(original_catalog)
             verified, readback_ms=call_node("verify",jq_executable,work,jq_digest)
             checked=json.loads(verified.stdout.strip())
-            if checked["status"]!="PASS" or checked["invoked_again"] is not False:
+            if (checked["status"]!="PASS" or checked["invoked_again"] is not False
+                    or checked["verified_sources"]!=4):
                 raise RuntimeError("HOST_RESTART_READBACK_FAILED")
             output_files=("sales.json","catalog.yaml","returns.yaml","stock.yaml",
                 "catalog.json","returns.json","stock.json","report.json","lines.csv",
@@ -359,6 +367,7 @@ def run_case(destination):
                 "independent_financial_readback":True,
                 "lost_ack_no_reexecution":True,
                 "corrupted_file_detected":True,
+                "source_change_detected":True,
                 "host_restart_readback_no_invoke":True,
                 "api_handshake_separate_qualification":True,
                 "latency_ms":{"yq_operations":timings,"node_case_process":node_ms,

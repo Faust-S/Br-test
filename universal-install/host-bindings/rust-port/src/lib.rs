@@ -152,7 +152,8 @@ fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static st
     if out.len() as u64 > MAX_OUTPUT || err.len() as u64 > MAX_OUTPUT {
         return Err("CLI_OUTPUT_TOO_LARGE");
     }
-    Ok((code, String::from_utf8_lossy(&out).into_owned()))
+    let output = String::from_utf8(out).map_err(|_| "CLI_OUTPUT_ENCODING_UNSUPPORTED")?;
+    Ok((code, output))
 }
 
 pub struct CliPort {
@@ -273,31 +274,36 @@ impl CliPort {
     }
     pub fn invoke(&mut self, name: &str, params: &Value) -> Value {
         if self.identity.is_none() {
-            return self.observation("NOT_CONNECTED", json!({"executed":false}));
+            return self.observation("NOT_CONNECTED", json!({"executed":false,"executionOutcome":"NONE"}));
         }
         if file_identity(&self.executable) != self.identity {
             self.disconnect_state();
-            return self.observation("CONNECTION_LOST", json!({"executed":false}));
+            return self.observation("CONNECTION_LOST", json!({"executed":false,"executionOutcome":"NONE"}));
         }
         let template = match self.operations.get(name) {
             Some(t) => t,
-            None => return self.observation("OPERATION_UNSUPPORTED", json!({"executed":false}))
+            None => return self.observation("OPERATION_UNSUPPORTED", json!({"executed":false,"executionOutcome":"NONE"}))
         };
         let argv = match bind(template, params) {
             Ok(v) => v,
-            Err(e) => return self.observation(e, json!({"executed":false}))
+            Err(e) => return self.observation(e, json!({"executed":false,"executionOutcome":"NONE"}))
         };
         let start = Instant::now();
         let (code, output) = match execute(&self.executable, &argv) {
             Ok(value) => value,
-            Err(e) => return self.observation(e, json!({"executed":false}))
+            Err(e) => {
+                self.verified.remove(name);
+                return self.observation(e, json!({"executed":false,"executionOutcome":"UNKNOWN"}))
+            }
         };
         if code != 0 {
-            return self.observation("EXECUTION_FAILED", json!({"executed":false,"exit_code":code}));
+            self.verified.remove(name);
+            return self.observation("EXECUTION_FAILED",
+                json!({"executed":false,"executionOutcome":"UNKNOWN","exit_code":code}));
         }
         self.verified.insert(name.to_owned());
         self.observation("EXECUTED", json!({
-            "executed":true,"operation":name, "output":output,
+            "executed":true,"executionOutcome":"ACKNOWLEDGED","operation":name, "output":output,
             "elapsed_ms":(start.elapsed().as_secs_f64()*1000.0*1000.0).round()/1000.0
         }))
     }
@@ -360,6 +366,13 @@ sys.{stream}.flush(); time.sleep(30)"
             assert!(start.elapsed() < Duration::from_secs(8),
                 "oversized {stream} blocked until timeout");
         }
+    }
+    #[test]
+    fn non_utf8_output_is_not_reported_as_valid_text() {
+        let args = ["-c".to_string(),
+            "import sys;sys.stdout.buffer.write(bytes([255]))".to_string()];
+        assert_eq!(execute(&PathBuf::from("python"), &args),
+            Err("CLI_OUTPUT_ENCODING_UNSUPPORTED"));
     }
     #[test]
     fn versions_have_exact_boundaries() {

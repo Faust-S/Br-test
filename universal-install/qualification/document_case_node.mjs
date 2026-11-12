@@ -9,6 +9,7 @@ const [mode,executable,dir,digest]=process.argv.slice(2);
 if(!["build","verify"].includes(mode)||!dir)throw Error("DOCUMENT_CASE_INVOCATION_INVALID");
 const hash=path=>createHash("sha256").update(readFileSync(path)).digest("hex");
 const outputNames=["report.json","lines.csv","summary.md"];
+const sourceNames=["sales.json","catalog.json","returns.json","stock.json"];
 const receiptPath=join(dir,"result-evidence.json");
 if(mode==="verify"){
  if(!existsSync(receiptPath))throw Error("EVIDENCE_MISSING");
@@ -21,12 +22,19 @@ if(mode==="verify"){
      hash(join(dir,name))!==value)throw Error("EVIDENCE_CHANGED:"+name);
  }
  assert.equal(Object.keys(record.output_sha256).length,outputNames.length);
+ if(!record.source_sha256||Object.keys(record.source_sha256).length!==sourceNames.length)
+  throw Error("EVIDENCE_SOURCE_LIST_INVALID");
+ for(const [name,value] of Object.entries(record.source_sha256)){
+  if(!sourceNames.includes(name)||typeof value!=="string"||
+     !/^[a-f0-9]{64}$/.test(value)||!existsSync(join(dir,name))||
+     hash(join(dir,name))!==value)throw Error("EVIDENCE_SOURCE_CHANGED:"+name);
+ }
  const report=JSON.parse(readFileSync(join(dir,"report.json"),"utf8"));
  assert.equal(report.schema,"IWXA_U01_DOCUMENT_REPORT/1");
  // No CLI program connection, re-install, or operation invocation in verify mode.
  console.log(JSON.stringify({schema:"IWXA_U01_DOCUMENT_CASE_READBACK/1",
   status:"PASS",verified_files:Object.keys(record.output_sha256).length,
-  invoked_again:false,installed_again:false,order_count:report.order_count,
+  verified_sources:sourceNames.length,invoked_again:false,installed_again:false,order_count:report.order_count,
   gross_margin_kopeks:report.totals.margin_kopeks}));
  process.exit(0);
 }

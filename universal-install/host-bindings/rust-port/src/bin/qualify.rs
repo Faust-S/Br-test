@@ -37,6 +37,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if port.capabilities()["operations"][0]["verified"] != true {
         return Err("RUST_CAPABILITY_NOT_VERIFIED".into());
     }
+    let broken = port.invoke("evaluate", &json!({"expression":"("}));
+    if status(&broken) != "EXECUTION_FAILED" || broken["executionOutcome"] != "UNKNOWN" ||
+       port.capabilities()["operations"][0]["verified"] != false {
+        return Err("RUST_FAILED_EXECUTION_RETAINED_PROOF".into());
+    }
+    let restored = port.invoke("evaluate", &json!({"expression":"6 * 7"}));
+    if status(&restored) != "EXECUTED" || restored["executionOutcome"] != "ACKNOWLEDGED" ||
+       port.capabilities()["operations"][0]["verified"] != true {
+        return Err("RUST_EXECUTION_PROOF_NOT_RESTORED".into());
+    }
     if status(&port.invoke("undefined", &Value::Null)) != "OPERATION_UNSUPPORTED" {
         return Err("RUST_UNDECLARED_OPERATION".into());
     }
