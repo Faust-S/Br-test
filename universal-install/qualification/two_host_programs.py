@@ -134,8 +134,10 @@ def qualify():
                 raise RuntimeError("FILE_OPERATION_OUTPUT_NOT_READABLE")
             if document.get("connection_epoch") != connected["connection_epoch"]:
                 raise RuntimeError("FILE_OPERATION_SESSION_CHANGED")
+            exact_file_operation = ("transform_json" if name == "JQ_CLI_V1"
+                                    else "read_yaml_json")
             if not next(x for x in connection.capabilities()["operations"]
-                        if x["name"] != "evaluate")["verified"]:
+                        if x["name"] == exact_file_operation)["verified"]:
                 raise RuntimeError("FILE_OPERATION_CAPABILITY_NOT_VERIFIED")
             file_operation_pass=True
             # A selectable query can work directly on the user's existing
