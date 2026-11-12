@@ -128,6 +128,50 @@ test('changed source bindings and unauthorized providers are reported without co
    /PROJECT_CHECKPOINT_INVALID/);
 });
 
+test('corrupted persisted checkpoint size or pin metadata cannot be reported current',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'u02-checkpoint-corrupt-'));
+ try {
+   await mkdir(join(root,'docs'));
+   await writeFile(join(root,'docs','plan.md'),'Current project plan');
+   const source=()=>({key:'plan',format:'markdown',port:createLocalFileSourcePort({
+     root,rootId:'project_a',relativePath:'docs/plan.md'})});
+   const first=await readSelectedProjectSources({scopeId:'project_a',sources:[source()]});
+   const checkpoint=JSON.parse(JSON.stringify(checkpointSelectedProjectSources(first)));
+   const wrongBytes=JSON.parse(JSON.stringify(checkpoint));
+   wrongBytes.sources[0].bytes+=17;
+   let pinnedReads=0;
+   const selected=source();
+   const observed=[{...selected,port:{
+     describe:()=>selected.port.describe(),
+     refresh:()=>selected.port.refresh(),
+     read:()=>{pinnedReads++;throw Error('MUST_NOT_READ_PINNED_BYTES');}
+   }}];
+   const damaged=await inspectSelectedProjectSources({
+     scopeId:'project_a',sources:observed,previous:wrongBytes});
+   assert.equal(damaged.sources[0].status,'SOURCE_INCONSISTENT');
+   assert.equal(damaged.sources[0].freshness,'UNKNOWN');
+   assert.equal(damaged.observationsComplete,false);
+   assert.equal(damaged.evidenceReady,false);
+   assert.equal(damaged.metrics.refreshCalls,1);
+   assert.equal(damaged.metrics.pinnedReadCalls,0);
+   assert.equal(pinnedReads,0);
+   const brokenPin=JSON.parse(JSON.stringify(checkpoint));
+   brokenPin.sources[0].pin.capabilities[0].available='yes';
+   await assert.rejects(()=>inspectSelectedProjectSources({
+     scopeId:'project_a',sources:observed,previous:brokenPin}),
+     /PROJECT_CHECKPOINT_INVALID/);
+   const invalidRef=JSON.parse(JSON.stringify(checkpoint));
+   invalidRef.sources[0].pin.sourceRef='';
+   await assert.rejects(()=>inspectSelectedProjectSources({
+     scopeId:'project_a',sources:observed,previous:invalidRef}),
+     /PROJECT_CHECKPOINT_INVALID/);
+   const valid=await inspectSelectedProjectSources({
+     scopeId:'project_a',sources:observed,previous:checkpoint});
+   assert.equal(valid.sources[0].freshness,'CURRENT');
+   assert.equal(pinnedReads,0);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('ambiguous unchanged revision with different contentRef fails closed',async()=>{
  const digest1='sha256:'+'a'.repeat(64),digest2='sha256:'+'b'.repeat(64);
  const d=sourceDescriptor({providerId:'host.file',sourceRef:'host://consistent'});

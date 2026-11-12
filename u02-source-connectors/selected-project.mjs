@@ -1,5 +1,5 @@
 import {captureSource, readPinnedSource} from './source-read.mjs';
-import {OBSERVATION_AUTHORITY, SOURCE_SCHEMA, requirePinnedSource} from './port.mjs';
+import {OBSERVATION_AUTHORITY, SOURCE_SCHEMA, requirePinnedSource, sourceDescriptor} from './port.mjs';
 
 // Stateless project read model. The host owns the selection, credentials,
 // persistence and Task/Result. No discovery, network retry, write or apply.
@@ -11,6 +11,16 @@ const digest = x => typeof x === 'string' && /^sha256:[a-f0-9]{64}$/i.test(x);
 const validDescriptor = d => d?.schema === SOURCE_SCHEMA && d.authority === OBSERVATION_AUTHORITY
   && typeof d.providerId === 'string' && typeof d.sourceRef === 'string'
   && Array.isArray(d.capabilities);
+// Checkpoint metadata is untrusted after persistence and JSON readback.
+const validSavedPin = p => {
+  if (!validDescriptor(p)) return false;
+  try {
+    sourceDescriptor({providerId: p.providerId, sourceRef: p.sourceRef,
+      revision: p.revision, observationType: p.observationType,
+      capabilities: p.capabilities});
+    return requirePinnedSource(p, p);
+  } catch {return false;}
+};
 const hasRead = d => d.capabilities.some(c => c.id === 'source.read' && c.available === true);
 const sameSource = (a, b) => validDescriptor(a) && validDescriptor(b) &&
   a.providerId === b.providerId && a.sourceRef === b.sourceRef &&
@@ -33,7 +43,7 @@ function checkInput({scopeId, sources, previous, maxTotalBytes}) {
   if (previous !== null && (previous?.schema !== PROJECT_CHECKPOINT_SCHEMA ||
       previous.scopeId !== scopeId || !Array.isArray(previous.sources) ||
       previous.sources.length > 24 || previous.sources.some(s => !id(s?.key) ||
-      !validDescriptor(s.pin) || !requirePinnedSource(s.pin, s.pin) ||
+      !validSavedPin(s.pin) ||
       !digest(s.contentRef) || !Number.isSafeInteger(s.bytes) || s.bytes < 0) ||
       new Set(previous.sources.map(s => s.key)).size !== previous.sources.length))
     throw Error('PROJECT_CHECKPOINT_INVALID');
@@ -222,15 +232,21 @@ export async function inspectSelectedProjectSources({scopeId, sources, previous 
         observed.status === 'SOURCE_MISSING' ? 'MISSING' : 'UNKNOWN'));
       continue;
     }
+    if (observed.bytes != null &&
+        (!Number.isSafeInteger(observed.bytes) || observed.bytes < 0)) {
+      rows.push(row('SOURCE_INVALID', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
     const current = observed.revision;
     if (typeof current !== 'string' || !/^(?:[a-f0-9]{40,64}|sha256:[a-f0-9]{64})$/i.test(current)) {
       rows.push(row('REVISION_UNAVAILABLE', 'UNKNOWN', 'UNKNOWN'));
       continue;
     }
-    // A content hash supplied by the provider cannot contradict a saved
-    // hash for an unchanged revision. This does not reread or validate bytes.
+    // An unchanged revision cannot contradict saved content identity OR
+    // byte count when the provider supplies them. No pinned content read.
     if (saved && current === saved.pin.revision &&
-        observed.contentRef != null && observed.contentRef !== saved.contentRef) {
+        ((observed.contentRef != null && observed.contentRef !== saved.contentRef) ||
+         (Number.isSafeInteger(observed.bytes) && observed.bytes !== saved.bytes))) {
       rows.push(row('SOURCE_INCONSISTENT', 'UNKNOWN', 'UNKNOWN'));
       continue;
     }

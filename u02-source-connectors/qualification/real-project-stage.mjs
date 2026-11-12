@@ -14,7 +14,7 @@ import {prepareSelectedTaskSources} from '../selected-task-inputs.mjs';
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
-if(!root||!['initial','reopen','task','cancel','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
+if(!root||!['initial','reopen','task','cancel','corrupt','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
 const paths=[
  {key:'plan',format:'markdown',path:'docs/project-plan.md'},
  {key:'requirements',format:'markdown',path:'docs/requirements.md'},
@@ -200,6 +200,32 @@ if(phase==='initial'){
     phase,status:'PASS',actualFirstSourceReads:firstReads,
     actualLaterSourceRequests:otherNativeCalls,remoteGitHubRequests:0,
     noPartialTaskEvidence:true}));
+}else if(phase==='corrupt'){
+  const checkpoint=JSON.parse(await readFile(save,'utf8'));
+  const changed=JSON.parse(JSON.stringify(checkpoint));
+  changed.sources[0].bytes+=1;
+  let pinnedReads=0;
+  const first=local()[0];
+  const selected=[{...first,port:{
+    describe:()=>first.port.describe(),
+    refresh:()=>first.port.refresh(),
+    read:()=>{pinnedReads++;throw Error('PINNED_READ_NOT_ALLOWED');}
+  }}];
+  const damaged=await inspectSelectedProjectSources({
+    scopeId:'iwxa_selected_project',sources:selected,previous:changed});
+  assert.equal(damaged.sources[0].status,'SOURCE_INCONSISTENT');
+  assert.equal(damaged.sources[0].freshness,'UNKNOWN');
+  assert.equal(damaged.observationsComplete,false);
+  assert.equal(damaged.metrics.refreshCalls,1);
+  assert.equal(damaged.metrics.pinnedReadCalls,0);
+  assert.equal(pinnedReads,0);
+  const undamaged=await inspectSelectedProjectSources({
+    scopeId:'iwxa_selected_project',sources:selected,previous:checkpoint});
+  assert.equal(undamaged.sources[0].freshness,'CURRENT');
+  assert.equal(pinnedReads,0);
+  console.log(JSON.stringify({schema:'IWXA_U02_REAL_CHECKPOINT_CORRUPTION/1',
+    phase,status:'PASS',damagedCheckpointRejected:true,
+    validCheckpointStillCurrent:true,pinnedReads}));
 }else if(phase==='inspect'){
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
   let accidentalReads=0;
