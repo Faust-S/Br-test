@@ -95,7 +95,7 @@ def sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    path.write_bytes((json.dumps(value, ensure_ascii=False, indent=2) + "\n").encode("utf-8"))
 
 def as_yaml(root, items):
     def value(v):
@@ -139,11 +139,11 @@ def make_sources(work):
         ("catalog.yaml", "products", products),
         ("returns.yaml", "returns", returns),
         ("stock.yaml", "stock", stock)):
-        (work / name).write_text(as_yaml(root, values), encoding="utf-8")
+        (work / name).write_bytes(as_yaml(root, values).encode("utf-8"))
     for name, value in (
         ("build_report.jq", REPORT_JQ), ("render_lines.jq", CSV_JQ),
         ("render_summary.jq", SUMMARY_JQ)):
-        (work / name).write_text(value.strip()+"\n", encoding="utf-8")
+        (work / name).write_bytes((value.strip()+"\n").encode("utf-8"))
     return {"orders": orders, "products": products, "returns": returns, "stock": stock}
 
 def installed_program(name, filename, platform, root):
@@ -293,12 +293,12 @@ def run_case(destination):
                 if converted[expected_key]!=source[expected_key]:
                     raise RuntimeError("YQ_DATA_CHANGED:"+name)
                 target=work/(name+".json")
-                target.write_text(result["output"],encoding="utf-8")
+                target.write_bytes(result["output"].replace("\r\n","\n").encode("utf-8"))
                 if json.loads(target.read_text(encoding="utf-8"))!=converted:
                     raise RuntimeError("YQ_READBACK_FAILED:"+name)
                 timings.append(result["elapsed_ms"])
             bad_file=work/"invalid.yaml"
-            bad_file.write_text("items: [broken\n",encoding="utf-8")
+            bad_file.write_bytes(b"items: [broken\n")
             rejected=yq.invoke("normalize",{"path":str(bad_file)})
             if rejected["status"]!="EXECUTION_FAILED" or rejected["executionOutcome"]!="UNKNOWN":
                 raise RuntimeError("YQ_BAD_YAML_NOT_REJECTED")

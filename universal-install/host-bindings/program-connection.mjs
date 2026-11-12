@@ -91,16 +91,19 @@ function executableIdentity(path) {
   }catch{return null;}
 }
 function run(path,args) {
-  const r=spawnSync(path,args,{encoding:"utf8",timeout:20000,maxBuffer:131072,
+  const r=spawnSync(path,args,{encoding:"buffer",timeout:20000,maxBuffer:131072,
     shell:false,windowsHide:true});
-  if (r.error?.code === "ETIMEDOUT") return {status:"CLI_TIMED_OUT"};
-  if (r.error) return {status:"CLI_EXECUTION_FAILED"};
-  return {status:r.status===0?"EXECUTED":"EXECUTION_FAILED",
-    code:r.status,output:r.stdout??""};
+  if(r.error?.code==="ETIMEDOUT")return {status:"CLI_TIMED_OUT"};
+  if(r.error?.code==="ENOBUFS")return {status:"CLI_OUTPUT_TOO_LARGE"};
+  if(r.error)return {status:"CLI_EXECUTION_FAILED"};
+  let output;
+  try{output=new TextDecoder("utf-8",{fatal:true}).decode(r.stdout??Buffer.alloc(0));}
+  catch{return {status:"CLI_OUTPUT_ENCODING_UNSUPPORTED"};}
+  return {status:r.status===0?"EXECUTED":"EXECUTION_FAILED",code:r.status,output};
 }
 // Opt-in asynchronous invocation for desktop hosts that need interactive cancel.
 // Existing synchronous invoke() and all host-port contracts remain unchanged.
-function runAsync(path,args,signal){
+function runAsync(path,args,signal,timeoutMs=20000){
   if(signal?.aborted)return Promise.resolve({status:"CLI_CANCELLED",executionOutcome:"NONE"});
   return new Promise(resolve=>{
     let proc,complete=false,reason=null,started=false;
@@ -136,13 +139,15 @@ function runAsync(path,args,signal){
     proc.once("error",()=>finish({status:"CLI_EXECUTION_FAILED",
       executionOutcome:started?"UNKNOWN":"NONE"}));
     proc.once("close",code=>{
-      if(reason)return finish({status:reason,executionOutcome:started?"UNKNOWN":"NONE"});
+      if(reason)return finish({status:reason,executionOutcome:proc?.pid?"UNKNOWN":"NONE"});
       if(code!==0)return finish({status:"EXECUTION_FAILED",code,executionOutcome:"UNKNOWN"});
-      finish({status:"EXECUTED",code,output:Buffer.concat(out).toString("utf8"),
-        executionOutcome:"ACKNOWLEDGED"});
+      let output;
+      try{output=new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(out));}
+      catch{return finish({status:"CLI_OUTPUT_ENCODING_UNSUPPORTED",executionOutcome:"UNKNOWN"});}
+      finish({status:"EXECUTED",code,output,executionOutcome:"ACKNOWLEDGED"});
     });
     signal?.addEventListener("abort",onAbort,{once:true});
-    timeout=setTimeout(()=>stop("CLI_TIMED_OUT"),20000);
+    timeout=setTimeout(()=>stop("CLI_TIMED_OUT"),timeoutMs);
     if(signal?.aborted)onAbort();
   });
 }
@@ -360,7 +365,7 @@ export class CliConnection {
       executionOutcome:"ACKNOWLEDGED",...installation,...process,
       output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
   }
-  async invokeAsync(operation,params={}, {signal}={}){
+  async invokeAsync(operation,params={}, {signal,timeoutMs=20000}={}){
     if(!this.path)return this.observation("NOT_CONNECTED",{executed:false,
       executionOutcome:"NONE"});
     const path=this.path,identity=this.identity,epoch=this.epoch;
@@ -386,8 +391,10 @@ export class CliConnection {
     try{bound=bindArgs(this.spec.operations[operation],params);}catch{
       return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
     }
+    if(!Number.isFinite(timeoutMs)||timeoutMs<50||timeoutMs>20000)
+      return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
     const begin=performance.now();
-    const r=await runAsync(path,bound,signal);
+    const r=await runAsync(path,bound,signal,timeoutMs);
     if(this.path!==path||this.identity!==identity||this.epoch!==epoch)
       return this.observation("CONNECTION_SUPERSEDED",{executed:false,
         executionOutcome:r.executionOutcome==="NONE"?"NONE":"UNKNOWN"});

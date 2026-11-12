@@ -76,8 +76,11 @@ def executable_identity(path):
         return None
 
 
-def run_command(path, args, *, cancel_event=None):
-    """Run a native CLI with bounded streams and optional host-owned cancellation."""
+def run_command(path, args, *, cancel_event=None, timeout_seconds=20):
+    """Run one native child, bounded by host cancellation, time and stream bytes."""
+    if (type(timeout_seconds) not in (int, float) or not
+            0.05 <= timeout_seconds <= 20):
+        raise ProgramError("CLI_INPUT_INVALID")
     if cancel_event is not None and cancel_event.is_set():
         raise ProgramError("CLI_CANCELLED_BEFORE_START")
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
@@ -108,7 +111,7 @@ def run_command(path, args, *, cancel_event=None):
                for stream, buffer in zip(streams, buffers)]
     for reader in readers:
         reader.start()
-    deadline = time.monotonic() + 20
+    deadline = time.monotonic() + timeout_seconds
     try:
         while child.poll() is None:
             if cancel_event is not None and cancel_event.is_set():
@@ -130,7 +133,11 @@ def run_command(path, args, *, cancel_event=None):
             raise ProgramError("CLI_TIMED_OUT")
         if stream_failed.is_set():
             raise ProgramError("CLI_EXECUTION_FAILED")
-        return child.returncode, buffers[0].decode("utf-8", errors="replace")
+        try:
+            output = buffers[0].decode("utf-8", errors="strict")
+        except UnicodeDecodeError:
+            raise ProgramError("CLI_OUTPUT_ENCODING_UNSUPPORTED") from None
+        return child.returncode, output
     finally:
         if child.poll() is None:
             child.kill()
@@ -355,7 +362,7 @@ class CliConnection:
             operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])
 
-    def invoke(self, operation, params=None, *, cancel_event=None):
+    def invoke(self, operation, params=None, *, cancel_event=None, timeout_seconds=20):
         # A denied preflight must not be classified as an unknown external effect.
         if not self.path:
             return self.observation("NOT_CONNECTED", executed=False,
@@ -394,12 +401,14 @@ class CliConnection:
             return self.observation("CLI_CANCELLED", executed=False, executionOutcome="NONE")
         start = time.perf_counter()
         try:
-            code, output = run_command(self.path, bound, cancel_event=cancel_event)
+            code, output = run_command(self.path, bound, cancel_event=cancel_event,
+                                       timeout_seconds=timeout_seconds)
         except ProgramError as exc:
             return self.observation("CLI_CANCELLED" if exc.code == "CLI_CANCELLED_BEFORE_START"
                                     else exc.code, executed=False,
-                                    executionOutcome="NONE" if exc.code ==
-                                    "CLI_CANCELLED_BEFORE_START" else "UNKNOWN")
+                                    executionOutcome="NONE" if exc.code in
+                                    ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID")
+                                    else "UNKNOWN")
         if code:
             return self.observation("EXECUTION_FAILED", executed=False,
                                     executionOutcome="UNKNOWN", exit_code=code)

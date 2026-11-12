@@ -18,7 +18,7 @@ async function boundedText(response){
   return text;
  }
  const reader=response.body.getReader();
- const decoder=new TextDecoder();
+ const decoder=new TextDecoder("utf-8",{fatal:true});
  let output="",size=0,complete=false;
  try{
   while(true){
@@ -60,7 +60,8 @@ export class HttpProgramConnection {
     ?{connection_epoch:this.connectionEpoch}:{}),...extra};}
  inspect(){return this.observation("CONFIGURED",{connected:false,installed:false,
   interfaces:["http"],ownership:"EXTERNAL",process:"UNKNOWN"});}
- async request(path,method="GET",payload,epoch=this.generation){
+ async request(path,method="GET",payload,epoch=this.generation,hostSignal=null){
+  if(hostSignal?.aborted)return {cancelled:true,beforeSend:true};
   // Validate input before resolving host authorization so bad requests cannot
   // hold a connection open while waiting for the host credential provider.
   let body;
@@ -71,15 +72,19 @@ export class HttpProgramConnection {
   }
   let headers;
   try {headers={...await this.authHeaders(this.spec.program_id)};}
-  catch{return {ok:false,status:401,hostAuthorizationUnavailable:true};}
+  catch{return hostSignal?.aborted?{cancelled:true,beforeSend:true}:
+    {ok:false,status:401,hostAuthorizationUnavailable:true};}
   // An explicit disconnect during slow credential resolution must prevent the
   // native HTTP call from ever starting; checking after fetch is too late.
   if(epoch!==this.generation)return {superseded:true};
+  if(hostSignal?.aborted)return {cancelled:true,beforeSend:true};
   // Reject cross-origin redirects so credentials cannot follow HTTP 3xx.
-  const opts={method,headers,signal:AbortSignal.timeout(10000),redirect:"error"};
+  const limit=AbortSignal.timeout(10000);
+  const opts={method,headers,signal:hostSignal?AbortSignal.any([limit,hostSignal]):limit,
+    redirect:"error"};
   if(body!==undefined){opts.body=body;opts.headers["Content-Type"]="application/json";}
   try{return await this.fetcher(new URL(path,this.spec.base_url).toString(),opts);}
-  catch{return null;}
+  catch{return hostSignal?.aborted?{cancelled:true,afterSend:true}:null;}
  }
  async connect(){
   // Starting a new connection epoch invalidates previous capability proofs.
@@ -100,25 +105,36 @@ export class HttpProgramConnection {
  capabilities(){return this.observation(this.connected?"DECLARED":"NOT_CONNECTED",{
   connected:this.connected,operations:Object.keys(this.spec.operations).sort().map(name=>
    ({name,declared:true,verified:this.connected&&this.verified.has(name)}))});}
- async invoke(name,payload={}){
-  if(!this.connected)return this.observation("NOT_CONNECTED",{executed:false});
+ async invoke(name,payload={}, {signal}={}){
+  if(!this.connected)return this.observation("NOT_CONNECTED",
+    {executed:false,executionOutcome:"NONE"});
   // Object prototypes are not an authority to invoke an operation.
   if(typeof name!=="string"||!Object.hasOwn(this.spec.operations,name))
-   return this.observation("OPERATION_UNSUPPORTED",{executed:false});
+   return this.observation("OPERATION_UNSUPPORTED",
+     {executed:false,executionOutcome:"NONE"});
   const op=this.spec.operations[name];
   // GET parameters have no manifest mapping; never silently discard them.
   if(op.method==="GET"&&(payload===null||typeof payload!=="object"||
      Array.isArray(payload)||Object.keys(payload).length>0))
-   return this.observation("HTTP_INPUT_INVALID",{executed:false});
+   return this.observation("HTTP_INPUT_INVALID",
+     {executed:false,executionOutcome:"NONE"});
+  if(signal?.aborted)return this.observation("HTTP_CANCELLED",
+    {executed:false,executionOutcome:"NONE"});
   const epoch=this.generation;
-  const r=await this.request(op.path,op.method,op.method==="POST"?payload:undefined,epoch);
+  const r=await this.request(op.path,op.method,op.method==="POST"?payload:undefined,epoch,signal);
   if(epoch!==this.generation)
    return this.observation("CONNECTION_SUPERSEDED",{executionOutcome:"UNKNOWN"});
-  if(r?.inputInvalid)return this.observation("HTTP_INPUT_INVALID",{executed:false});
+  if(r?.inputInvalid)return this.observation("HTTP_INPUT_INVALID",
+    {executed:false,executionOutcome:"NONE"});
+  if(r?.cancelled){this.verified.delete(name);
+   return this.observation("HTTP_CANCELLED",
+    {executed:false,executionOutcome:r.beforeSend?"NONE":"UNKNOWN"});}
   if(!r){this.disconnect();
    return this.observation("HTTP_UNAVAILABLE",{executionOutcome:"UNKNOWN"});}
   if(r.status===401||r.status===403){
-   this.disconnect();return this.observation("AUTHORIZATION_REQUIRED",{executed:false});
+   const outcome=r.hostAuthorizationUnavailable?"NONE":"UNKNOWN";
+   this.disconnect();return this.observation("AUTHORIZATION_REQUIRED",
+    {executed:false,executionOutcome:outcome});
   }
   if(!r.ok){this.verified.delete(name);
    return this.observation("HTTP_EXECUTION_FAILED",
@@ -130,12 +146,16 @@ export class HttpProgramConnection {
     return this.observation("CONNECTION_SUPERSEDED",{executionOutcome:"UNKNOWN"});
    this.disconnect();
    const status=error?.message==="HTTP_OUTPUT_TOO_LARGE"?"HTTP_OUTPUT_TOO_LARGE":"HTTP_RESPONSE_UNAVAILABLE";
-   return this.observation(status,{executionOutcome:"UNKNOWN"});
+   return this.observation(signal?.aborted?"HTTP_CANCELLED":status,
+    {executed:false,executionOutcome:"UNKNOWN"});
   }
   if(epoch!==this.generation)
    return this.observation("CONNECTION_SUPERSEDED",{executionOutcome:"UNKNOWN"});
+  if(signal?.aborted){this.verified.delete(name);
+   return this.observation("HTTP_CANCELLED",{executed:false,executionOutcome:"UNKNOWN"});}
   this.verified.add(name);
-  return this.observation("EXECUTED",{executed:true,operation:name,output:body});
+  return this.observation("EXECUTED",
+    {executed:true,executionOutcome:"ACKNOWLEDGED",operation:name,output:body});
  }
  disconnect(){this.generation++;this.connected=false;this.verified.clear();this.connectionEpoch=null;
   return this.observation("DISCONNECTED",{connected:false});}

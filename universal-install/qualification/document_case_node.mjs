@@ -76,8 +76,9 @@ assert.equal(build.connection_epoch,aEpoch);
 const report=JSON.parse(build.output);
 assert.equal(report.schema,"IWXA_U01_DOCUMENT_REPORT/1");
 assert.ok(report.order_count>=20 && report.line_count>=40);
-writeFileSync(join(dir,"report.json"),build.output,"utf8");
-assert.equal(readFileSync(join(dir,"report.json"),"utf8"),build.output);
+const normalizeText=value=>value.replace(/\r\n/g,"\n");
+writeFileSync(join(dir,"report.json"),normalizeText(build.output),"utf8");
+assert.equal(readFileSync(join(dir,"report.json"),"utf8"),normalizeText(build.output));
 const render=async(name,filter)=>{
  const response=await atlas.port.invoke({operation:"render_file",params:{
    filter:join(dir,filter),input:join(dir,"report.json")}});
@@ -85,8 +86,8 @@ const render=async(name,filter)=>{
  assert.equal(response.connection_epoch,bEpoch);
  assert.equal(response.executionOutcome,"ACKNOWLEDGED");
  assert.ok(response.output.length>30);
- writeFileSync(join(dir,name),response.output,"utf8");
- assert.equal(readFileSync(join(dir,name),"utf8"),response.output);
+ writeFileSync(join(dir,name),normalizeText(response.output),"utf8");
+ assert.equal(readFileSync(join(dir,name),"utf8"),normalizeText(response.output));
 };
 await render("lines.csv","render_lines.jq");
 await render("summary.md","render_summary.jq");

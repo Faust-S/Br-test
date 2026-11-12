@@ -262,6 +262,41 @@ class CliProcessHostTest(unittest.TestCase):
                               if x["name"] == "slow")["verified"])
         self.assertEqual(conn.invoke("echo")["output"].strip(), "42")
 
+    def test_real_timeout_stops_child_and_does_not_verify_operation(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_TIMEOUT_NATIVE",
+                "executable_name": Path(executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"slow": ["-c", "import time;time.sleep(8)"]}}
+        conn = CliConnection(spec, executable)
+        connected = conn.connect()
+        started = time.monotonic()
+        result = conn.invoke("slow", timeout_seconds=0.2)
+        self.assertEqual((result["status"], result["executionOutcome"]),
+                         ("CLI_TIMED_OUT", "UNKNOWN"))
+        self.assertLess(time.monotonic()-started, 3.0)
+        self.assertFalse(conn.capabilities()["operations"][0]["verified"])
+        self.assertEqual(conn.capabilities()["connection_epoch"], connected["connection_epoch"])
+        rejected = conn.invoke("slow", timeout_seconds=0)
+        self.assertEqual((rejected["status"], rejected["executionOutcome"]),
+                         ("CLI_INPUT_INVALID", "NONE"))
+
+    def test_invalid_utf8_cli_output_is_not_declared_a_success(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_BINARY_OUTPUT",
+                "executable_name": Path(executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"bad_encoding": ["-c",
+                    "import sys;sys.stdout.buffer.write(bytes([255]))"]}}
+        conn = CliConnection(spec, executable)
+        self.assertEqual(conn.connect()["status"], "CONNECTED")
+        result = conn.invoke("bad_encoding")
+        self.assertEqual((result["status"],result["executionOutcome"]),
+                         ("CLI_OUTPUT_ENCODING_UNSUPPORTED","UNKNOWN"))
+        self.assertFalse(conn.capabilities()["operations"][0]["verified"])
+
     def test_excessive_output_is_rejected_before_timeout(self):
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):

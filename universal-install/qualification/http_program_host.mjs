@@ -10,6 +10,16 @@ const server=http.createServer(async(req,res)=>{
  if(req.url==="/health"&&req.method==="GET"){
   res.writeHead(200);res.end("ready");return;
  }
+ if(req.url==="/slow-evaluate"&&req.method==="POST"){
+  for await(const _chunk of req){}
+  calls++;
+  await new Promise(resolve=>setTimeout(resolve,380));
+  if(!res.destroyed){
+   res.writeHead(200,{"content-type":"application/json"});
+   res.end(JSON.stringify({answer:144}));
+  }
+  return;
+ }
  if(req.url==="/evaluate"&&req.method==="POST"){
   let data="";for await(const part of req)data+=part;
   const input=JSON.parse(data);calls++;
@@ -22,7 +32,8 @@ await new Promise(resolve=>server.listen(0,"127.0.0.1",resolve));
 try{
  const spec={schema:"IWXA_HTTP_PROGRAM/1",program_id:"HTTP_FIXTURE_V1",
   base_url:"http://127.0.0.1:"+server.address().port,health_path:"/health",
-  operations:{evaluate:{method:"POST",path:"/evaluate"}}};
+  operations:{evaluate:{method:"POST",path:"/evaluate"},
+              slow_evaluate:{method:"POST",path:"/slow-evaluate"}}};
  for(const invalid of ["https://untrusted.example/health","//untrusted.example/health",
                       "/../health","/%2f/health"]){
    assert.throws(()=>new HttpProgramConnection({...spec,health_path:invalid}),/HTTP_URL_INVALID/);
@@ -48,6 +59,7 @@ try{
  assert.equal(c.capabilities().operations[0].verified,false);
  const result=await c.invoke("evaluate",{a:6,b:7});
  assert.equal(result.status,"EXECUTED");
+ assert.equal(result.executionOutcome,"ACKNOWLEDGED");
  assert.equal(result.connection_epoch,firstConnect.connection_epoch);
  assert.equal(JSON.parse(result.output).answer,42);
  assert.equal(c.capabilities().operations[0].verified,true);
@@ -88,6 +100,21 @@ try{
  assert.equal((await c.invoke("evaluate",{a:2,b:3})).status,"NOT_CONNECTED");
  assert.equal((await c.recover()).status,"CONNECTED");
  assert.equal(calls,3);
+ const preAbort=new AbortController();
+ preAbort.abort();
+ const sentBefore=observedRedirectPolicy.length;
+ const notStarted=await c.invoke("slow_evaluate",{value:1},{signal:preAbort.signal});
+ assert.equal(notStarted.status,"HTTP_CANCELLED");
+ assert.equal(notStarted.executionOutcome,"NONE");
+ assert.equal(observedRedirectPolicy.length,sentBefore);
+ const lateAbort=new AbortController();
+ const delayed=c.invoke("slow_evaluate",{value:2},{signal:lateAbort.signal});
+ setTimeout(()=>lateAbort.abort(),180);
+ const abandoned=await delayed;
+ assert.equal(abandoned.status,"HTTP_CANCELLED");
+ assert.equal(abandoned.executionOutcome,"UNKNOWN");
+ assert.equal(c.capabilities().operations.find(x=>x.name==="slow_evaluate").verified,false);
+ assert.ok(calls>=4,"real request never reached the HTTP provider");
  assert.ok(observedRedirectPolicy.length>0);
  assert.ok(observedRedirectPolicy.every(policy=>policy==="error"));
 
@@ -195,5 +222,7 @@ try{
   disconnect_race_prevented:true,stale_read_race_prevented:true,
   bounded_response:true,broken_stream_fails_closed:true,
   prototype_methods_rejected:true,credentials_disconnect_fence:true,
-  invalid_url_and_get_params_rejected:true}));
+  invalid_url_and_get_params_rejected:true,
+  http_cancel_before_dispatch:"NONE",http_cancel_after_dispatch:"UNKNOWN",
+  successful_http_execution:"ACKNOWLEDGED"}));
 }finally{await new Promise(resolve=>server.close(resolve));}

@@ -18,7 +18,8 @@ const spec={
   echo:["-e","console.log(42)"],
   value:["-e","console.log(process.argv[1])","file={note}"],
   fail:["-e","process.exit(3)"],
-  slow:["-e","setTimeout(()=>{},9000)"]
+  slow:["-e","setTimeout(()=>{},9000)"],
+  binary:["-e","process.stdout.write(Buffer.from([255]))"]
  }
 };
 const observed={program_id:id,verified:true,status:"RUNNING",spawned:false,
@@ -59,6 +60,16 @@ const asyncCompleted=await first.invokeAsync("echo");
 assert.equal(asyncCompleted.status,"EXECUTED");
 assert.equal(asyncCompleted.output.trim(),"42");
 assert.equal(asyncCompleted.connection_epoch,a.connection_epoch);
+const stalled=await first.invokeAsync("slow",{}, {timeoutMs:180});
+assert.equal(stalled.status,"CLI_TIMED_OUT");
+assert.equal(stalled.executionOutcome,"UNKNOWN");
+const invalidTimeout=await first.invokeAsync("slow",{}, {timeoutMs:0});
+assert.equal(invalidTimeout.status,"CLI_INPUT_INVALID");
+assert.equal(invalidTimeout.executionOutcome,"NONE");
+const undecodable=first.invoke("binary");
+assert.equal(undecodable.status,"CLI_OUTPUT_ENCODING_UNSUPPORTED");
+assert.equal(undecodable.executionOutcome,"UNKNOWN");
+assert.equal(first.capabilities().operations.find(x=>x.name==="binary").verified,false);
 assert.equal(first.verify().connection_epoch,a.connection_epoch);
 const port=createProductHostPort("atlas",async({operation,request})=>
  operation==="invoke"?second.invoke(request.operation,request.params):second[operation]());
@@ -99,5 +110,6 @@ console.log(JSON.stringify({
  installed_identity_verified:true,process_restart_invalidates_session:true,
  no_hidden_program_launch:true,preflight_effect:"NONE",
  attempted_effect:"UNKNOWN",connected_epoch_isolation:true,
- cancel_before_start:"NONE",cancel_after_start:"UNKNOWN",async_readback:"42"
+ cancel_before_start:"NONE",cancel_after_start:"UNKNOWN",async_readback:"42",
+ native_timeout:"UNKNOWN",binary_output_refused:true
 }));
