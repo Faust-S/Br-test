@@ -21,8 +21,41 @@ class U03HostBinding:
     def describe(self):
         return self._adapter.describe()
 
+    def _snapshot(self):
+        # Preserve the exact read used by the U01 bridge, not a second probe.
+        # Stable receipt references can be reused across different programs,
+        # operation mappings or connection epochs: all three are owner identity.
+        selected = self._get_bindings()
+        actual = [None]
+        connection = self._connection
+
+        class OneRead:
+            def capabilities(self):
+                actual[0] = connection.capabilities()
+                return actual[0]
+
+        observations = observe_u01_capabilities(OneRead(), selected)
+        mapping = tuple(sorted((row['operation'], row['id'], row['version'])
+                               for row in selected['bindings']))
+        source = actual[0]
+        if isinstance(source, dict):
+            operations = source.get('operations')
+            operations = tuple(sorted(
+                ((row.get('name'), row.get('declared'), row.get('verified'))
+                 for row in operations if isinstance(row, dict)),
+                key=lambda item: str(item[0])
+            )) if isinstance(operations, list) else None
+            owner_identity = (source.get('schema'), source.get('program_id'),
+                              source.get('transport'), source.get('status'),
+                              source.get('connected'), source.get('connection_epoch'),
+                              operations)
+        else:
+            owner_identity = None
+        identity = (selected['programId'], mapping, owner_identity)
+        return observations, identity
+
     def _observations(self):
-        return observe_u01_capabilities(self._connection, self._get_bindings())
+        return self._snapshot()[0]
 
     def assess(self):
         return assess(self.describe(), deepcopy(self._host), self._observations())
@@ -34,7 +67,7 @@ class U03HostBinding:
                                    'reasons': ['U03_HOST_ATTACH_IN_PROGRESS']},
                     'hostReceipt': None}
         try:
-            before = self._observations()
+            before, owner_before = self._snapshot()
             result = self._adapter.attach(deepcopy(self._host), before)
             if not result['attached']:
                 return result
@@ -47,12 +80,13 @@ class U03HostBinding:
                         'hostReceipt': receipt,
                         'rollback': 'UNCONFIRMED', 'hostState': 'UNKNOWN'}
             try:
-                after = self._observations()
+                after, owner_after = self._snapshot()
                 assessment = assess(self.describe(), deepcopy(self._host), after)
             except Exception:
                 after = None
+                owner_after = None
                 assessment = {'compatible': False, 'reasons': ['U03_HOST_OBSERVATION_LOST']}
-            if assessment['compatible'] and before == after:
+            if assessment['compatible'] and before == after and owner_before == owner_after:
                 return result
             if assessment['compatible']:
                 assessment = {'compatible': False, 'reasons': ['U03_HOST_OBSERVATION_CHANGED']}

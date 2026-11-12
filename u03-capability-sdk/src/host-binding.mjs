@@ -9,19 +9,45 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
   const adapter = createModuleAdapter(descriptor, hooks);
   const owner = {hostId: host?.hostId, version: host?.version};
   const describe = () => adapter.describe();
-  const observe = async () => observeU01CapabilitiesAsync(port, await getBindings());
+  // Capture the same ONE U01 capabilities() read used by the public bridge.
+  // A recycled observationRef alone is insufficient proof that the selected
+  // program, operation mapping and connection epoch stayed unchanged.
+  const observe = async () => {
+    const selected = await getBindings();
+    let source = null;
+    const observations = await observeU01CapabilitiesAsync({
+      capabilities: async request => {
+        source = await port.capabilities(request);
+        return source;
+      },
+    }, selected);
+    const mapped = selected.bindings.map(x=>[x.operation,x.id,x.version])
+      .sort((a,b)=>a[0]<b[0]?-1:a[0]>b[0]?1:0);
+    const operations = Array.isArray(source?.operations)
+      ? source.operations.map(x=>[x?.name,x?.declared,x?.verified])
+        .sort((a,b)=>String(a[0]).localeCompare(String(b[0])))
+      : null;
+    const identity = JSON.stringify({
+      programId:selected.programId,mapped,
+      source:source&&typeof source==='object'&&!Array.isArray(source)
+        ? [source.schema,source.program_id,source.transport,source.status,
+           source.connected,source.connection_epoch??null,operations]
+        : null,
+    });
+    return {observations,identity};
+  };
   const refusedInFlight = () => ({attached: false,
     assessment: {compatible: false, reasons: ['U03_HOST_ATTACH_IN_PROGRESS']}, hostReceipt: null});
   let attaching = false; // Per-binding call guard, not a host registry or persistent state.
   return Object.freeze({
     describe,
-    assess: async () => assess(describe(), owner, await observe()),
+    assess: async () => assess(describe(), owner, (await observe()).observations),
     attach: async () => {
       if (attaching) return refusedInFlight();
       attaching = true;
       try {
         const before = await observe();
-        const result = await adapter.attach(owner, before);
+        const result = await adapter.attach(owner, before.observations);
         if (!result.attached) return result;
         const ref = result.hostReceipt?.bindingRef;
         if (typeof ref !== 'string' || ref.trim().length === 0) {
@@ -33,11 +59,13 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
         let after, assessment;
         try {
           after = await observe();
-          assessment = assess(describe(), owner, after);
+          assessment = assess(describe(), owner, after.observations);
         } catch {
           assessment = {compatible: false, reasons: ['U03_HOST_OBSERVATION_LOST']};
         }
-        if (assessment.compatible && JSON.stringify(before) === JSON.stringify(after))
+        if (assessment.compatible &&
+            JSON.stringify(before.observations) === JSON.stringify(after.observations) &&
+            before.identity === after.identity)
           return result;
         if (assessment.compatible)
           assessment = {compatible: false, reasons: ['U03_HOST_OBSERVATION_CHANGED']};
