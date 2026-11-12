@@ -84,8 +84,10 @@ function dataState(row,status,ui){
     return setState(row,'BLOCKED','NATIVE_CONTRACT_NOT_OBSERVED',STATUS);
   return setState(row,'AVAILABLE',null,STATUS,status.observationRef);
 }
-function discovered(row,inspect){
+function discovered(row,inspect,programId){
   if(!object(inspect)||inspect.schema!==PROGRAM)return row;
+  if(inspect.program_id!==programId)
+    return setState(row,'BLOCKED','DISCOVERY_IDENTITY_MISMATCH',PROGRAM);
   if(inspect.status==='DISCOVERED'&&inspect.installed===true)
     return setState(row,'AVAILABLE',null,PROGRAM,null);
   if(inspect.status==='CONFIGURED')
@@ -99,15 +101,26 @@ function invocation(row,observed,status,operation,programId){
     observed.connected===true&&typeof observed.connection_epoch==='string'&&
     scoped.test(observed.connection_epoch)&&Array.isArray(observed.operations);
   const found=sourceValid?observed.operations.find(x=>x?.name===operation):null;
-  row.firstUseCandidate=Boolean(found?.declared===true&&found.verified===false);
-  row.canOfferInvocation=row.firstUseCandidate;
+  // The U01 bridge has validated the full source, transport, operation and
+  // receipt before producing this status. A prior proof is not P01 authority.
   if(status.available){
-    if(status.version!==row.version)return setState(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',PROGRAM);
+    if(status.version!==row.version)
+      return setState(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',PROGRAM);
+    if(found?.declared!==true||found.verified!==true)
+      return setState(row,'BLOCKED','OWNER_SOURCE_INVALID',PROGRAM);
+    row.canOfferInvocation=true;
     row.executionConfirmed=true;
     return setState(row,'EXECUTABLE',null,PROGRAM,status.observationRef);
   }
-  if(status.reason==='operation-unverified'&&row.firstUseCandidate)
-    return setState(row,'INTEGRATED','operation-unverified',PROGRAM);
+  const first=found?.declared===true&&found.verified===false&&
+    status.reason==='operation-unverified';
+  const receiptMissing=found?.declared===true&&found.verified===true&&
+    status.reason==='execution-receipt-missing';
+  if(first||receiptMissing){
+    row.canOfferInvocation=true;
+    row.firstUseCandidate=first;
+    return setState(row,'INTEGRATED',status.reason,PROGRAM);
+  }
   return setState(row,'BLOCKED',status.reason??'OPERATION_UNAVAILABLE',PROGRAM);
 }
 
@@ -243,7 +256,7 @@ export function projectProgramCard({programId,descriptor,channels,statuses=[],
   }
   const capabilities=channels.map(binding=>{
     const row=initial(binding,declared.get(binding.id));
-    if(binding.kind==='DISCOVERY')return discovered(row,u01?.inspect);
+    if(binding.kind==='DISCOVERY')return discovered(row,u01?.inspect,programId);
     if(binding.kind==='DATA'||binding.kind==='NATIVE_CONTRACT')
       return dataState(row,statusIndex.get(binding.id),ui);
     if(binding.kind==='OPERATION'){

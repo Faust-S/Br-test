@@ -354,7 +354,8 @@
     "checks": {
       "iwxa.program.operation.execute": {
         "firstUseCandidate": true,
-        "executionConfirmed": false
+        "executionConfirmed": false,
+        "canOfferInvocation": true
       },
       "iwxa.program.window.linked": {
         "verified": false,
@@ -558,7 +559,8 @@
     "checks": {
       "iwxa.program.operation.execute": {
         "executionConfirmed": true,
-        "verified": true
+        "verified": true,
+        "canOfferInvocation": true
       },
       "iwxa.program.surface.embedded": {
         "verified": false,

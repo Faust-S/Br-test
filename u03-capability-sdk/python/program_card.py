@@ -114,9 +114,11 @@ def _data(row,status,ui):
     return _state(row,'AVAILABLE',None,STATUS,status['observationRef'])
 
 
-def _discovered(row,inspect):
+def _discovered(row,inspect,program_id):
     if not isinstance(inspect,dict) or inspect.get('schema')!=PROGRAM:
         return row
+    if inspect.get('program_id')!=program_id:
+        return _state(row,'BLOCKED','DISCOVERY_IDENTITY_MISMATCH',PROGRAM)
     if inspect.get('status')=='DISCOVERED' and inspect.get('installed') is True:
         return _state(row,'AVAILABLE',None,PROGRAM)
     if inspect.get('status')=='CONFIGURED':
@@ -134,16 +136,26 @@ def _invocation(row,observed,status,operation,program_id):
         isinstance(observed.get('operations'),list)
     found=next((x for x in observed['operations']
                 if isinstance(x,dict) and x.get('name')==operation),None) if valid else None
-    row['firstUseCandidate']=bool(found and found.get('declared') is True and
-                                  found.get('verified') is False)
-    row['canOfferInvocation']=row['firstUseCandidate']
+    # Existing U01 bridge already verifies the source, transport and receipt.
+    # A current execution proof is a UI hint, never a host invocation grant.
     if status['available']:
         if status.get('version')!=row['version']:
             return _state(row,'BLOCKED','CAPABILITY_VERSION_MISMATCH',PROGRAM)
+        if not found or found.get('declared') is not True or found.get('verified') is not True:
+            return _state(row,'BLOCKED','OWNER_SOURCE_INVALID',PROGRAM)
+        row['canOfferInvocation']=True
         row['executionConfirmed']=True
         return _state(row,'EXECUTABLE',None,PROGRAM,status.get('observationRef'))
-    if status.get('reason')=='operation-unverified' and row['firstUseCandidate']:
-        return _state(row,'INTEGRATED','operation-unverified',PROGRAM)
+    first=bool(found and found.get('declared') is True and
+               found.get('verified') is False and
+               status.get('reason')=='operation-unverified')
+    receipt_missing=bool(found and found.get('declared') is True and
+                         found.get('verified') is True and
+                         status.get('reason')=='execution-receipt-missing')
+    if first or receipt_missing:
+        row['canOfferInvocation']=True
+        row['firstUseCandidate']=first
+        return _state(row,'INTEGRATED',status.get('reason'),PROGRAM)
     return _state(row,'BLOCKED',status.get('reason','OPERATION_UNAVAILABLE'),PROGRAM)
 
 
@@ -293,7 +305,7 @@ def project_program_card(*,programId,descriptor,channels,statuses=None,u01=None,
     for binding in channels:
         row=_initial(binding,declared[binding['id']])
         if binding['kind']=='DISCOVERY':
-            result.append(_discovered(row,u01.get('inspect') if isinstance(u01,dict) else None))
+            result.append(_discovered(row,u01.get('inspect') if isinstance(u01,dict) else None,programId))
         elif binding['kind'] in ('DATA','NATIVE_CONTRACT'):
             result.append(_data(row,status_index.get(binding['id']),ui))
         elif binding['kind']=='OPERATION':

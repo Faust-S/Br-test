@@ -39,8 +39,11 @@ class ProgramCardConsumers(unittest.TestCase):
         sample=deepcopy(next(c['args'] for c in CASES if c['case']=='atlas_embedded_ui'))
         sample['u01']['capabilities']['connection_epoch']='epoch0000000000002'
         result=by_kind(project_program_card(**sample))
-        self.assertEqual(result['OPERATION']['state'],'BLOCKED')
+        self.assertEqual(result['OPERATION']['state'],'INTEGRATED')
         self.assertEqual(result['OPERATION']['reason'],'execution-receipt-missing')
+        self.assertTrue(result['OPERATION']['canOfferInvocation'])
+        self.assertFalse(result['OPERATION']['executionConfirmed'])
+        self.assertFalse(result['OPERATION']['verified'])
         self.assertEqual(result['EMBEDDED_VIEW']['state'],'DECLARED')
 
     def test_window_does_not_imply_embed(self):
@@ -66,6 +69,51 @@ class ProgramCardConsumers(unittest.TestCase):
         case['statuses'].append(case['statuses'][0])
         with self.assertRaisesRegex(ValueError,'U03_PROGRAM_CARD_INPUT_INVALID'):
             project_program_card(**case)
+
+    def test_raw_readiness_parity_and_missing_receipt(self):
+        sample=next(x['args'] for x in CASES if x['case']=='atlas_embedded_ui')
+        def operation(input_data):
+            return by_kind(project_program_card(**input_data))['OPERATION']
+        verified=operation(deepcopy(sample))
+        self.assertEqual(verified['state'],'EXECUTABLE')
+        self.assertTrue(verified['canOfferInvocation'])
+        self.assertTrue(verified['executionConfirmed'])
+        self.assertFalse(verified['firstUseCandidate'])
+        no_receipt=deepcopy(sample)
+        no_receipt['u01'].pop('receipts')
+        missing=operation(no_receipt)
+        self.assertEqual(missing['state'],'INTEGRATED')
+        self.assertEqual(missing['reason'],'execution-receipt-missing')
+        self.assertTrue(missing['canOfferInvocation'])
+        self.assertFalse(missing['firstUseCandidate'])
+        self.assertFalse(missing['executionConfirmed'])
+        self.assertFalse(missing['verified'])
+        self.assertIsNone(missing['observationRef'])
+        first=deepcopy(sample)
+        first['u01']['capabilities']['operations'][0]['verified']=False
+        unexecuted=operation(first)
+        self.assertEqual(unexecuted['state'],'INTEGRATED')
+        self.assertEqual(unexecuted['reason'],'operation-unverified')
+        self.assertTrue(unexecuted['canOfferInvocation'])
+        self.assertTrue(unexecuted['firstUseCandidate'])
+        disconnected=deepcopy(sample)
+        disconnected['u01']['capabilities'].update(connected=False,status='DISCONNECTED')
+        unavailable=operation(disconnected)
+        self.assertEqual(unavailable['state'],'BLOCKED')
+        self.assertFalse(unavailable['canOfferInvocation'])
+        self.assertFalse(unavailable['executionConfirmed'])
+
+    def test_discovery_requires_matching_program_id(self):
+        sample=deepcopy(next(x['args'] for x in CASES if x['case']=='obsidian_data_only'))
+        def discovery(input_data):
+            return by_kind(project_program_card(**input_data))['DISCOVERY']
+        self.assertEqual(discovery(sample)['state'],'AVAILABLE')
+        sample['u01']['inspect']['program_id']='OTHER_PROGRAM_V1'
+        self.assertEqual(discovery(sample)['state'],'BLOCKED')
+        self.assertEqual(discovery(sample)['reason'],'DISCOVERY_IDENTITY_MISMATCH')
+        sample['u01']['inspect'].pop('program_id')
+        self.assertEqual(discovery(sample)['state'],'BLOCKED')
+        self.assertFalse(discovery(sample)['verified'])
 
 if __name__=='__main__':
     unittest.main()
