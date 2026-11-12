@@ -14,7 +14,8 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 pub mod tauri_host;
 
 pub const CONTRACT: &str = "IWXA_PROGRAM_CONNECTION/1.0.0";
-const MAX_OUTPUT: u64 = 131_072;
+const DEFAULT_OUTPUT: u64 = 131_072;
+const MAX_APPROVED_OUTPUT: u64 = 4 * 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(20);
 
 fn args(value: &Value) -> Result<Vec<String>, &'static str> {
@@ -87,7 +88,7 @@ fn file_identity(path: &PathBuf) -> Option<FileIdentity> {
             .map(|dur| dur.as_nanos()),
     })
 }
-fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static str> {
+fn execute(path: &PathBuf, argv: &[String], max_output_bytes: u64) -> Result<(i32, String), &'static str> {
     let mut command = Command::new(path);
     command.args(argv).stdin(Stdio::null())
         .stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -101,14 +102,14 @@ fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static st
     let mut child = command.spawn().map_err(|_| "CLI_EXECUTION_FAILED")?;
     let stdout = child.stdout.take().ok_or("CLI_EXECUTION_FAILED")?;
     let stderr = child.stderr.take().ok_or("CLI_EXECUTION_FAILED")?;
-    // The reader stops at MAX_OUTPUT+1. Without a signal the child can fill
+    // The reader stops at the approved limit+1. Without a signal the child can fill
     // its pipe and block until the 20-second timeout instead of failing fast.
     let oversized = Arc::new(AtomicBool::new(false));
     let out_limit = Arc::clone(&oversized);
     let out_thread = thread::spawn(move || {
         let mut buffer = Vec::new();
-        let result = stdout.take(MAX_OUTPUT + 1).read_to_end(&mut buffer);
-        if buffer.len() as u64 > MAX_OUTPUT {
+        let result = stdout.take(max_output_bytes + 1).read_to_end(&mut buffer);
+        if buffer.len() as u64 > max_output_bytes {
             out_limit.store(true, Ordering::Release);
         }
         result.map(|_| buffer)
@@ -116,8 +117,8 @@ fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static st
     let err_limit = Arc::clone(&oversized);
     let err_thread = thread::spawn(move || {
         let mut buffer = Vec::new();
-        let result = stderr.take(MAX_OUTPUT + 1).read_to_end(&mut buffer);
-        if buffer.len() as u64 > MAX_OUTPUT {
+        let result = stderr.take(DEFAULT_OUTPUT + 1).read_to_end(&mut buffer);
+        if buffer.len() as u64 > DEFAULT_OUTPUT {
             err_limit.store(true, Ordering::Release);
         }
         result.map(|_| buffer)
@@ -149,7 +150,7 @@ fn execute(path: &PathBuf, argv: &[String]) -> Result<(i32, String), &'static st
     let err = err_thread.join().map_err(|_| "CLI_EXECUTION_FAILED")?
         .map_err(|_| "CLI_EXECUTION_FAILED")?;
     let code = status?.code().unwrap_or(-1);
-    if out.len() as u64 > MAX_OUTPUT || err.len() as u64 > MAX_OUTPUT {
+    if out.len() as u64 > max_output_bytes || err.len() as u64 > DEFAULT_OUTPUT {
         return Err("CLI_OUTPUT_TOO_LARGE");
     }
     let output = String::from_utf8(out).map_err(|_| "CLI_OUTPUT_ENCODING_UNSUPPORTED")?;
@@ -162,6 +163,7 @@ pub struct CliPort {
     version_args: Vec<String>,
     version_contains: String,
     operations: BTreeMap<String, Vec<String>>,
+    max_output_bytes: u64,
     identity: Option<FileIdentity>,
     verified: BTreeSet<String>,
 }
@@ -188,10 +190,20 @@ impl CliPort {
             declared.insert(name.clone(), args(argv)?);
         }
         if !executable.is_absolute() { return Err("CLI_EXECUTABLE_INVALID"); }
+        let max_output_bytes = match spec.get("max_output_bytes") {
+            Some(value) => {
+                let bytes = value.as_u64().ok_or("CLI_OUTPUT_LIMIT_INVALID")?;
+                if !(1024..=MAX_APPROVED_OUTPUT).contains(&bytes) {
+                    return Err("CLI_OUTPUT_LIMIT_INVALID");
+                }
+                bytes
+            },
+            None => DEFAULT_OUTPUT,
+        };
         Ok(Self {
             program_id: id.to_owned(), executable, version_args,
             version_contains: version.to_owned(), operations: declared,
-            identity: None, verified: BTreeSet::new()
+            max_output_bytes, identity: None, verified: BTreeSet::new()
         })
     }
     fn observation(&self, status: &str, detail: Value) -> Value {
@@ -231,7 +243,7 @@ impl CliPort {
             return self.observation("NOT_FOUND", json!({"installed":false,"connected":false}));
         }
         if self.identity != new_id { self.verified.clear(); }
-        let (code, output) = match execute(&self.executable, &self.version_args) {
+        let (code, output) = match execute(&self.executable, &self.version_args, DEFAULT_OUTPUT) {
             Ok(result) => result,
             Err(error) => {
                 self.disconnect_state();
@@ -289,7 +301,7 @@ impl CliPort {
             Err(e) => return self.observation(e, json!({"executed":false,"executionOutcome":"NONE"}))
         };
         let start = Instant::now();
-        let (code, output) = match execute(&self.executable, &argv) {
+        let (code, output) = match execute(&self.executable, &argv, self.max_output_bytes) {
             Ok(value) => value,
             Err(e) => {
                 self.verified.remove(name);

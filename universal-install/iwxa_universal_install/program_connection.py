@@ -10,6 +10,8 @@ import threading
 import time
 
 SCHEMA = "IWXA_PROGRAM_CONNECTION/1.0.0"
+DEFAULT_OUTPUT_BYTES = 131072
+MAX_APPROVED_OUTPUT_BYTES = 4 * 1024 * 1024
 
 class ProgramError(RuntimeError):
     def __init__(self, code):
@@ -36,6 +38,9 @@ def validate_spec(data):
         raise ValueError("CLI_DIGEST_INVALID")
     if "requires_running" in data and not isinstance(data["requires_running"], bool):
         raise ValueError("CLI_RUNNING_POLICY_INVALID")
+    limit = data.get("max_output_bytes", DEFAULT_OUTPUT_BYTES)
+    if type(limit) is not int or not 1024 <= limit <= MAX_APPROVED_OUTPUT_BYTES:
+        raise ValueError("CLI_OUTPUT_LIMIT_INVALID")
     for args in [data.get("version_args"), *ops.values()]:
         if not isinstance(args, list) or len(args) > 24 or any(
             not isinstance(x, str) or len(x) > 2048 or "\0" in x for x in args
@@ -88,10 +93,13 @@ def executable_identity(path):
         return None
 
 
-def run_command(path, args, *, cancel_event=None, timeout_seconds=20):
+def run_command(path, args, *, cancel_event=None, timeout_seconds=20,
+                max_output_bytes=DEFAULT_OUTPUT_BYTES):
     """Run one native child, bounded by host cancellation, time and stream bytes."""
     if (type(timeout_seconds) not in (int, float) or not
             0.05 <= timeout_seconds <= 20):
+        raise ProgramError("CLI_INPUT_INVALID")
+    if type(max_output_bytes) is not int or not 1024 <= max_output_bytes <= MAX_APPROVED_OUTPUT_BYTES:
         raise ProgramError("CLI_INPUT_INVALID")
     if cancel_event is not None and cancel_event.is_set():
         raise ProgramError("CLI_CANCELLED_BEFORE_START")
@@ -108,19 +116,20 @@ def run_command(path, args, *, cancel_event=None, timeout_seconds=20):
     stream_failed = threading.Event()
     buffers = [bytearray(), bytearray()]
 
-    def collect(stream, buffer):
+    def collect(stream, buffer, limit):
         try:
             while chunk := stream.read(8192):
                 buffer.extend(chunk)
-                if len(buffer) > 131072:
+                if len(buffer) > limit:
                     too_large.set()
                     break
         except OSError:
             stream_failed.set()
 
     streams = (child.stdout, child.stderr)
-    readers = [threading.Thread(target=collect, args=(stream, buffer), daemon=True)
-               for stream, buffer in zip(streams, buffers)]
+    readers = [threading.Thread(target=collect, args=(stream, buffer, limit), daemon=True)
+               for stream, buffer, limit in zip(
+                   streams, buffers, (max_output_bytes, DEFAULT_OUTPUT_BYTES))]
     for reader in readers:
         reader.start()
     deadline = time.monotonic() + timeout_seconds
@@ -414,7 +423,8 @@ class CliConnection:
         start = time.perf_counter()
         try:
             code, output = run_command(self.path, bound, cancel_event=cancel_event,
-                                       timeout_seconds=timeout_seconds)
+                                       timeout_seconds=timeout_seconds,
+                                       max_output_bytes=self.spec.get("max_output_bytes", DEFAULT_OUTPUT_BYTES))
         except ProgramError as exc:
             if exc.code not in ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID"):
                 self._verified.discard(operation)

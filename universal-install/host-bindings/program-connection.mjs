@@ -6,6 +6,8 @@ import {delimiter, isAbsolute} from "node:path";
 import {platform} from "node:os";
 
 export const SCHEMA = "IWXA_PROGRAM_CONNECTION/1.0.0";
+const DEFAULT_OUTPUT_BYTES=131072;
+const MAX_APPROVED_OUTPUT_BYTES=4*1024*1024;
 const HEX64=/^[a-f0-9]{64}$/;
 const name=/^[a-z][a-z0-9_]*$/;
 const slot=x=>/^\{([a-z][a-z0-9_]*)\}$/.exec(x)||
@@ -55,7 +57,10 @@ export function validateCliSpec(spec) {
       typeof spec.version_contains !== "string" || !spec.version_contains ||
       !spec.operations || !Object.keys(spec.operations).length ||
       (spec.executable_sha256!==undefined&&!HEX64.test(spec.executable_sha256)) ||
-      (spec.requires_running!==undefined&&typeof spec.requires_running!=="boolean"))
+      (spec.requires_running!==undefined&&typeof spec.requires_running!=="boolean")||
+      (spec.max_output_bytes!==undefined&&
+       (!Number.isSafeInteger(spec.max_output_bytes)||
+        spec.max_output_bytes<1024||spec.max_output_bytes>MAX_APPROVED_OUTPUT_BYTES)))
     throw Error("CLI_SPEC_INVALID");
   for (const argv of [spec.version_args, ...Object.values(spec.operations)]) {
     if (!Array.isArray(argv) || argv.length > 24 ||
@@ -95,8 +100,8 @@ function executableIdentity(path) {
     return [st.dev,st.ino,st.size,st.mtimeNs].map(String).join(":");
   }catch{return null;}
 }
-function run(path,args) {
-  const r=spawnSync(path,args,{encoding:"buffer",timeout:20000,maxBuffer:131072,
+function run(path,args,maxOutputBytes=DEFAULT_OUTPUT_BYTES) {
+  const r=spawnSync(path,args,{encoding:"buffer",timeout:20000,maxBuffer:maxOutputBytes,
     shell:false,windowsHide:true});
   if(r.error?.code==="ETIMEDOUT")return {status:"CLI_TIMED_OUT"};
   if(r.error?.code==="ENOBUFS")return {status:"CLI_OUTPUT_TOO_LARGE"};
@@ -108,7 +113,7 @@ function run(path,args) {
 }
 // Opt-in asynchronous invocation for desktop hosts that need interactive cancel.
 // Existing synchronous invoke() and all host-port contracts remain unchanged.
-function runAsync(path,args,signal,timeoutMs=20000){
+function runAsync(path,args,signal,timeoutMs=20000,maxOutputBytes=DEFAULT_OUTPUT_BYTES){
   if(signal?.aborted)return Promise.resolve({status:"CLI_CANCELLED",executionOutcome:"NONE"});
   return new Promise(resolve=>{
     let proc,complete=false,reason=null,started=false;
@@ -134,7 +139,7 @@ function runAsync(path,args,signal,timeoutMs=20000){
     proc.once("spawn",()=>{started=true;});
     proc.stdout.on("data",chunk=>{
       sizeOut+=chunk.length;
-      if(sizeOut>131072){stop("CLI_OUTPUT_TOO_LARGE");return;}
+      if(sizeOut>maxOutputBytes){stop("CLI_OUTPUT_TOO_LARGE");return;}
       out.push(chunk);
     });
     proc.stderr.on("data",chunk=>{
@@ -350,7 +355,8 @@ export class CliConnection {
     try{bound=bindArgs(this.spec.operations[operation],params);}catch{
       return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
     }
-    const begin=performance.now(),r=run(this.path,bound);
+    const begin=performance.now(),
+      r=run(this.path,bound,this.spec.max_output_bytes??DEFAULT_OUTPUT_BYTES);
     if(r.status!=="EXECUTED"){
       this.verified.delete(operation);
       return this.observation(r.status,
@@ -402,7 +408,8 @@ export class CliConnection {
     if(!Number.isFinite(timeoutMs)||timeoutMs<50||timeoutMs>20000)
       return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
     const begin=performance.now();
-    const r=await runAsync(path,bound,signal,timeoutMs);
+    const r=await runAsync(path,bound,signal,timeoutMs,
+      this.spec.max_output_bytes??DEFAULT_OUTPUT_BYTES);
     if(this.path!==path||this.identity!==identity||this.epoch!==epoch)
       return this.observation("CONNECTION_SUPERSEDED",{executed:false,
         executionOutcome:r.executionOutcome==="NONE"?"NONE":"UNKNOWN"});

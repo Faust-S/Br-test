@@ -342,6 +342,43 @@ class CliProcessHostTest(unittest.TestCase):
                          ("CLI_OUTPUT_ENCODING_UNSUPPORTED","UNKNOWN"))
         self.assertFalse(conn.capabilities()["operations"][0]["verified"])
 
+    def test_host_approved_large_document_output_and_default_limit(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_DOCUMENT_OUTPUT",
+                "executable_name": Path(executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {
+                    "large": ["-c", "import sys;sys.stdout.write('X'*262144)"],
+                    "too_large": ["-c", "import sys;sys.stdout.write('Y'*786432)"]}}
+        default = CliConnection(spec, executable)
+        self.assertEqual(default.connect()["status"], "CONNECTED")
+        refused = default.invoke("large")
+        self.assertEqual((refused["status"], refused["executionOutcome"]),
+                         ("CLI_OUTPUT_TOO_LARGE", "UNKNOWN"))
+        self.assertFalse(default.capabilities()["operations"][0]["verified"])
+        approved = CliConnection({**spec, "max_output_bytes": 524288}, executable)
+        connected = approved.connect()
+        self.assertEqual(connected["status"], "CONNECTED")
+        large = approved.invoke("large")
+        self.assertEqual((large["status"], large["executionOutcome"]),
+                         ("EXECUTED", "ACKNOWLEDGED"))
+        self.assertEqual(large["output"], "X"*262144)
+        self.assertEqual(large["connection_epoch"], connected["connection_epoch"])
+        refused = approved.invoke("too_large")
+        self.assertEqual((refused["status"], refused["executionOutcome"]),
+                         ("CLI_OUTPUT_TOO_LARGE", "UNKNOWN"))
+        self.assertFalse(next(x for x in approved.capabilities()["operations"]
+                              if x["name"] == "too_large")["verified"])
+        self.assertTrue(next(x for x in approved.capabilities()["operations"]
+                             if x["name"] == "large")["verified"])
+        self.assertEqual(approved.invoke("large")["output"], large["output"])
+
+        for invalid in (True, 0, 1023, 4194305, "524288", 524288.0):
+            with self.subTest(invalid=invalid):
+                with self.assertRaisesRegex(ValueError, "CLI_OUTPUT_LIMIT_INVALID"):
+                    CliConnection({**spec, "max_output_bytes": invalid}, executable)
+
     def test_excessive_output_is_rejected_before_timeout(self):
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):

@@ -12,7 +12,7 @@ const id="NODE_EXISTING_APP_V1";
 const spec={
  schema:"IWXA_CLI_PROGRAM/1",program_id:id,
  executable_name:basename(executable),
- executable_sha256:digest,requires_running:true,
+ executable_sha256:digest,requires_running:true,max_output_bytes:524288,
  version_args:["--version"],version_contains:process.version,
  operations:{
   echo:["-e","console.log(42)"],
@@ -20,7 +20,9 @@ const spec={
   fail:["-e","process.exit(3)"],
   slow:["-e","setTimeout(()=>{},9000)"],
   binary:["-e","process.stdout.write(Buffer.from([255]))"],
-  dynamic:["-e","{script}"]
+  dynamic:["-e","{script}"],
+  large:["-e","process.stdout.write('X'.repeat(300000))"],
+  oversize:["-e","process.stdout.write('Y'.repeat(800000))"]
  }
 };
 const observed={program_id:id,verified:true,status:"RUNNING",spawned:false,
@@ -71,6 +73,29 @@ const undecodable=first.invoke("binary");
 assert.equal(undecodable.status,"CLI_OUTPUT_ENCODING_UNSUPPORTED");
 assert.equal(undecodable.executionOutcome,"UNKNOWN");
 assert.equal(first.capabilities().operations.find(x=>x.name==="binary").verified,false);
+// The same real executable must support both sync and async bounded output.
+for(const invalid of [null,true,0,1023,4194305,524288.5,"524288"]){
+ assert.throws(()=>new CliConnection({...spec,max_output_bytes:invalid},
+   executable,{processProbe:probe}),/CLI_SPEC_INVALID/);
+}
+const legacy=new CliConnection({...spec,max_output_bytes:undefined},executable,
+ {processProbe:probe});
+assert.equal(legacy.connect().status,"CONNECTED");
+assert.equal(legacy.invoke("large").status,"CLI_OUTPUT_TOO_LARGE");
+assert.equal((await legacy.invokeAsync("large")).status,"CLI_OUTPUT_TOO_LARGE");
+legacy.disconnect();
+const largeSync=first.invoke("large");
+assert.equal(largeSync.status,"EXECUTED");
+assert.equal(largeSync.output.length,300000);
+assert.equal(largeSync.connection_epoch,a.connection_epoch);
+const largeAsync=await first.invokeAsync("large");
+assert.equal(largeAsync.status,"EXECUTED");
+assert.equal(largeAsync.output,largeSync.output);
+assert.equal(first.invoke("oversize").status,"CLI_OUTPUT_TOO_LARGE");
+const overflow=await first.invokeAsync("oversize");
+assert.equal(overflow.status,"CLI_OUTPUT_TOO_LARGE");
+assert.equal(overflow.executionOutcome,"UNKNOWN");
+assert.equal(first.capabilities().operations.find(x=>x.name==="oversize").verified,false);
 const evaluated=first.invoke("dynamic",{script:"console.log(42)"});
 assert.equal(evaluated.status,"EXECUTED");
 assert.equal(first.capabilities().operations.find(x=>x.name==="dynamic").verified,true);
@@ -119,5 +144,7 @@ console.log(JSON.stringify({
  no_hidden_program_launch:true,preflight_effect:"NONE",
  attempted_effect:"UNKNOWN",connected_epoch_isolation:true,
  cancel_before_start:"NONE",cancel_after_start:"UNKNOWN",async_readback:"42",
- native_timeout:"UNKNOWN",binary_output_refused:true
+ native_timeout:"UNKNOWN",binary_output_refused:true,
+ approved_output_limit_bytes:524288,large_sync_and_async_bytes:300000,
+ legacy_output_limit_rejected:true,output_overflow_rejected:true
 }));

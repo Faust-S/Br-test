@@ -47,6 +47,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
        port.capabilities()["operations"][0]["verified"] != true {
         return Err("RUST_EXECUTION_PROOF_NOT_RESTORED".into());
     }
+    // The same real jq/yq executable must support opt-in bounded, larger
+    // documents through the native port, without replacing the default cap.
+    for bad in [json!(true),json!(0),json!(1023),json!(4194305),json!("524288")] {
+        let mut rejected = spec.clone();
+        rejected["max_output_bytes"] = bad;
+        if CliPort::from_manifest(&rejected, file.clone()).is_ok() {
+            return Err("RUST_OUTPUT_LIMIT_UNVALIDATED".into());
+        }
+    }
+    let query = if args[2]=="JQ_CLI_V1" {"query_json"} else {"query_yaml"};
+    let suffix = if args[2]=="JQ_CLI_V1" {"json"} else {"yaml"};
+    let big_file = std::env::temp_dir().join(format!(
+        "iwxa-rust-big-{}-{}.{}",std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?
+            .as_nanos(),suffix));
+    let large_check = (|| -> Result<usize,Box<dyn std::error::Error>> {
+        if args[2]=="JQ_CLI_V1" {
+            let rows = (0..4000).map(|i| json!({"id":i,
+                "name":format!("Номенклатура склада № {i:04}"),
+                "quantity":i%9})).collect::<Vec<_>>();
+            fs::write(&big_file,serde_json::to_vec(&json!({"rows":rows}))?)?;
+        } else {
+            let mut document=String::from("rows:\n");
+            for i in 0..4000 {
+                document.push_str(&format!("  - id: {i}\n    name: \"Номенклатура склада № {i:04}\"\n    quantity: {}\n",i%9));
+            }
+            fs::write(&big_file,document)?;
+        }
+        let request=json!({"expression":".","input":big_file.display().to_string()});
+        let mut capped=spec.clone();
+        capped["max_output_bytes"]=json!(131072);
+        let mut old=CliPort::from_manifest(&capped,file.clone())?;
+        if status(&old.connect())!="CONNECTED" ||
+           status(&old.invoke(query,&request))!="CLI_OUTPUT_TOO_LARGE" {
+            return Err("RUST_DEFAULT_CAP_LARGE_OUTPUT_FALSE_SUCCESS".into());
+        }
+        let accepted=port.invoke(query,&request);
+        if status(&accepted)!="EXECUTED" ||
+           accepted["executionOutcome"]!="ACKNOWLEDGED" {
+            return Err("RUST_LARGE_DOCUMENT_EXECUTION_FAILED".into());
+        }
+        let output=accepted["output"].as_str().ok_or("RUST_LARGE_DOCUMENT_NO_OUTPUT")?;
+        if !(131072..1048576).contains(&output.len()) {
+            return Err("RUST_LARGE_DOCUMENT_BOUNDS_INVALID".into());
+        }
+        let readback:Value=serde_json::from_str(output)?;
+        if readback["rows"].as_array().map(|a|a.len())!=Some(4000) {
+            return Err("RUST_LARGE_DOCUMENT_READBACK_FAILED".into());
+        }
+        Ok(output.len())
+    })();
+    let _ = fs::remove_file(&big_file);
+    let large_document_bytes=large_check?;
     if status(&port.invoke("undefined", &Value::Null)) != "OPERATION_UNSUPPORTED" {
         return Err("RUST_UNDECLARED_OPERATION".into());
     }
@@ -113,7 +166,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "schema":"IWXA_RUST_NATIVE_HOST_QUALIFICATION/1",
         "status":"PASS", "program_id":args[2],
         "real_cli":true, "value":"42",
-        "reconnected":true,"python_runtime_required":false,
+        "reconnected":true,
+        "large_document_bytes":large_document_bytes,
+        "default_output_cap_refused_large_document":true,
+        "native_output_limit_bytes":1048576,
+        "python_runtime_required":false,
         "node_runtime_required":false,"additional_daemon":false
     }));
     Ok(())

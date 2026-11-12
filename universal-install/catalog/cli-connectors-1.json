@@ -24,7 +24,8 @@
           "{expression}",
           "{input}"
         ]
-      }
+      },
+      "max_output_bytes": 1048576
     },
     {
       "schema": "IWXA_CLI_PROGRAM/1",
@@ -52,7 +53,8 @@
           "{expression}",
           "{input}"
         ]
-      }
+      },
+      "max_output_bytes": 1048576
     }
   ]
 }

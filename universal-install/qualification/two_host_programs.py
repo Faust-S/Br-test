@@ -172,6 +172,47 @@ def qualify():
             if not next(x for x in connection.capabilities()["operations"]
                         if x["name"]==query_op)["verified"]:
                 raise RuntimeError("FILE_QUERY_NOT_VERIFIED")
+            # A real user document may exceed the legacy 128-KiB stdout cap.
+            # The host must explicitly approve the larger bounded result.
+            large_rows=[{"id":index,"region":"Москва","quantity":index%9,
+                         "name":"Номенклатура склада № %04d" % index}
+                        for index in range(4000)]
+            large_source=root/("user large source " + name + (
+                ".json" if name=="JQ_CLI_V1" else ".yaml"))
+            if name=="JQ_CLI_V1":
+                large_source.write_bytes(json.dumps({"rows":large_rows},
+                    ensure_ascii=False).encode("utf-8"))
+            else:
+                large_source.write_bytes(("rows:\n"+"".join(
+                    "  - id: %d\n    region: \"Москва\"\n    quantity: %d\n"
+                    "    name: \"Номенклатура склада № %04d\"\n"
+                    % (i, i%9, i) for i in range(4000))).encode("utf-8"))
+            large_request={"expression":".","input":str(large_source)}
+            old_limit={**manifest, "max_output_bytes":131072}
+            old_connection=CliConnection(old_limit,str(program))
+            if old_connection.connect()["status"]!="CONNECTED":
+                raise RuntimeError("DEFAULT_LIMIT_PROBE_NOT_CONNECTED")
+            old_out=old_connection.invoke(query_op,large_request)
+            if (old_out["status"]!="CLI_OUTPUT_TOO_LARGE" or
+                    old_out["executionOutcome"]!="UNKNOWN"):
+                raise RuntimeError("DEFAULT_LIMIT_FALSELY_ACCEPTED_LARGE_FILE")
+            old_connection.disconnect()
+            large_out=connection.invoke(query_op,large_request)
+            if (large_out["status"]!="EXECUTED" or
+                    large_out["executionOutcome"]!="ACKNOWLEDGED" or
+                    not 131072<len(large_out["output"].encode("utf-8"))<1048576):
+                raise RuntimeError("APPROVED_LARGE_DOCUMENT_INVOCATION_FAILED")
+            parsed=json.loads(large_out["output"])
+            if (len(parsed.get("rows",[]))!=4000 or
+                    parsed["rows"][-1]["name"]!=large_rows[-1]["name"]):
+                raise RuntimeError("LARGE_DOCUMENT_CONTENT_MISMATCH")
+            large_readback=root/("large document output "+name+".json")
+            large_readback.write_bytes(large_out["output"].encode("utf-8"))
+            if (hashlib.sha256(large_readback.read_bytes()).digest()!=
+                    hashlib.sha256(large_out["output"].encode("utf-8")).digest()):
+                raise RuntimeError("LARGE_DOCUMENT_READBACK_MISMATCH")
+            large_document_bytes=large_readback.stat().st_size
+            large_document_elapsed_ms=large_out["elapsed_ms"]
             if connection.invoke("not_declared")["status"]!="OPERATION_UNSUPPORTED":
                 raise RuntimeError("UNDECLARED_OPERATION_ACCEPTED")
             connection.disconnect()
@@ -260,7 +301,10 @@ def qualify():
                            "existing_install_reused":True,"reinstalled":False,
                            "real_file_operation":file_operation_pass,
                            "real_query_operation":query_op,
-                           "real_query_readback":True})
+                           "real_query_readback":True,
+                           "bounded_large_document_bytes":large_document_bytes,
+                           "large_document_ms":large_document_elapsed_ms,
+                           "default_large_output_rejected":True})
     print(json.dumps({"schema":"IWXA_PROGRAM_INTEGRATION_QUALIFICATION/1",
                       "status":"PASS","platform":platform,"results":report},sort_keys=True))
 

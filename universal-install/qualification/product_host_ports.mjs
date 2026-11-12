@@ -1,5 +1,6 @@
 
 import assert from "node:assert/strict";
+import {createHash} from "node:crypto";
 import {createProductHostPort} from "../host-bindings/product-hosts.mjs";
 import {integrationObservation} from "../host-bindings/ui-levels.mjs";
 import {CliConnection,SCHEMA,argumentParameterNames} from "../host-bindings/program-connection.mjs";
@@ -15,9 +16,20 @@ const expectedParams=programId==="JQ_CLI_V1"?["filter","input"]:["input"];
 const queryOperation=programId==="JQ_CLI_V1"?"query_json":"query_yaml";
 assert.deepEqual(argumentParameterNames(spec.operations[fileOperation]),expectedParams);
 assert.deepEqual(argumentParameterNames(spec.operations[queryOperation]),["expression","input"]);
+assert.equal(spec.max_output_bytes,1048576);
 const root=mkdtempSync(join(tmpdir(),"iwxa-u01-ports-files-"));
 const source=join(root,programId==="JQ_CLI_V1"?"customer orders.json":"customer orders.yaml");
 const filter=join(root,"transform.jq");
+const largeRows=Array.from({length:4000},(_,index)=>({
+ id:index,region:"Москва",quantity:index%9,
+ name:"Номенклатура склада № "+String(index).padStart(4,"0")
+}));
+const largeSource=join(root,programId==="JQ_CLI_V1"?
+ "large orders file.json":"large orders file.yaml");
+if(programId==="JQ_CLI_V1")
+ writeFileSync(largeSource,JSON.stringify({rows:largeRows}),"utf8");
+else writeFileSync(largeSource,"rows:\n"+largeRows.map(item=>
+ `  - id: ${item.id}\n    region: "Москва"\n    quantity: ${item.quantity}\n    name: "${item.name}"\n`).join(""),"utf8");
 if(programId==="JQ_CLI_V1"){
  writeFileSync(source,'{"rows":[{"units":2,"price":19},{"units":3,"price":7}]}',"utf8");
  writeFileSync(filter,".rows | map(.units * .price) | add\n","utf8");
@@ -63,6 +75,30 @@ for(const host of ["agent","admin-center","atlas"]){
  const queryReadback=join(root,host+"-"+programId+"-query.txt");
  writeFileSync(queryReadback,queried.output.replace(/\r\n/g,"\n"),"utf8");
  assert.equal(readFileSync(queryReadback,"utf8").trim(),"19");
+ // Ensure the legacy 128-KiB cap still refuses a larger output unless the
+ // host explicitly includes its revised bounded limit in the approved spec.
+ if(host==="agent"){
+  const limited=new CliConnection({...spec,max_output_bytes:undefined},executable);
+  assert.equal(limited.connect().status,"CONNECTED");
+  const legacy=limited.invoke(queryOperation,{expression:".",input:largeSource});
+  assert.equal(legacy.status,"CLI_OUTPUT_TOO_LARGE");
+  assert.equal(legacy.executionOutcome,"UNKNOWN");
+  limited.disconnect();
+ }
+ const large=await port.invoke({operation:queryOperation,
+   params:{expression:".",input:largeSource}});
+ assert.equal(large.status,"EXECUTED");
+ assert.equal(large.executionOutcome,"ACKNOWLEDGED");
+ assert.equal(large.connection_epoch,invoked.connection_epoch);
+ const largeBytes=Buffer.byteLength(large.output,"utf8");
+ assert.ok(largeBytes>131072&&largeBytes<spec.max_output_bytes,largeBytes);
+ const parsed=JSON.parse(large.output);
+ assert.equal(parsed.rows.length,largeRows.length);
+ assert.equal(parsed.rows.at(-1).name,largeRows.at(-1).name);
+ const largeReadback=join(root,host+"-"+programId+"-large.json");
+ writeFileSync(largeReadback,large.output,"utf8");
+ assert.equal(createHash("sha256").update(readFileSync(largeReadback)).digest("hex"),
+              createHash("sha256").update(Buffer.from(large.output,"utf8")).digest("hex"));
  const caps=await port.capabilities({});
  assert.equal(caps.operations.find(x=>x.name===queryOperation).verified,true);
  assert.equal(caps.operations.find(x=>x.name===fileOperation).verified,true);
@@ -89,4 +125,5 @@ console.log(JSON.stringify({schema:"IWXA_PRODUCT_HOST_QUALIFICATION/1",status:"P
   real_file_operation:fileOperation,real_file_readback:true,
   real_query_operation:queryOperation,query_readback:true,
   declared_parameters:expectedParams,
+  host_approved_large_documents:true,large_document_rows:4000,
   product_gui_integrated:false,ui_max_verified:"I2"}));
