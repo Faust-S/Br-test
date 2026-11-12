@@ -55,7 +55,13 @@ function currentTime(label,fn){const began=performance.now();return Promise.reso
 
 test('public source -> native K02 choice -> real U01 git -> U03 host receipt, JS + Python',async t=>{
  assert.equal(validateDescriptor(u03descriptor),true);
- const original=await readFile(resolve(k02root,gitPath));
+ const gitSource=spawnSync('git',['-C',k02root,'show',gitRevision+':'+gitPath],{
+  encoding:null,timeout:10000,maxBuffer:1024*1024
+ });
+ assert.equal(gitSource.status,0,gitSource.stderr?.toString('utf8'));
+ const original=Buffer.from(gitSource.stdout);
+ // Git's committed blob is the canonical source. A Windows working-tree
+ // checkout may normalize line endings; never change observed source bytes.
  let selected=Buffer.from(original);
  const source=createHostSelectedSourcePort({
   hostId:'atlas',scopeId:'workspace-u03',sourceId:'k02-instructions',bindingId:'task-actual',

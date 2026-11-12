@@ -61,7 +61,14 @@ def main():
             observed["contentRef"] == pinned["revision"],
             "PYTHON_U02_PROVENANCE_MISMATCH")
 
-    source_content = (path / vector["gitPath"]).read_bytes()
+    # Inspect the pinned Git blob, not an OS-dependent working-tree copy.
+    # Windows autocrlf and filesystem newline conversions are not source revisions.
+    import subprocess
+    source_result = subprocess.run(
+        ["git", "-C", str(path), "show", revision + ":" + vector["gitPath"]],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10, check=True,
+    )
+    source_content = source_result.stdout
     require("sha256:" + sha(source_content) == pinned["revision"],
             "PYTHON_SOURCE_CHANGED")
     plan = vector["plan"]
@@ -86,6 +93,7 @@ def main():
            "bindings": [{"operation": "show", "id": "source.git.show", "version": "1.0.0"}]}
     git = shutil.which("git")
     require(git is not None, "PYTHON_GIT_NOT_FOUND")
+    git = str(Path(git).resolve())  # U01 inspect rejects symlinks (Homebrew often uses one).
     spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": program_id,
             "executable_name": Path(git).name,
             "version_args": ["--version"], "version_contains": "git version",
