@@ -262,6 +262,95 @@ class CliProcessHostTest(unittest.TestCase):
         self.assertEqual(conn.connect()["status"], "PROCESS_CHANGED")
         self.assertEqual(conn.capabilities()["status"], "NOT_CONNECTED")
 
+    def test_concurrent_real_process_does_not_duplicate_or_ack_stale_session(self):
+        import tempfile
+        import threading
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        script = (
+            "import sys,time\nfrom pathlib import Path\n"
+            "effect,gate=map(Path,sys.argv[1:3])\n"
+            "with effect.open('a',encoding='utf-8') as stream:\n"
+            "    stream.write('external-effect\\n')\n"
+            "deadline=time.monotonic()+8\n"
+            "while not gate.exists() and time.monotonic()<deadline:\n"
+            "    time.sleep(0.02)\n"
+            "print('completed')\n"
+        )
+        spec = {"schema":"IWXA_CLI_PROGRAM/1", "program_id":"PYTHON_CONCURRENT_APP",
+                "executable_name":Path(executable).name,
+                "version_args":["--version"],"version_contains":version,
+                "operations":{"slow":["-c",script,"{effect}","{gate}"],
+                              "echo":["-c","print(42)"]}}
+        conn = CliConnection(spec,executable)
+        with tempfile.TemporaryDirectory(prefix="iwxa u01 concurrent ") as folder:
+            effect = Path(folder)/"external effects.txt"
+            gate = Path(folder)/"release signal.txt"
+            params = {"effect":str(effect),"gate":str(gate)}
+            initial = conn.connect()
+            self.assertEqual(initial["status"],"CONNECTED")
+
+            def run_one(results):
+                results.append(conn.invoke("slow",params))
+
+            def wait_started():
+                deadline = time.monotonic()+6
+                while not effect.exists() and time.monotonic()<deadline:
+                    time.sleep(0.02)
+                self.assertTrue(effect.exists(),"real subprocess never began")
+
+            first = []
+            thread = threading.Thread(target=run_one,args=(first,),daemon=True)
+            thread.start()
+            try:
+                wait_started()
+                for operation, bound in (("slow",params),("echo",None)):
+                    busy=conn.invoke(operation,bound)
+                    self.assertEqual((busy["status"],busy["executionOutcome"]),
+                                     ("CLI_BUSY","NONE"))
+                self.assertEqual(effect.read_text(encoding="utf-8"),
+                                 "external-effect\n")
+            finally:
+                gate.write_text("release",encoding="utf-8")
+                thread.join(timeout=6)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual(first[0]["status"],"EXECUTED")
+            self.assertEqual(first[0]["connection_epoch"],
+                             initial["connection_epoch"])
+            self.assertTrue(next(x for x in conn.capabilities()["operations"]
+                                 if x["name"]=="slow")["verified"])
+            effect.unlink()
+            gate.unlink()
+
+            second = []
+            thread = threading.Thread(target=run_one,args=(second,),daemon=True)
+            thread.start()
+            try:
+                wait_started()
+                self.assertEqual(conn.disconnect()["status"],"DISCONNECTED")
+                recovered=conn.recover()
+                self.assertEqual(recovered["status"],"CONNECTED")
+                self.assertNotEqual(recovered["connection_epoch"],
+                                    initial["connection_epoch"])
+                busy=conn.invoke("echo")
+                self.assertEqual((busy["status"],busy["executionOutcome"]),
+                                 ("CLI_BUSY","NONE"))
+                self.assertEqual(effect.read_text(encoding="utf-8"),
+                                 "external-effect\n")
+            finally:
+                gate.write_text("release",encoding="utf-8")
+                thread.join(timeout=6)
+            self.assertFalse(thread.is_alive())
+            self.assertEqual((second[0]["status"], second[0]["executionOutcome"]),
+                             ("CONNECTION_SUPERSEDED","UNKNOWN"))
+            self.assertFalse(next(x for x in conn.capabilities()["operations"]
+                                  if x["name"]=="slow")["verified"])
+            echo = conn.invoke("echo")
+            self.assertEqual((echo["status"],echo["output"].strip()),
+                             ("EXECUTED","42"))
+            self.assertEqual(echo["connection_epoch"],
+                             recovered["connection_epoch"])
+
     def test_host_cancel_before_start_does_not_launch_program(self):
         import threading
         flag = threading.Event()

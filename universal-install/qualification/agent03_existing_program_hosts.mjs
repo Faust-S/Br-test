@@ -104,6 +104,32 @@ assert.equal(failedDynamic.status,"EXECUTION_FAILED");
 assert.equal(failedDynamic.executionOutcome,"UNKNOWN");
 assert.equal(first.capabilities().operations.find(x=>x.name==="dynamic").verified,false);
 assert.equal(first.verify().connection_epoch,a.connection_epoch);
+// An active child must not spawn a second operation on this connection.
+// Lifecycle recovery during that child must not credit its output to a new epoch.
+const competingAbort=new AbortController();
+const inFlight=first.invokeAsync("slow",{}, {signal:competingAbort.signal});
+const busySync=first.invoke("echo");
+const busyAsync=await first.invokeAsync("echo");
+assert.equal(busySync.status,"CLI_BUSY");
+assert.equal(busySync.executionOutcome,"NONE");
+assert.equal(busyAsync.status,"CLI_BUSY");
+assert.equal(busyAsync.executionOutcome,"NONE");
+assert.equal(first.capabilities().operations.find(x=>x.name==="slow").verified,false);
+const oldEpoch=first.capabilities().connection_epoch;
+assert.equal(first.disconnect().status,"DISCONNECTED");
+const connectedAgain=first.recover();
+assert.equal(connectedAgain.status,"CONNECTED");
+assert.notEqual(connectedAgain.connection_epoch,oldEpoch);
+const busyAfterRecovery=first.invoke("echo");
+assert.equal(busyAfterRecovery.status,"CLI_BUSY");
+assert.equal(busyAfterRecovery.executionOutcome,"NONE");
+competingAbort.abort();
+const staleResult=await inFlight;
+assert.equal(staleResult.status,"CONNECTION_SUPERSEDED");
+assert.equal(staleResult.executionOutcome,"UNKNOWN");
+assert.equal(first.capabilities().operations.find(x=>x.name==="slow").verified,false);
+assert.equal(first.invoke("echo").status,"EXECUTED");
+assert.equal(first.capabilities().connection_epoch,connectedAgain.connection_epoch);
 const port=createProductHostPort("atlas",async({operation,request})=>
  operation==="invoke"?second.invoke(request.operation,request.params):second[operation]());
 assert.equal((await port.capabilities({})).connected,true);
@@ -146,5 +172,8 @@ console.log(JSON.stringify({
  cancel_before_start:"NONE",cancel_after_start:"UNKNOWN",async_readback:"42",
  native_timeout:"UNKNOWN",binary_output_refused:true,
  approved_output_limit_bytes:524288,large_sync_and_async_bytes:300000,
- legacy_output_limit_rejected:true,output_overflow_rejected:true
+ legacy_output_limit_rejected:true,output_overflow_rejected:true,
+ single_flight_busy_preflight:"NONE",
+ session_superseded_after_recovery:"UNKNOWN",
+ no_implicit_reexecution:true
 }));

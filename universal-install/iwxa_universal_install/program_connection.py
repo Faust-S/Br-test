@@ -181,6 +181,8 @@ class CliConnection:
         self._unavailable = None
         self._process_ref = None
         self._pin_cache = None  # (path, filesystem-identity, approved SHA)
+        self._invocation_lock = threading.Lock()
+        self._state_lock = threading.RLock()
 
     def observation(self, status, **extra):
         epoch = ({"connection_epoch": self._epoch} if self._epoch and
@@ -289,182 +291,212 @@ class CliConnection:
                                 **self.process_observation())
 
     def connect(self):
-        found = self.inspect()
-        if found["status"] != "DISCOVERED":
-            self.disconnect()
-            self._unavailable = found["status"]
-            return found
-        required = self.spec.get("requires_running")
-        initial_process = self._process_key(found) if required else None
-        if required and initial_process is None:
-            self.disconnect()
-            status = self._process_reason(found)
-            self._unavailable = status
-            return self.observation(status, installed=True, connected=False,
-                                    **self.process_observation())
-        identity = executable_identity(found["path"])
-        if identity is None:
-            self.disconnect()
-            return self.observation("NOT_FOUND", installed=False, connected=False)
-        if (self.path != found["path"] or self._identity != identity or
-                (required and self._process_ref != initial_process)):
-            self._verified.clear()
-            self._epoch = None
-        try:
-            code, version = run_command(found["path"], self.spec["version_args"])
-        except ProgramError as error:
-            self.disconnect()
-            self._unavailable = error.code
-            return self.observation(error.code, installed=True, connected=False)
-        if code or not version_matches(version, self.spec["version_contains"]):
-            self.disconnect()
-            self._unavailable = "VERSION_UNVERIFIED"
-            return self.observation("VERSION_UNVERIFIED", installed=True, connected=False)
-        if executable_identity(found["path"]) != identity:
-            self.disconnect()
-            self._unavailable = "CONNECTION_LOST"
-            return self.observation("CONNECTION_LOST", installed=True, connected=False)
-        if required:
-            current = self.process_observation()
-            if self._process_key(current) != initial_process:
+        with self._state_lock:
+            found = self.inspect()
+            if found["status"] != "DISCOVERED":
                 self.disconnect()
-                status = ("PROCESS_CHANGED" if self._process_key(current) is not None
-                          else self._process_reason(current))
+                self._unavailable = found["status"]
+                return found
+            required = self.spec.get("requires_running")
+            initial_process = self._process_key(found) if required else None
+            if required and initial_process is None:
+                self.disconnect()
+                status = self._process_reason(found)
                 self._unavailable = status
-                return self.observation(status, installed=True, connected=False, **current)
-        installation = self.installation_identity(found["path"])
-        if self.spec.get("executable_sha256") and not installation["installation_verified"]:
-            self.disconnect()
-            self._unavailable = "INSTALLATION_MISMATCH"
-            return self.observation("INSTALLATION_MISMATCH", installed=True, connected=False)
-        self.path = found["path"]
-        self._identity = identity
-        self._process_ref = initial_process
-        if self._epoch is None:
-            self._epoch = secrets.token_hex(16)
-        self._unavailable = None
-        return self.observation("CONNECTED", installed=True, connected=True,
-                                path=self.path, version=version.strip()[:256],
-                                **installation, **self.process_observation())
+                return self.observation(status, installed=True, connected=False,
+                                        **self.process_observation())
+            identity = executable_identity(found["path"])
+            if identity is None:
+                self.disconnect()
+                return self.observation("NOT_FOUND", installed=False, connected=False)
+            if (self.path != found["path"] or self._identity != identity or
+                    (required and self._process_ref != initial_process)):
+                self._verified.clear()
+                self._epoch = None
+            try:
+                code, version = run_command(found["path"], self.spec["version_args"])
+            except ProgramError as error:
+                self.disconnect()
+                self._unavailable = error.code
+                return self.observation(error.code, installed=True, connected=False)
+            if code or not version_matches(version, self.spec["version_contains"]):
+                self.disconnect()
+                self._unavailable = "VERSION_UNVERIFIED"
+                return self.observation("VERSION_UNVERIFIED", installed=True, connected=False)
+            if executable_identity(found["path"]) != identity:
+                self.disconnect()
+                self._unavailable = "CONNECTION_LOST"
+                return self.observation("CONNECTION_LOST", installed=True, connected=False)
+            if required:
+                current = self.process_observation()
+                if self._process_key(current) != initial_process:
+                    self.disconnect()
+                    status = ("PROCESS_CHANGED" if self._process_key(current) is not None
+                              else self._process_reason(current))
+                    self._unavailable = status
+                    return self.observation(status, installed=True, connected=False, **current)
+            installation = self.installation_identity(found["path"])
+            if self.spec.get("executable_sha256") and not installation["installation_verified"]:
+                self.disconnect()
+                self._unavailable = "INSTALLATION_MISMATCH"
+                return self.observation("INSTALLATION_MISMATCH", installed=True, connected=False)
+            self.path = found["path"]
+            self._identity = identity
+            self._process_ref = initial_process
+            if self._epoch is None:
+                self._epoch = secrets.token_hex(16)
+            self._unavailable = None
+            return self.observation("CONNECTED", installed=True, connected=True,
+                                    path=self.path, version=version.strip()[:256],
+                                    **installation, **self.process_observation())
 
     def verify(self):
-        if not self.path:
-            return self.observation("NOT_CONNECTED", connected=False)
-        if executable_identity(self.path) != self._identity:
-            self.disconnect()
-            return self.observation("CONNECTION_LOST", connected=False)
-        self._pin_cache = None  # Explicit verify always rehashes the approved file.
-        return self.connect()
+        with self._state_lock:
+            if not self.path:
+                return self.observation("NOT_CONNECTED", connected=False)
+            if executable_identity(self.path) != self._identity:
+                self.disconnect()
+                return self.observation("CONNECTION_LOST", connected=False)
+            self._pin_cache = None  # Explicit verify always rehashes the approved file.
+            return self.connect()
 
     def capabilities(self):
-        lost = bool(self.path) and executable_identity(self.path) != self._identity
-        if lost:
-            self.disconnect()
-        installation = self.installation_identity(self.path) if self.path else {}
-        mismatch = bool(self.path) and bool(self.spec.get("executable_sha256")) and not (
-            installation["installation_verified"])
-        running = self.process_observation()
-        process_status = None
-        if self.path and self.spec.get("requires_running"):
-            observed_key = self._process_key(running)
-            process_status = ("PROCESS_CHANGED" if observed_key is not None
-                              else self._process_reason(running)) if (
-                              observed_key != self._process_ref) else None
-        if mismatch or process_status:
-            self.disconnect()
-            self._unavailable = "INSTALLATION_MISMATCH" if mismatch else process_status
-        status = ("CONNECTION_LOST" if lost else
-                  "INSTALLATION_MISMATCH" if mismatch else
-                  process_status if process_status else
-                  "DECLARED" if self.path else "NOT_CONNECTED")
-        return self.observation(
-            status, connected=bool(self.path), **installation, **running,
-            **({"unavailable_reason": self._unavailable} if self._unavailable else {}),
-            operations=[dict(name=name, declared=True, verified=name in self._verified)
-                        for name in sorted(self.spec["operations"])])
+        with self._state_lock:
+            lost = bool(self.path) and executable_identity(self.path) != self._identity
+            if lost:
+                self.disconnect()
+            installation = self.installation_identity(self.path) if self.path else {}
+            mismatch = bool(self.path) and bool(self.spec.get("executable_sha256")) and not (
+                installation["installation_verified"])
+            running = self.process_observation()
+            process_status = None
+            if self.path and self.spec.get("requires_running"):
+                observed_key = self._process_key(running)
+                process_status = ("PROCESS_CHANGED" if observed_key is not None
+                                  else self._process_reason(running)) if (
+                                  observed_key != self._process_ref) else None
+            if mismatch or process_status:
+                self.disconnect()
+                self._unavailable = "INSTALLATION_MISMATCH" if mismatch else process_status
+            status = ("CONNECTION_LOST" if lost else
+                      "INSTALLATION_MISMATCH" if mismatch else
+                      process_status if process_status else
+                      "DECLARED" if self.path else "NOT_CONNECTED")
+            return self.observation(
+                status, connected=bool(self.path), **installation, **running,
+                **({"unavailable_reason": self._unavailable} if self._unavailable else {}),
+                operations=[dict(name=name, declared=True, verified=name in self._verified)
+                            for name in sorted(self.spec["operations"])])
 
     def invoke(self, operation, params=None, *, cancel_event=None, timeout_seconds=20):
-        # A denied preflight must not be classified as an unknown external effect.
-        if not self.path:
-            return self.observation("NOT_CONNECTED", executed=False,
-                                    executionOutcome="NONE",
-                                    **({"unavailable_reason": self._unavailable}
-                                       if self._unavailable else {}))
-        if executable_identity(self.path) != self._identity:
-            self.disconnect()
-            return self.observation("CONNECTION_LOST", executed=False, executionOutcome="NONE")
-        if self.spec.get("executable_sha256") and not (
-            self.installation_identity(self.path)["installation_verified"]
-        ):
-            self.disconnect()
-            self._unavailable = "INSTALLATION_MISMATCH"
-            return self.observation("INSTALLATION_MISMATCH", executed=False,
-                                    executionOutcome="NONE")
-        if self.spec.get("requires_running"):
-            running = self.process_observation()
-            current_key = self._process_key(running)
-            if current_key != self._process_ref:
-                status = ("PROCESS_CHANGED" if current_key is not None
-                          else self._process_reason(running))
-                self.disconnect()
-                self._unavailable = status
-                return self.observation(status, executed=False,
-                                        executionOutcome="NONE", **running)
-        args = self.spec["operations"].get(operation)
-        if args is None:
-            return self.observation("OPERATION_UNSUPPORTED", executed=False,
-                                    executionOutcome="NONE")
+        if not self._invocation_lock.acquire(blocking=False):
+            return self.observation("CLI_BUSY", executed=False, executionOutcome="NONE")
         try:
-            bound = bind_arguments(args, params)
-        except ProgramError as exc:
-            return self.observation(exc.code, executed=False, executionOutcome="NONE")
-        if cancel_event is not None and cancel_event.is_set():
-            return self.observation("CLI_CANCELLED", executed=False, executionOutcome="NONE")
+            return self._invoke_owned(operation, params, cancel_event=cancel_event,
+                                      timeout_seconds=timeout_seconds)
+        finally:
+            self._invocation_lock.release()
+
+    def _invoke_owned(self, operation, params=None, *, cancel_event=None,
+                      timeout_seconds=20):
+        with self._state_lock:
+            # A denied preflight must not be classified as an unknown external effect.
+            if not self.path:
+                return self.observation("NOT_CONNECTED", executed=False,
+                                        executionOutcome="NONE",
+                                        **({"unavailable_reason": self._unavailable}
+                                           if self._unavailable else {}))
+            if executable_identity(self.path) != self._identity:
+                self.disconnect()
+                return self.observation("CONNECTION_LOST", executed=False, executionOutcome="NONE")
+            if self.spec.get("executable_sha256") and not (
+                self.installation_identity(self.path)["installation_verified"]
+            ):
+                self.disconnect()
+                self._unavailable = "INSTALLATION_MISMATCH"
+                return self.observation("INSTALLATION_MISMATCH", executed=False,
+                                        executionOutcome="NONE")
+            if self.spec.get("requires_running"):
+                running = self.process_observation()
+                current_key = self._process_key(running)
+                if current_key != self._process_ref:
+                    status = ("PROCESS_CHANGED" if current_key is not None
+                              else self._process_reason(running))
+                    self.disconnect()
+                    self._unavailable = status
+                    return self.observation(status, executed=False,
+                                            executionOutcome="NONE", **running)
+            args = self.spec["operations"].get(operation)
+            if args is None:
+                return self.observation("OPERATION_UNSUPPORTED", executed=False,
+                                        executionOutcome="NONE")
+            try:
+                bound = bind_arguments(args, params)
+            except ProgramError as exc:
+                return self.observation(exc.code, executed=False, executionOutcome="NONE")
+            if cancel_event is not None and cancel_event.is_set():
+                return self.observation("CLI_CANCELLED", executed=False, executionOutcome="NONE")
+            opened_epoch = self._epoch
+            opened_path = self.path
+            opened_identity = self._identity
         start = time.perf_counter()
         try:
-            code, output = run_command(self.path, bound, cancel_event=cancel_event,
+            code, output = run_command(opened_path, bound, cancel_event=cancel_event,
                                        timeout_seconds=timeout_seconds,
                                        max_output_bytes=self.spec.get("max_output_bytes", DEFAULT_OUTPUT_BYTES))
         except ProgramError as exc:
-            if exc.code not in ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID"):
+            with self._state_lock:
+                if (self._epoch != opened_epoch or self.path != opened_path or
+                        self._identity != opened_identity):
+                    return self.observation("CONNECTION_SUPERSEDED", executed=False,
+                                            executionOutcome="NONE" if exc.code in
+                                            ("CLI_INPUT_INVALID", "CLI_CANCELLED_BEFORE_START")
+                                            else "UNKNOWN")
+                if exc.code not in ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID"):
+                    self._verified.discard(operation)
+                return self.observation("CLI_CANCELLED" if exc.code == "CLI_CANCELLED_BEFORE_START"
+                                        else exc.code, executed=False,
+                                        executionOutcome="NONE" if exc.code in
+                                        ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID")
+                                        else "UNKNOWN")
+        with self._state_lock:
+            if (self._epoch != opened_epoch or self.path != opened_path or
+                    self._identity != opened_identity):
+                return self.observation("CONNECTION_SUPERSEDED", executed=False,
+                                        executionOutcome="UNKNOWN")
+            if code:
                 self._verified.discard(operation)
-            return self.observation("CLI_CANCELLED" if exc.code == "CLI_CANCELLED_BEFORE_START"
-                                    else exc.code, executed=False,
-                                    executionOutcome="NONE" if exc.code in
-                                    ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID")
-                                    else "UNKNOWN")
-        if code:
-            self._verified.discard(operation)
-            return self.observation("EXECUTION_FAILED", executed=False,
-                                    executionOutcome="UNKNOWN", exit_code=code)
-        installation = self.installation_identity(self.path)
-        if self.spec.get("executable_sha256") and not installation["installation_verified"]:
-            self.disconnect()
-            self._unavailable = "INSTALLATION_MISMATCH"
-            return self.observation("INSTALLATION_MISMATCH", executed=False,
-                                    executionOutcome="UNKNOWN")
-        process = self.process_observation()
-        if self.spec.get("requires_running") and self._process_key(process) != self._process_ref:
-            status = ("PROCESS_CHANGED" if self._process_key(process) is not None
-                      else self._process_reason(process))
-            self.disconnect()
-            self._unavailable = status
-            return self.observation(status, executed=False,
-                                    executionOutcome="UNKNOWN", **process)
-        self._verified.add(operation)
-        return self.observation("EXECUTED", executed=True, operation=operation,
-                                executionOutcome="ACKNOWLEDGED",
-                                **installation, **process, output=output,
-                                elapsed_ms=round((time.perf_counter()-start)*1000, 3))
+                return self.observation("EXECUTION_FAILED", executed=False,
+                                        executionOutcome="UNKNOWN", exit_code=code)
+            installation = self.installation_identity(self.path)
+            if self.spec.get("executable_sha256") and not installation["installation_verified"]:
+                self.disconnect()
+                self._unavailable = "INSTALLATION_MISMATCH"
+                return self.observation("INSTALLATION_MISMATCH", executed=False,
+                                        executionOutcome="UNKNOWN")
+            process = self.process_observation()
+            if self.spec.get("requires_running") and self._process_key(process) != self._process_ref:
+                status = ("PROCESS_CHANGED" if self._process_key(process) is not None
+                          else self._process_reason(process))
+                self.disconnect()
+                self._unavailable = status
+                return self.observation(status, executed=False,
+                                        executionOutcome="UNKNOWN", **process)
+            self._verified.add(operation)
+            return self.observation("EXECUTED", executed=True, operation=operation,
+                                    executionOutcome="ACKNOWLEDGED",
+                                    **installation, **process, output=output,
+                                    elapsed_ms=round((time.perf_counter()-start)*1000, 3))
 
     def disconnect(self):
-        self.path = None
-        self._identity = None
-        self._process_ref = None
-        self._pin_cache = None
-        self._epoch = None
-        self._verified.clear()
-        return self.observation("DISCONNECTED", connected=False)
+        with self._state_lock:
+            self.path = None
+            self._identity = None
+            self._process_ref = None
+            self._pin_cache = None
+            self._epoch = None
+            self._verified.clear()
+            return self.observation("DISCONNECTED", connected=False)
 
     def recover(self):
         return self.connect()
