@@ -16,7 +16,7 @@ import {projectU01Capabilities,observeU01CapabilitiesAsync} from '../src/u01-bri
 const root=resolve(fileURLToPath(new URL('../../',import.meta.url)));
 const k02root=resolve(root,'k02-owner-latest');
 const u02root=resolve(root,'u02-owner-latest');
-const gitRevision='3c19fbb3ed0e7555959e47958c2d0c4365c45b3d';
+const gitRevision='6fd060eb3adc376505f1922bf5b43d557d4c8882';
 const gitPath='modules/k02-interoperability/skills/exact-source-audit.instructions.json';
 const k02=await import(pathToFileURL(resolve(k02root,'modules/k02-interoperability/index.mjs')).href);
 const {GitCliProvider,GIT_INPUT,GIT_OUTPUT}=await import(pathToFileURL(resolve(k02root,
@@ -242,7 +242,7 @@ test('public source -> native K02 choice -> real U01 git -> U03 host receipt, JS
  assert.equal(after.capabilityReads,iterations);
  assert.equal(after.invocations,1);
  const report={status:'PASS',schema:'IWXA_U03_OWNER_INTEROP_QUALIFICATION/1',
-  owners:{u02:'a66b79a474ad7ac0004513d7fb77f5c46c931cfb',
+  owners:{u02:'ac587cc48f70e8547c4e162509fa12f89257e5b3',
    k02:gitRevision,u03:'37eddb413bae949a165ce0380f1c74199e0cad91'},
   script:'native U02 source + K02 GitCliProvider + U01 real git + U03 receipt',
   jsInvocations:graph.invocations,pythonInvocations:pythonResult.invocations,

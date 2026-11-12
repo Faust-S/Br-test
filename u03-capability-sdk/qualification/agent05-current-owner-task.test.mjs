@@ -244,8 +244,8 @@ test('current U02 Task sources + current K02 choice + actual U01 jq + U03 eviden
     assert.equal(counters.invoke,1);
     console.log(JSON.stringify({
       schema:'IWXA_U03_AGENT05_CURRENT_OWNERS/1',status:'PASS',
-      u02Owner:'a66b79a474ad7ac0004513d7fb77f5c46c931cfb',
-      k02Owner:'3c19fbb3ed0e7555959e47958c2d0c4365c45b3d',
+      u02Owner:'ac587cc48f70e8547c4e162509fa12f89257e5b3',
+      k02Owner:'6fd060eb3adc376505f1922bf5b43d557d4c8882',
       realJq:true,sourceCount:2,sourceReads:counters.sourcePinnedReads,
       sourceRefreshOnly:true,javascriptInvocations:counters.invoke,
       pythonInvocations:checked.invocations,grandTotalCents:result.grandTotalCents,

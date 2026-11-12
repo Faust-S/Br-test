@@ -39,14 +39,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Faust-S/Br-test
-          ref: a66b79a474ad7ac0004513d7fb77f5c46c931cfb
+          ref: ac587cc48f70e8547c4e162509fa12f89257e5b3
           path: u02-owner-latest
           persist-credentials: false
       - name: Checkout current public K02 owner (read-only)
         uses: actions/checkout@v4
         with:
           repository: Faust-S/knowledge
-          ref: 3c19fbb3ed0e7555959e47958c2d0c4365c45b3d
+          ref: 6fd060eb3adc376505f1922bf5b43d557d4c8882
           path: k02-owner-latest
           persist-credentials: false
       - name: U02 source, K02 selection, U03 compatibility, real U01 execution and Python readback
@@ -108,14 +108,14 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Faust-S/Br-test
-          ref: a66b79a474ad7ac0004513d7fb77f5c46c931cfb
+          ref: ac587cc48f70e8547c4e162509fa12f89257e5b3
           path: u02-owner-latest
           persist-credentials: false
       - name: Checkout current public K02 jq-choice owner (read-only)
         uses: actions/checkout@v4
         with:
           repository: Faust-S/knowledge
-          ref: 3c19fbb3ed0e7555959e47958c2d0c4365c45b3d
+          ref: 6fd060eb3adc376505f1922bf5b43d557d4c8882
           path: k02-owner-latest
           persist-credentials: false
       - name: Install official pinned jq, execute via Python and Node U01 hosts, revoke, remove
