@@ -113,7 +113,7 @@ function invocation(row,observed,status,operation,programId){
 
 // Consume a SINGLE Core-owned U01/U03 readback, not raw receipts or a new probe.
 // This shape is already returned by Personal Agent 0.3 program_use_projection().
-function ownerOperationState(row,owner,operation,programId){
+function ownerOperationState(row,owner,operation,programId,rawStatus){
   const source=owner.source;
   if(!object(source)||source.schema!==PROGRAM||source.program_id!==programId)
     return setState(row,'BLOCKED','SOURCE_IDENTITY_MISMATCH',PROGRAM);
@@ -121,6 +121,10 @@ function ownerOperationState(row,owner,operation,programId){
     typeof source.connection_epoch==='string'&&scoped.test(source.connection_epoch)&&
     Array.isArray(source.operations);
   if(!live)return setState(row,'BLOCKED','source-unavailable',PROGRAM);
+  // Apply the existing U01 bridge's full snapshot validity test, including
+  // transport, duplicate operations and booleans, without calling U01 again.
+  if(!['operation-unverified','execution-receipt-missing'].includes(rawStatus?.reason))
+    return setState(row,'BLOCKED',rawStatus?.reason??'OWNER_SOURCE_INVALID',PROGRAM);
   const raw=source.operations.filter(x=>x?.name===operation);
   if(raw.length!==1||raw[0].declared!==true)
     return setState(row,'BLOCKED',raw.length>1?'OWNER_OPERATION_AMBIGUOUS':'operation-unsupported',PROGRAM);
@@ -199,7 +203,8 @@ function present(row,presentation){
  * descriptor: existing U03 ModuleDescriptor
  * channels: host display metadata, one row for each declared provides[]
  * statuses: current U03 CapabilityStatus observations for DATA/NATIVE
- * u01: {inspect,capabilities,receipts} OR {inspect,ownerProjection} already\n *      checked by the Core owner; no second U01 read or receipt transfer
+ * u01: {inspect,capabilities,receipts} OR {inspect,ownerProjection}, already
+ *      checked by the Core owner; revalidate snapshot in memory, never reread U01
  * ui: existing integrationObservation() output; never used to certify a capability
  * presentation: {appRef,hostRef,capabilities,observations} from U04 owner
  */
@@ -222,6 +227,13 @@ export function projectProgramCard({programId,descriptor,channels,statuses=[],
       invalid();
   }
   const opStatus=new Map();
+  const ownerStatus=new Map();
+  if(owner!==undefined&&operations.length){
+    const config={programId,bindings:operations.map(x=>({
+      id:x.id,operation:x.operation,version:declared.get(x.id)}))};
+    for(const status of projectU01Capabilities(owner.source,config))
+      ownerStatus.set(status.id,status);
+  }
   if(operations.length&&u01?.capabilities){
     const config={programId,bindings:operations.map(x=>({
       id:x.id,operation:x.operation,version:declared.get(x.id)})),
@@ -235,7 +247,7 @@ export function projectProgramCard({programId,descriptor,channels,statuses=[],
     if(binding.kind==='DATA'||binding.kind==='NATIVE_CONTRACT')
       return dataState(row,statusIndex.get(binding.id),ui);
     if(binding.kind==='OPERATION'){
-      if(owner!==undefined)return ownerOperationState(row,owner,binding.operation,programId);
+      if(owner!==undefined)return ownerOperationState(row,owner,binding.operation,programId,ownerStatus.get(binding.id));
       if(!opStatus.has(binding.id))return row;
       return invocation(row,u01.capabilities,opStatus.get(binding.id),binding.operation,programId);
     }

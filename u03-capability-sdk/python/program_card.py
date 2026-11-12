@@ -148,7 +148,7 @@ def _invocation(row,observed,status,operation,program_id):
 
 
 
-def _owner_operation(row, owner, operation, program_id):
+def _owner_operation(row, owner, operation, program_id, raw_status):
     """Display the current Core-owned projection without calling U01 twice."""
     source=owner.get('source')
     if not isinstance(source,dict) or source.get('schema')!=PROGRAM or \
@@ -159,6 +159,12 @@ def _owner_operation(row, owner, operation, program_id):
         _EPOCH.fullmatch(source['connection_epoch']) is not None and \
         isinstance(source.get('operations'),list)
     if not live:return _state(row,'BLOCKED','source-unavailable',PROGRAM)
+    # Reuse the existing U01 contract validation for this in-memory snapshot.
+    # No extra U01 capabilities() call or execution.
+    if not isinstance(raw_status,dict) or raw_status.get('reason') not in (
+            'operation-unverified','execution-receipt-missing'):
+        return _state(row,'BLOCKED',raw_status.get('reason','OWNER_SOURCE_INVALID')
+                      if isinstance(raw_status,dict) else 'OWNER_SOURCE_INVALID',PROGRAM)
     raw=[x for x in source['operations'] if isinstance(x,dict) and x.get('name')==operation]
     if len(raw)!=1 or raw[0].get('declared') is not True:
         return _state(row,'BLOCKED','OWNER_OPERATION_AMBIGUOUS' if len(raw)>1 else
@@ -264,6 +270,16 @@ def project_program_card(*,programId,descriptor,channels,statuses=None,u01=None,
                 owner.get('execution_authority_granted') is not False or \
                 not isinstance(owner.get('operations'),list) or len(owner['operations'])>128:
             _invalid()
+    owner_status={}
+    if owner is not None and ops:
+        source=owner.get('source')
+        class OwnerSnapshot:
+            def capabilities(self):return source
+        bindings={'programId':programId,'bindings':[{
+            'id':row['id'],'operation':row['operation'],'version':declared[row['id']]
+        } for row in ops]}
+        owner_status={row['id']:row for row in observe_u01_capabilities(
+            OwnerSnapshot(),bindings)}
     projected={}
     if ops and isinstance(u01,dict) and u01.get('capabilities') is not None:
         source=u01['capabilities']
@@ -282,7 +298,8 @@ def project_program_card(*,programId,descriptor,channels,statuses=None,u01=None,
             result.append(_data(row,status_index.get(binding['id']),ui))
         elif binding['kind']=='OPERATION':
             if owner is not None:
-                result.append(_owner_operation(row,owner,binding['operation'],programId))
+                result.append(_owner_operation(row,owner,binding['operation'],programId,
+                                               owner_status.get(binding['id'])))
             else:
                 result.append(_invocation(row,u01['capabilities'],projected[binding['id']],
                              binding['operation'],programId) if binding['id'] in projected else row)

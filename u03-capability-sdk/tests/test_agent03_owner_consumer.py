@@ -49,3 +49,26 @@ class Agent03OwnerConsumer(unittest.TestCase):
         prior=deepcopy(item)
         self.assertEqual(project_program_card(**item),project_program_card(**item))
         self.assertEqual(item,prior)
+
+    def test_agent05_malformed_u01_snapshot_fails_closed(self):
+        sample=next(c['args'] for c in CASES if c['case']=='agent03_verified_execution')
+        variants=(
+            lambda s:s.update(transport='not-a-u01-transport'),
+            lambda s:s['operations'].append(dict(name='other',declared='yes',verified=False)),
+            lambda s:s['operations'].extend((dict(name='other',declared=True,verified=False),
+                                               dict(name='other',declared=True,verified=False))),
+            lambda s:s['operations'][0].update(verified='true'),
+        )
+        for modify in variants:
+            item=deepcopy(sample)
+            modify(item['u01']['ownerProjection']['source'])
+            before=deepcopy(item)
+            card=project_program_card(**item)
+            op=next(row for row in card['capabilities'] if row['kind']=='OPERATION')
+            self.assertEqual(op['state'],'BLOCKED')
+            self.assertEqual(op['reason'],'source-unavailable')
+            self.assertFalse(op['executionConfirmed'])
+            self.assertFalse(op['verified'])
+            self.assertFalse(op['canOfferInvocation'])
+            self.assertIsNone(op['observationRef'])
+            self.assertEqual(item,before)

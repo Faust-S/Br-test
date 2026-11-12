@@ -49,3 +49,27 @@ test('Agent snapshot projection is pure and does not modify current Core source'
  assert.deepEqual(first,second);
  assert.equal(JSON.stringify(entry),before);
 });
+
+test('Agent 0.5 owner readback rejects malformed U01 snapshots without a second probe',()=>{
+ const sourceCase=cases.find(c=>c.case==='agent03_verified_execution').args;
+ for(const change of [
+  source=>{source.transport='not-a-u01-transport';},
+  source=>{source.operations.push({name:'other',declared:'yes',verified:false});},
+  source=>{source.operations.push({name:'other',declared:true,verified:false});
+    source.operations.push({name:'other',declared:true,verified:false});},
+  source=>{source.operations[0].verified='true';},
+ ]){
+  const snapshot=structuredClone(sourceCase);
+  change(snapshot.u01.ownerProjection.source);
+  const inputCopy=structuredClone(snapshot);
+  const view=projectProgramCard(snapshot);
+  const operation=view.capabilities.find(x=>x.kind==='OPERATION');
+  assert.equal(operation.state,'BLOCKED');
+  assert.equal(operation.reason,'source-unavailable');
+  assert.equal(operation.executionConfirmed,false);
+  assert.equal(operation.verified,false);
+  assert.equal(operation.canOfferInvocation,false);
+  assert.equal(operation.observationRef,null);
+  assert.deepEqual(snapshot,inputCopy,'read-only UI projection may not modify Core evidence');
+ }
+});
