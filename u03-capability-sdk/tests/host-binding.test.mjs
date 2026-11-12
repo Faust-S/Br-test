@@ -262,3 +262,47 @@ test('host denial preserves owner decision and leaves in-flight guard reusable',
   assert.equal((await bridge.attach()).attached,true);
   assert.equal(attempts,2);
 });
+
+test('host attach must roll back when U01 owner epoch, program or operation changes with recycled receipt ref',async()=>{
+ for(const change of ['epoch','program','operation']){
+  const state={epoch:epochA,programId:'JQ_CLI_V1',operation:'evaluate'};
+  let reads=0,attaches=0;
+  const detaches=[];
+  const stableRef='host:stable:receipt';
+  const connection={capabilities:async()=>{
+    reads++;
+    return {...source(state.epoch),program_id:state.programId,
+      operations:[{name:state.operation,declared:true,verified:true}]};
+  }};
+  const config=()=>({
+    programId:state.programId,
+    bindings:[{operation:state.operation,id:'iwxa.cli.evaluate',version:'1.0.0'}],
+    receipts:{[state.operation]:{observationRef:stableRef,
+      observation:{...receipt(state.epoch).observation,
+       program_id:state.programId,operation:state.operation}}}
+  });
+  const bridge=bindModuleToU01Host({
+    descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+    port:connection,getBindings:config,
+    hooks:{
+      attach:async()=>{
+        attaches++;
+        if(change==='epoch')state.epoch=epochB;
+        else if(change==='program')state.programId='YQ_CLI_V1';
+        else state.operation='recompute';
+        return {attached:true,bindingRef:'host:must-rollback'};
+      },
+      detach:async ref=>{detaches.push(ref);return {detached:true};}
+    }
+  });
+  const outcome=await bridge.attach();
+  assert.equal(outcome.attached,false,change+' must not attach under the old owner identity');
+  assert.deepEqual(outcome.assessment.reasons,['U03_HOST_OBSERVATION_CHANGED']);
+  assert.equal(outcome.rollback,'DETACHED');
+  assert.equal(outcome.hostState,'DETACHED');
+  assert.equal(outcome.hostReceipt.bindingRef,'host:must-rollback');
+  assert.deepEqual(detaches,['host:must-rollback']);
+  assert.equal(attaches,1);
+  assert.equal(reads,2,'U03 must reuse the two existing U01 reads, not add another');
+ }
+});

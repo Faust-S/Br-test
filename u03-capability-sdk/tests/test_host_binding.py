@@ -243,3 +243,48 @@ class ConcurrentAndIncompleteReceiptTests(unittest.TestCase):
         permitted[0]=True
         self.assertTrue(bridge.attach()['attached'])
         self.assertEqual(len(actions),2)
+
+class OwnerIdentityRaces(unittest.TestCase):
+    def test_epoch_program_and_operation_change_roll_back_even_with_same_receipt_ref(self):
+        for change in ('epoch','program','operation'):
+            with self.subTest(change=change):
+                state={'epoch':EPOCH_A,'programId':'JQ_CLI_V1','operation':'evaluate'}
+                calls={'read':0,'attach':0}
+                detaches=[]
+                class DynamicConnection:
+                    def capabilities(self):
+                        calls['read']+=1
+                        return {'schema':SCHEMA,'program_id':state['programId'],
+                                'transport':'cli','status':'DECLARED','connected':True,
+                                'connection_epoch':state['epoch'],
+                                'operations':[{'name':state['operation'],
+                                               'declared':True,'verified':True}]}
+                def get_bindings():
+                    return {'programId':state['programId'],
+                            'bindings':[{'operation':state['operation'],
+                                         'id':'iwxa.cli.evaluate','version':'1.0.0'}],
+                            'receipts':{state['operation']:{
+                                'observationRef':'host:stable:receipt',
+                                'observation':{**receipt(state['epoch'])['observation'],
+                                  'program_id':state['programId'],
+                                  'operation':state['operation']}}}}
+                def attach(*_):
+                    calls['attach']+=1
+                    if change=='epoch':state['epoch']=EPOCH_B
+                    elif change=='program':state['programId']='YQ_CLI_V1'
+                    else:state['operation']='recompute'
+                    return {'attached':True,'bindingRef':'host:must-rollback'}
+                def detach(ref):
+                    detaches.append(ref)
+                    return {'detached':True}
+                bridge=U03HostBinding(
+                    DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                    DynamicConnection(),get_bindings,attach,detach)
+                outcome=bridge.attach()
+                self.assertFalse(outcome['attached'])
+                self.assertEqual(outcome['assessment']['reasons'],
+                                 ['U03_HOST_OBSERVATION_CHANGED'])
+                self.assertEqual(outcome['rollback'],'DETACHED')
+                self.assertEqual(outcome['hostState'],'DETACHED')
+                self.assertEqual(detaches,['host:must-rollback'])
+                self.assertEqual(calls,{'read':2,'attach':1})
