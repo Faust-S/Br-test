@@ -35,6 +35,22 @@ jobs:
         run: |
           node --test u03-capability-sdk/tests/agent03-owner-consumer.test.mjs
           python -m unittest discover -s u03-capability-sdk/tests -p 'test_agent03_owner_consumer.py' -v
+      - name: Checkout current public U02 owner (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Br-test
+          ref: 687ef5c3d7c3000d6b9c9e3ff666bc3e96f2805e
+          path: u02-owner-latest
+          persist-credentials: false
+      - name: Checkout current public K02 owner (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/knowledge
+          ref: 467fddc8a49dab475af79a63b0ca4eea78fd5ff2
+          path: k02-owner-latest
+          persist-credentials: false
+      - name: U02 source, K02 selection, U03 compatibility, real U01 execution and Python readback
+        run: node --test u03-capability-sdk/qualification/u02-k02-u01-host.test.mjs
       - name: Live local HTTP API, host-owned credential loss and reattachment
         run: node u03-capability-sdk/qualification/real-u01-http.mjs
       - name: Checkout pinned public K02 owner source (read-only)
