@@ -13,3 +13,4 @@ export {createCliOutputSourcePort} from './cli-source.mjs';
 export {createHostSelectedSourcePort} from './host-source.mjs';
 export {TASK_SOURCE_SCHEMA,bindSourceObject,linkTaskSource,assessTaskSourceFreshness} from './task-object.mjs';
 export {PROJECT_VIEW_SCHEMA, PROJECT_CHECKPOINT_SCHEMA, readSelectedProjectSources, checkpointSelectedProjectSources, projectSourceObservationsForKnowledge} from './selected-project.mjs';
+export {PROJECT_FRESHNESS_SCHEMA,inspectSelectedProjectSources} from './selected-project.mjs';

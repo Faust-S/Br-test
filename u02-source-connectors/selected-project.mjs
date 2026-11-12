@@ -151,3 +151,80 @@ export function projectSourceObservationsForKnowledge(view) {
     text: s.text, complete: true
   }));
 }
+
+// A low-cost status check for reopened Tasks. This observes source revisions,
+// never calls source.read(), never supplies source text, and never turns a
+// prior checkpoint into fresh evidence for K01/K05.
+export const PROJECT_FRESHNESS_SCHEMA = 'IWXA_U02_SELECTED_PROJECT_FRESHNESS/1';
+export async function inspectSelectedProjectSources({scopeId, sources, previous = null} = {}) {
+  checkInput({scopeId, sources, previous, maxTotalBytes: limit});
+  const prior = new Map((previous?.sources ?? []).map(s => [s.key, s]));
+  const metrics = {refreshCalls: 0, pinnedReadCalls: 0, returnedTextBytes: 0, elapsedMs: 0};
+  const rows = [];
+  const begin = performance.now();
+  for (const {key, format, port} of sources) {
+    const start = performance.now();
+    const descriptor = port.describe();
+    if (!validDescriptor(descriptor)) throw Error('PROJECT_SOURCE_DESCRIPTOR_INVALID');
+    const saved = prior.get(key) ?? null;
+    const base = {key, format, providerId: descriptor.providerId,
+      sourceRef: descriptor.sourceRef, authority: OBSERVATION_AUTHORITY};
+    const row = (status, freshness, change, more = {}) => ({
+      ...base, status, freshness, change, ...more, elapsedMs: elapsed(start)});
+    if (!FORMATS.has(format)) {
+      rows.push(row('FORMAT_UNSUPPORTED', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    if (saved && (saved.pin.providerId !== descriptor.providerId ||
+        saved.pin.sourceRef !== descriptor.sourceRef ||
+        saved.pin.observationType !== descriptor.observationType)) {
+      rows.push(row('SOURCE_REBIND_REQUIRED', 'UNKNOWN', 'REBIND_REQUIRED'));
+      continue;
+    }
+    if (!descriptor.capabilities.some(x => x.id === 'source.refresh' && x.available === true)) {
+      rows.push(row('REFRESH_UNSUPPORTED', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    let observed;
+    metrics.refreshCalls++;
+    try {observed = await port.refresh();}
+    catch {
+      rows.push(row('SOURCE_UNAVAILABLE', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    if (observed?.schema !== SOURCE_SCHEMA ||
+        observed.authority !== OBSERVATION_AUTHORITY ||
+        observed.providerId !== descriptor.providerId ||
+        observed.sourceRef !== descriptor.sourceRef ||
+        observed.observationType !== descriptor.observationType) {
+      rows.push(row('SOURCE_INVALID', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    if (observed.status !== 'OK') {
+      rows.push(row(observed.status, 'UNKNOWN',
+        observed.status === 'SOURCE_MISSING' ? 'MISSING' : 'UNKNOWN'));
+      continue;
+    }
+    const current = observed.revision;
+    if (typeof current !== 'string' || !/^(?:[a-f0-9]{40,64}|sha256:[a-f0-9]{64})$/i.test(current)) {
+      rows.push(row('REVISION_UNAVAILABLE', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    // A content hash supplied by the provider cannot contradict a saved
+    // hash for an unchanged revision. This does not reread or validate bytes.
+    if (saved && current === saved.pin.revision &&
+        observed.contentRef != null && observed.contentRef !== saved.contentRef) {
+      rows.push(row('SOURCE_INCONSISTENT', 'UNKNOWN', 'UNKNOWN'));
+      continue;
+    }
+    const same = saved && current === saved.pin.revision;
+    rows.push(row('OK', saved ? (same ? 'CURRENT' : 'STALE') : 'NOT_PINNED',
+      saved ? (same ? 'UNCHANGED' : 'CHANGED') : 'FIRST_OBSERVATION',
+      {currentRevision: current, previousRevision: saved?.pin.revision ?? null,
+        observedAt: observed.observedAt, provenance: observed.provenance}));
+  }
+  metrics.elapsedMs = elapsed(begin);
+  return {schema: PROJECT_FRESHNESS_SCHEMA, scopeId, sources: rows, metrics,
+    observationsComplete: rows.every(r => r.status === 'OK'),
+    contentRead: false, evidenceReady: false};
+}

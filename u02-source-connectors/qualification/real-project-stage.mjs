@@ -8,11 +8,11 @@ import {observePublicRepo} from '../../atlas-public/src/github-public.mjs';
 import {createAtlasGitHubSourcePort} from '../atlas-github.mjs';
 import {createLocalFileSourcePort} from '../local-file.mjs';
 import {readSelectedProjectSources,checkpointSelectedProjectSources,
-  projectSourceObservationsForKnowledge} from '../selected-project.mjs';
+  projectSourceObservationsForKnowledge,inspectSelectedProjectSources} from '../selected-project.mjs';
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
-if(!root||!['initial','reopen','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
+if(!root||!['initial','reopen','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
 const paths=[
  {key:'plan',format:'markdown',path:'docs/project-plan.md'},
  {key:'requirements',format:'markdown',path:'docs/requirements.md'},
@@ -128,6 +128,37 @@ if(phase==='initial'){
     key:s.key,revision:s.revision,contentRef:s.contentRef,change:s.change})),reopenMetrics:again.metrics}));
   console.log(JSON.stringify({schema:'IWXA_U02_REAL_PROJECT/1',phase,status:'PASS',
     restartedIndependentProcess:true,githubChange:gh.change,metrics:again.metrics}));
+}else if(phase==='inspect'){
+  const checkpoint=JSON.parse(await readFile(save,'utf8'));
+  let accidentalReads=0;
+  const sources=[...local(),github()].map(({key,format,port})=>({
+    key,format,port:{
+      describe:()=>port.describe(),refresh:()=>port.refresh(),
+      read:async()=>{accidentalReads++;throw Error('OBSERVATION_MUST_NOT_READ_CONTENT')}
+    }
+  }));
+  const check=await retry(()=>inspectSelectedProjectSources({
+    scopeId:'iwxa_selected_project',sources,previous:checkpoint
+  }));
+  assert.equal(check.observationsComplete,true,
+    JSON.stringify(check.sources.map(s=>({key:s.key,status:s.status}))));
+  assert.deepEqual(check.sources.slice(0,4).map(s=>s.freshness),
+    ['CURRENT','CURRENT','CURRENT','CURRENT']);
+  assert.ok(['CURRENT','STALE'].includes(check.sources[4].freshness));
+  assert.equal(check.metrics.refreshCalls,5);
+  assert.equal(check.metrics.pinnedReadCalls,0);
+  assert.equal(check.metrics.returnedTextBytes,0);
+  assert.equal(accidentalReads,0);
+  assert.equal(check.evidenceReady,false);
+  assert.equal(check.contentRead,false);
+  assert.ok(check.sources.every(row=>!('text' in row)));
+  const old=JSON.parse(await readFile(view,'utf8'));
+  await writeFile(view,JSON.stringify({...old,inspect:check.sources.map(s=>({
+    key:s.key,freshness:s.freshness,change:s.change,revision:s.currentRevision
+  })),inspectMetrics:check.metrics}));
+  console.log(JSON.stringify({schema:'IWXA_U02_REAL_PROJECT/1',phase,status:'PASS',
+    contentReads:0,freshnessOnly:true,externalGitHubStatus:check.sources[4].freshness,
+    metrics:check.metrics}));
 }else{
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
   // A real second local revision and a renamed file; previous bytes remain historical.
@@ -137,6 +168,14 @@ if(phase==='initial'){
     'Milestone: approved, execution ready'));
 
   await rename(join(root,paths[1].path),join(root,'docs','requirements-renamed.md'));
+  const freshness=await inspectSelectedProjectSources({
+    scopeId:'iwxa_selected_project',sources:local(),previous:checkpoint});
+  assert.equal(freshness.sources[0].freshness,'STALE');
+  assert.equal(freshness.sources[1].status,'SOURCE_MISSING');
+  assert.deepEqual(freshness.sources.slice(2).map(row=>row.freshness),
+    ['CURRENT','CURRENT']);
+  assert.equal(freshness.metrics.pinnedReadCalls,0);
+  assert.equal(freshness.evidenceReady,false);
   const changed=await readSelectedProjectSources({scopeId:'iwxa_selected_project',
     sources:local(),previous:checkpoint});
   assert.equal(changed.sources[0].change,'CHANGED');

@@ -12,7 +12,7 @@ try {
   await writeFile(join(root,'index.html'),
     '<!doctype html><html><head><meta charset="utf-8"></head><body><div id="app"></div><script type="module" src="/src/main.mjs"></script></body></html>');
   await writeFile(join(root,'src','main.mjs'), `
-    import {sourceDescriptor,sourceObservation,captureSource,readPinnedSource,sourceChange,createHostSelectedSourcePort}
+    import {sourceDescriptor,sourceObservation,captureSource,readPinnedSource,sourceChange,createHostSelectedSourcePort,inspectSelectedProjectSources}
       from '@iwxa/u02-source-connectors/web';
     const bytes = new TextEncoder().encode('Atlas Center source preview');
     const hash = new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
@@ -29,6 +29,12 @@ try {
       readSelected:async()=>({status:'OK',bytes})
     });
     const verified=await captureSource(source);
+    const snapshot={schema:'IWXA_U02_SELECTED_PROJECT_CHECKPOINT/1',scopeId:'org-a',
+      sources:[{key:'atlas',pin:verified.pin,contentRef:verified.read.contentRef,bytes:verified.read.bytes}]};
+    const freshness=await inspectSelectedProjectSources({scopeId:'org-a',
+      sources:[{key:'atlas',format:'text',port:source}],previous:snapshot});
+    window.IWXA_U02_FRESHNESS_READY=freshness.sources[0].freshness==='CURRENT' &&
+      freshness.metrics.pinnedReadCalls===0 && freshness.evidenceReady===false;
     window.IWXA_U02_HOST_PORT_READY=verified.status==='OK' &&
       verified.read.contentRef===sha && verified.read.authority==='OBSERVATION_ONLY';
     window.IWXA_U02_WEBVIEW_READY = captured.status==='OK' &&
