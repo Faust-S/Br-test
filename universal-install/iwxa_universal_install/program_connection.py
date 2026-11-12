@@ -404,12 +404,15 @@ class CliConnection:
             code, output = run_command(self.path, bound, cancel_event=cancel_event,
                                        timeout_seconds=timeout_seconds)
         except ProgramError as exc:
+            if exc.code not in ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID"):
+                self._verified.discard(operation)
             return self.observation("CLI_CANCELLED" if exc.code == "CLI_CANCELLED_BEFORE_START"
                                     else exc.code, executed=False,
                                     executionOutcome="NONE" if exc.code in
                                     ("CLI_CANCELLED_BEFORE_START", "CLI_INPUT_INVALID")
                                     else "UNKNOWN")
         if code:
+            self._verified.discard(operation)
             return self.observation("EXECUTION_FAILED", executed=False,
                                     executionOutcome="UNKNOWN", exit_code=code)
         installation = self.installation_identity(self.path)

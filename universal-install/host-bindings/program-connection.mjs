@@ -346,8 +346,11 @@ export class CliConnection {
       return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
     }
     const begin=performance.now(),r=run(this.path,bound);
-    if(r.status!=="EXECUTED")return this.observation(r.status,
-      {executed:false,executionOutcome:"UNKNOWN",exit_code:r.code});
+    if(r.status!=="EXECUTED"){
+      this.verified.delete(operation);
+      return this.observation(r.status,
+        {executed:false,executionOutcome:"UNKNOWN",exit_code:r.code});
+    }
     const installation=this.installationIdentity(this.path);
     if(this.spec.executable_sha256&&!installation.installation_verified){
       this.disconnect();this.lastUnavailable="INSTALLATION_MISMATCH";
@@ -398,9 +401,11 @@ export class CliConnection {
     if(this.path!==path||this.identity!==identity||this.epoch!==epoch)
       return this.observation("CONNECTION_SUPERSEDED",{executed:false,
         executionOutcome:r.executionOutcome==="NONE"?"NONE":"UNKNOWN"});
-    if(r.status!=="EXECUTED")
+    if(r.status!=="EXECUTED"){
+      if(r.executionOutcome!=="NONE")this.verified.delete(operation);
       return this.observation(r.status,{executed:false,executionOutcome:r.executionOutcome,
         ...(r.code===undefined?{}:{exit_code:r.code})});
+    }
     const installation=this.installationIdentity(path);
     const running=this.processObservation();
     if((this.spec.executable_sha256&&!installation.installation_verified)||

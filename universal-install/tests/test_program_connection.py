@@ -146,6 +146,23 @@ class CliProcessHostTest(unittest.TestCase):
                           result["executionOutcome"]), ("EXECUTED", "42", "ACKNOWLEDGED"))
         self.assertEqual(result["connection_epoch"], connected["connection_epoch"])
 
+    def test_failed_attempt_revokes_previous_verified_operation(self):
+        executable = str(Path(sys.executable).resolve())
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1",
+                "program_id": "PYTHON_REVOKE_ON_FAILURE",
+                "executable_name": Path(executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"dynamic": ["-c", "{script}"]}}
+        conn = CliConnection(spec, executable)
+        self.assertEqual(conn.connect()["status"], "CONNECTED")
+        self.assertEqual(conn.invoke("dynamic", {"script": "print(42)"})["status"], "EXECUTED")
+        self.assertTrue(conn.capabilities()["operations"][0]["verified"])
+        failed = conn.invoke("dynamic", {"script": "raise SystemExit(3)"})
+        self.assertEqual((failed["status"], failed["executionOutcome"]),
+                         ("EXECUTION_FAILED","UNKNOWN"))
+        self.assertFalse(conn.capabilities()["operations"][0]["verified"])
+
     def test_hash_cached_for_polling_but_explicit_verify_rehashes(self):
         executable = str(Path(sys.executable).resolve())
         digest = hashlib.sha256(Path(executable).read_bytes()).hexdigest()

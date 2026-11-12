@@ -19,7 +19,8 @@ const spec={
   value:["-e","console.log(process.argv[1])","file={note}"],
   fail:["-e","process.exit(3)"],
   slow:["-e","setTimeout(()=>{},9000)"],
-  binary:["-e","process.stdout.write(Buffer.from([255]))"]
+  binary:["-e","process.stdout.write(Buffer.from([255]))"],
+  dynamic:["-e","{script}"]
  }
 };
 const observed={program_id:id,verified:true,status:"RUNNING",spawned:false,
@@ -41,7 +42,7 @@ assert.equal(second.invoke("value",{note:"a b.md"}).output.trim(),"file=a b.md")
 assert.equal(first.invoke("fail").executionOutcome,"UNKNOWN");
 assert.equal(first.invoke("missing").executionOutcome,"NONE");
 assert.equal(first.invoke("echo",{bad:"input"}).executionOutcome,"NONE");
-assert.equal(first.capabilities().operations[0].verified,true);
+assert.equal(first.capabilities().operations.find(x=>x.name==="echo").verified,true);
 const preCancelled=new AbortController();
 preCancelled.abort();
 const before=await first.invokeAsync("slow",{}, {signal:preCancelled.signal});
@@ -70,6 +71,13 @@ const undecodable=first.invoke("binary");
 assert.equal(undecodable.status,"CLI_OUTPUT_ENCODING_UNSUPPORTED");
 assert.equal(undecodable.executionOutcome,"UNKNOWN");
 assert.equal(first.capabilities().operations.find(x=>x.name==="binary").verified,false);
+const evaluated=first.invoke("dynamic",{script:"console.log(42)"});
+assert.equal(evaluated.status,"EXECUTED");
+assert.equal(first.capabilities().operations.find(x=>x.name==="dynamic").verified,true);
+const failedDynamic=first.invoke("dynamic",{script:"process.exit(3)"});
+assert.equal(failedDynamic.status,"EXECUTION_FAILED");
+assert.equal(failedDynamic.executionOutcome,"UNKNOWN");
+assert.equal(first.capabilities().operations.find(x=>x.name==="dynamic").verified,false);
 assert.equal(first.verify().connection_epoch,a.connection_epoch);
 const port=createProductHostPort("atlas",async({operation,request})=>
  operation==="invoke"?second.invoke(request.operation,request.params):second[operation]());
