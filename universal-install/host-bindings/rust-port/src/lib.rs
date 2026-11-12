@@ -359,7 +359,7 @@ mod tests {
             "-c".to_string(),
             "import ctypes; print(ctypes.windll.kernel32.GetConsoleWindow())".to_string()
         ];
-        let (code, output) = execute(&PathBuf::from("python"), &args)
+        let (code, output) = execute(&PathBuf::from("python"), &args, DEFAULT_OUTPUT)
             .expect("Windows Python CLI must launch");
         assert_eq!(code, 0);
         assert_eq!(output.trim(), "0", "GUI-owned CLI must not create a console");
@@ -373,7 +373,7 @@ mod tests {
 sys.{stream}.flush(); time.sleep(30)"
             );
             let start = Instant::now();
-            let result = execute(&PathBuf::from("python"), &["-c".into(), code]);
+            let result = execute(&PathBuf::from("python"), &["-c".into(), code], DEFAULT_OUTPUT);
             assert_eq!(result, Err("CLI_OUTPUT_TOO_LARGE"));
             assert!(start.elapsed() < Duration::from_secs(8),
                 "oversized {stream} blocked until timeout");
@@ -383,8 +383,24 @@ sys.{stream}.flush(); time.sleep(30)"
     fn non_utf8_output_is_not_reported_as_valid_text() {
         let args = ["-c".to_string(),
             "import sys;sys.stdout.buffer.write(bytes([255]))".to_string()];
-        assert_eq!(execute(&PathBuf::from("python"), &args),
+        assert_eq!(execute(&PathBuf::from("python"), &args, DEFAULT_OUTPUT),
             Err("CLI_OUTPUT_ENCODING_UNSUPPORTED"));
+    }
+    #[test]
+    fn approved_large_stdout_is_bounded_and_readable() {
+        let rows = ["-c".to_string(),
+            "import sys;sys.stdout.write('A'*262144)".to_string()];
+        assert_eq!(execute(&PathBuf::from("python"), &rows, DEFAULT_OUTPUT),
+            Err("CLI_OUTPUT_TOO_LARGE"));
+        let (code, output) = execute(&PathBuf::from("python"), &rows, 524288)
+            .expect("approved larger output must complete");
+        assert_eq!(code, 0);
+        assert_eq!(output.len(),262144);
+        assert!(output.bytes().all(|byte|byte==b'A'));
+        let huge = ["-c".to_string(),
+            "import sys;sys.stdout.write('B'*786432)".to_string()];
+        assert_eq!(execute(&PathBuf::from("python"), &huge, 524288),
+            Err("CLI_OUTPUT_TOO_LARGE"));
     }
     #[test]
     fn versions_have_exact_boundaries() {
