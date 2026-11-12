@@ -306,3 +306,31 @@ test('host attach must roll back when U01 owner epoch, program or operation chan
   assert.equal(reads,2,'U03 must reuse the two existing U01 reads, not add another');
  }
 });
+
+
+test('rollback cannot claim DETACHED when host confirms another bindingRef',async()=>{
+ for(const [label,confirmation,expectedRollback] of [
+  ['wrong-ref',{detached:true,bindingRef:'host:someone-else'},'UNCONFIRMED'],
+  ['null-ref',{detached:true,bindingRef:null},'UNCONFIRMED'],
+  ['matching-ref',{detached:true,bindingRef:'host:owned'},'DETACHED'],
+  ['legacy-without-ref',{detached:true},'DETACHED'],
+ ]) {
+  let reads=0,detaches=0,epoch=epochA;
+  const bridge=bindModuleToU01Host({
+   descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+   port:{capabilities:async()=>{reads++;return source(epoch);}},
+   getBindings:()=>({...cfg,receipts:{evaluate:receipt(epochA)}}),
+   hooks:{
+     attach:async()=>{epoch=epochB;return {attached:true,bindingRef:'host:owned'};},
+     detach:async ref=>{assert.equal(ref,'host:owned');detaches++;return confirmation;}
+   }
+  });
+  const result=await bridge.attach();
+  assert.equal(result.attached,false,label);
+  assert.equal(result.rollback,expectedRollback,label);
+  assert.equal(result.hostState,expectedRollback==='DETACHED'?'DETACHED':'UNKNOWN',label);
+  assert.deepEqual(result.assessment.reasons,['U03_CAPABILITY_UNAVAILABLE:iwxa.cli.evaluate']);
+  assert.equal(reads,2,label+' must not add an U01 probe');
+  assert.equal(detaches,1,label+' must request rollback exactly once');
+ }
+});

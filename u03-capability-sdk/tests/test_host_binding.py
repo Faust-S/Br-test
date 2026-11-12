@@ -288,3 +288,36 @@ class OwnerIdentityRaces(unittest.TestCase):
                 self.assertEqual(outcome['hostState'],'DETACHED')
                 self.assertEqual(detaches,['host:must-rollback'])
                 self.assertEqual(calls,{'read':2,'attach':1})
+
+
+class OwnerDetachReceiptTests(unittest.TestCase):
+    def test_roll_back_requires_matching_ref_if_owner_returns_one(self):
+        cases=(
+            ('wrong-ref',{'detached':True,'bindingRef':'host:someone-else'},'UNCONFIRMED'),
+            ('null-ref',{'detached':True,'bindingRef':None},'UNCONFIRMED'),
+            ('matching-ref',{'detached':True,'bindingRef':'host:owned'},'DETACHED'),
+            ('legacy-without-ref',{'detached':True},'DETACHED'),
+        )
+        for label,confirmation,expected in cases:
+            with self.subTest(label=label):
+                connection=Connection()
+                calls=[]
+                def attach(*_):
+                    connection.epoch=EPOCH_B
+                    return {'attached':True,'bindingRef':'host:owned'}
+                def detach(ref):
+                    calls.append(ref)
+                    return confirmation
+                bridge=U03HostBinding(
+                    DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                    connection,lambda:{**CFG,'receipts':{'evaluate':receipt(EPOCH_A)}},
+                    attach,detach)
+                result=bridge.attach()
+                self.assertFalse(result['attached'])
+                self.assertEqual(result['rollback'],expected)
+                self.assertEqual(result['hostState'],
+                                 'DETACHED' if expected=='DETACHED' else 'UNKNOWN')
+                self.assertEqual(result['assessment']['reasons'],
+                                 ['U03_CAPABILITY_UNAVAILABLE:iwxa.cli.evaluate'])
+                self.assertEqual(connection.calls,2)
+                self.assertEqual(calls,['host:owned'])
