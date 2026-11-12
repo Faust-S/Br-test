@@ -72,3 +72,11 @@ jobs:
       - name: Verify U02 WebView source entry with Center Vite
         shell: bash
         run: node u02-source-connectors/qualification/webview-bundle.mjs
+      - name: Real selected project with public GitHub and local documents
+        shell: bash
+        run: |
+          export U02_PROJECT_ROOT="$RUNNER_TEMP/u02-real-project"
+          mkdir -p "$U02_PROJECT_ROOT"
+          node u02-source-connectors/qualification/real-project-stage.mjs initial
+          node u02-source-connectors/qualification/real-project-stage.mjs reopen
+          node u02-source-connectors/qualification/real-project-stage.mjs change

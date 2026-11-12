@@ -29,6 +29,7 @@
     "source-connector-v1.schema.json",
     "task-object.mjs",
     "task-source-link-v1.schema.json",
-    "consumers/agent03-evidence.mjs"
+    "consumers/agent03-evidence.mjs",
+    "selected-project.mjs"
   ]
 }
