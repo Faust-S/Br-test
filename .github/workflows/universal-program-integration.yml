@@ -92,6 +92,14 @@ jobs:
       - name: Agent 0.3 two independent host consumers with real executable and readback
         shell: bash
         run: node universal-install/qualification/agent03_existing_program_hosts.mjs
+      - name: Real user document case through installed jq and yq with host readback
+        if: matrix.os == 'ubuntu-24.04' || matrix.os == 'windows-2022' || matrix.os == 'macos-15'
+        shell: bash
+        timeout-minutes: 9
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/universal-program/document-case
+          python universal-install/qualification/document_case.py artifacts/universal-program/document-case
       - name: Real local HTTP API connection with host-owned authorization
         shell: bash
         run: node universal-install/qualification/http_program_host.mjs
@@ -136,7 +144,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: iwxa-u01-native-${{ matrix.os }}
-          path: artifacts/universal-program/native/
+          path: |
+            artifacts/universal-program/native/
+            artifacts/universal-program/document-case/
           retention-days: 7
           if-no-files-found: ignore
 

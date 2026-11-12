@@ -1,5 +1,5 @@
 // Host-neutral JS/TS CLI binding. No Python core, daemon, network or store.
-import {spawnSync} from "node:child_process";
+import {spawn,spawnSync} from "node:child_process";
 import {accessSync, closeSync, constants, lstatSync, openSync, readSync, realpathSync} from "node:fs";
 import {createHash,randomUUID} from "node:crypto";
 import {delimiter, isAbsolute} from "node:path";
@@ -97,6 +97,54 @@ function run(path,args) {
   if (r.error) return {status:"CLI_EXECUTION_FAILED"};
   return {status:r.status===0?"EXECUTED":"EXECUTION_FAILED",
     code:r.status,output:r.stdout??""};
+}
+// Opt-in asynchronous invocation for desktop hosts that need interactive cancel.
+// Existing synchronous invoke() and all host-port contracts remain unchanged.
+function runAsync(path,args,signal){
+  if(signal?.aborted)return Promise.resolve({status:"CLI_CANCELLED",executionOutcome:"NONE"});
+  return new Promise(resolve=>{
+    let proc,complete=false,reason=null,started=false;
+    let sizeOut=0,sizeErr=0;
+    const out=[];
+    let timeout;
+    const finish=value=>{
+      if(complete)return;
+      complete=true;
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort",onAbort);
+      resolve(value);
+    };
+    const stop=status=>{
+      if(reason||complete)return;
+      reason=status;
+      if(proc?.pid){try{proc.kill("SIGKILL");}catch{}}
+    };
+    const onAbort=()=>stop("CLI_CANCELLED");
+    try{proc=spawn(path,args,{shell:false,windowsHide:true,
+      stdio:["ignore","pipe","pipe"]});}
+    catch{return finish({status:"CLI_EXECUTION_FAILED",executionOutcome:"NONE"});}
+    proc.once("spawn",()=>{started=true;});
+    proc.stdout.on("data",chunk=>{
+      sizeOut+=chunk.length;
+      if(sizeOut>131072){stop("CLI_OUTPUT_TOO_LARGE");return;}
+      out.push(chunk);
+    });
+    proc.stderr.on("data",chunk=>{
+      sizeErr+=chunk.length;
+      if(sizeErr>131072)stop("CLI_OUTPUT_TOO_LARGE");
+    });
+    proc.once("error",()=>finish({status:"CLI_EXECUTION_FAILED",
+      executionOutcome:started?"UNKNOWN":"NONE"}));
+    proc.once("close",code=>{
+      if(reason)return finish({status:reason,executionOutcome:started?"UNKNOWN":"NONE"});
+      if(code!==0)return finish({status:"EXECUTION_FAILED",code,executionOutcome:"UNKNOWN"});
+      finish({status:"EXECUTED",code,output:Buffer.concat(out).toString("utf8"),
+        executionOutcome:"ACKNOWLEDGED"});
+    });
+    signal?.addEventListener("abort",onAbort,{once:true});
+    timeout=setTimeout(()=>stop("CLI_TIMED_OUT"),20000);
+    if(signal?.aborted)onAbort();
+  });
 }
 function located(name) {
   const windows=platform()==="win32";
@@ -310,6 +358,52 @@ export class CliConnection {
     this.verified.add(operation);
     return this.observation("EXECUTED",{executed:true,operation,
       executionOutcome:"ACKNOWLEDGED",...installation,...process,
+      output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
+  }
+  async invokeAsync(operation,params={}, {signal}={}){
+    if(!this.path)return this.observation("NOT_CONNECTED",{executed:false,
+      executionOutcome:"NONE"});
+    const path=this.path,identity=this.identity,epoch=this.epoch;
+    if(executableIdentity(path)!==identity){
+      this.disconnect();
+      return this.observation("CONNECTION_LOST",{executed:false,executionOutcome:"NONE"});
+    }
+    if(this.spec.executable_sha256&&!this.installationIdentity(path).installation_verified){
+      this.disconnect();
+      return this.observation("INSTALLATION_MISMATCH",{executed:false,executionOutcome:"NONE"});
+    }
+    if(this.spec.requires_running){
+      const running=this.processObservation();
+      if(this.processKey(running)!==this.processRef){
+        const status=this.processKey(running)?"PROCESS_CHANGED":this.processReason(running);
+        this.disconnect();this.lastUnavailable=status;
+        return this.observation(status,{executed:false,executionOutcome:"NONE",...running});
+      }
+    }
+    if(typeof operation!=="string"||!Object.hasOwn(this.spec.operations,operation))
+      return this.observation("OPERATION_UNSUPPORTED",{executed:false,executionOutcome:"NONE"});
+    let bound;
+    try{bound=bindArgs(this.spec.operations[operation],params);}catch{
+      return this.observation("CLI_INPUT_INVALID",{executed:false,executionOutcome:"NONE"});
+    }
+    const begin=performance.now();
+    const r=await runAsync(path,bound,signal);
+    if(this.path!==path||this.identity!==identity||this.epoch!==epoch)
+      return this.observation("CONNECTION_SUPERSEDED",{executed:false,
+        executionOutcome:r.executionOutcome==="NONE"?"NONE":"UNKNOWN"});
+    if(r.status!=="EXECUTED")
+      return this.observation(r.status,{executed:false,executionOutcome:r.executionOutcome,
+        ...(r.code===undefined?{}:{exit_code:r.code})});
+    const installation=this.installationIdentity(path);
+    const running=this.processObservation();
+    if((this.spec.executable_sha256&&!installation.installation_verified)||
+       (this.spec.requires_running&&this.processKey(running)!==this.processRef)){
+      this.disconnect();
+      return this.observation("CONNECTION_LOST",{executed:false,executionOutcome:"UNKNOWN"});
+    }
+    this.verified.add(operation);
+    return this.observation("EXECUTED",{executed:true,operation,
+      executionOutcome:"ACKNOWLEDGED",...installation,...running,
       output:r.output,elapsed_ms:Math.round((performance.now()-begin)*1000)/1000});
   }
   disconnect(){this.path=null;this.identity=null;this.epoch=null;

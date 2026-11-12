@@ -76,8 +76,10 @@ def executable_identity(path):
         return None
 
 
-def run_command(path, args):
-    """Run a native CLI with strict per-stream output limits on all hosts."""
+def run_command(path, args, *, cancel_event=None):
+    """Run a native CLI with bounded streams and optional host-owned cancellation."""
+    if cancel_event is not None and cancel_event.is_set():
+        raise ProgramError("CLI_CANCELLED_BEFORE_START")
     flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     try:
         child = subprocess.Popen(
@@ -109,6 +111,8 @@ def run_command(path, args):
     deadline = time.monotonic() + 20
     try:
         while child.poll() is None:
+            if cancel_event is not None and cancel_event.is_set():
+                raise ProgramError("CLI_CANCELLED")
             if too_large.is_set():
                 raise ProgramError("CLI_OUTPUT_TOO_LARGE")
             if stream_failed.is_set():
@@ -118,6 +122,8 @@ def run_command(path, args):
             time.sleep(0.01)
         for reader in readers:
             reader.join(timeout=max(0, deadline - time.monotonic()))
+        if cancel_event is not None and cancel_event.is_set():
+            raise ProgramError("CLI_CANCELLED")
         if too_large.is_set():
             raise ProgramError("CLI_OUTPUT_TOO_LARGE")
         if any(reader.is_alive() for reader in readers):
@@ -349,7 +355,7 @@ class CliConnection:
             operations=[dict(name=name, declared=True, verified=name in self._verified)
                         for name in sorted(self.spec["operations"])])
 
-    def invoke(self, operation, params=None):
+    def invoke(self, operation, params=None, *, cancel_event=None):
         # A denied preflight must not be classified as an unknown external effect.
         if not self.path:
             return self.observation("NOT_CONNECTED", executed=False,
@@ -384,11 +390,16 @@ class CliConnection:
             bound = bind_arguments(args, params)
         except ProgramError as exc:
             return self.observation(exc.code, executed=False, executionOutcome="NONE")
+        if cancel_event is not None and cancel_event.is_set():
+            return self.observation("CLI_CANCELLED", executed=False, executionOutcome="NONE")
         start = time.perf_counter()
         try:
-            code, output = run_command(self.path, bound)
+            code, output = run_command(self.path, bound, cancel_event=cancel_event)
         except ProgramError as exc:
-            return self.observation(exc.code, executed=False, executionOutcome="UNKNOWN")
+            return self.observation("CLI_CANCELLED" if exc.code == "CLI_CANCELLED_BEFORE_START"
+                                    else exc.code, executed=False,
+                                    executionOutcome="NONE" if exc.code ==
+                                    "CLI_CANCELLED_BEFORE_START" else "UNKNOWN")
         if code:
             return self.observation("EXECUTION_FAILED", executed=False,
                                     executionOutcome="UNKNOWN", exit_code=code)

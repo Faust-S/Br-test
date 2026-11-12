@@ -217,6 +217,51 @@ class CliProcessHostTest(unittest.TestCase):
         self.assertEqual(conn.connect()["status"], "PROCESS_CHANGED")
         self.assertEqual(conn.capabilities()["status"], "NOT_CONNECTED")
 
+    def test_host_cancel_before_start_does_not_launch_program(self):
+        import threading
+        flag = threading.Event()
+        flag.set()
+        with self.assertRaisesRegex(ProgramError, "CLI_CANCELLED_BEFORE_START"):
+            run_command(sys.executable, ["-c", "raise RuntimeError('ran')"],
+                        cancel_event=flag)
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_CANCEL_TEST",
+                "executable_name": Path(sys.executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"slow": ["-c", "import time;time.sleep(9)"]}}
+        conn = CliConnection(spec, str(Path(sys.executable).resolve()))
+        self.assertEqual(conn.connect()["status"], "CONNECTED")
+        observation = conn.invoke("slow", cancel_event=flag)
+        self.assertEqual((observation["status"], observation["executionOutcome"]),
+                         ("CLI_CANCELLED", "NONE"))
+        self.assertFalse(conn.capabilities()["operations"][0]["verified"])
+
+    def test_host_cancel_running_cli_kills_child_and_preserves_session(self):
+        import threading
+        version = f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_CANCEL_RUNNING",
+                "executable_name": Path(sys.executable).name,
+                "version_args": ["--version"], "version_contains": version,
+                "operations": {"slow": ["-c", "import time;time.sleep(9)"],
+                               "echo": ["-c", "print(42)"]}}
+        conn = CliConnection(spec, str(Path(sys.executable).resolve()))
+        connected = conn.connect()
+        flag = threading.Event()
+        timer = threading.Timer(0.15, flag.set)
+        timer.start()
+        start = time.monotonic()
+        try:
+            status = conn.invoke("slow", cancel_event=flag)
+        finally:
+            timer.join(timeout=2)
+        self.assertEqual((status["status"], status["executionOutcome"]),
+                         ("CLI_CANCELLED", "UNKNOWN"))
+        self.assertLess(time.monotonic()-start, 3.0)
+        self.assertEqual(conn.capabilities()["connection_epoch"], connected["connection_epoch"])
+        self.assertFalse(next(x for x in conn.capabilities()["operations"]
+                              if x["name"] == "slow")["verified"])
+        self.assertEqual(conn.invoke("echo")["output"].strip(), "42")
+
     def test_excessive_output_is_rejected_before_timeout(self):
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):

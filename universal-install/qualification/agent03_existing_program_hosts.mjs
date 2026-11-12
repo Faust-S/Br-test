@@ -17,7 +17,8 @@ const spec={
  operations:{
   echo:["-e","console.log(42)"],
   value:["-e","console.log(process.argv[1])","file={note}"],
-  fail:["-e","process.exit(3)"]
+  fail:["-e","process.exit(3)"],
+  slow:["-e","setTimeout(()=>{},9000)"]
  }
 };
 const observed={program_id:id,verified:true,status:"RUNNING",spawned:false,
@@ -40,6 +41,24 @@ assert.equal(first.invoke("fail").executionOutcome,"UNKNOWN");
 assert.equal(first.invoke("missing").executionOutcome,"NONE");
 assert.equal(first.invoke("echo",{bad:"input"}).executionOutcome,"NONE");
 assert.equal(first.capabilities().operations[0].verified,true);
+const preCancelled=new AbortController();
+preCancelled.abort();
+const before=await first.invokeAsync("slow",{}, {signal:preCancelled.signal});
+assert.equal(before.status,"CLI_CANCELLED");
+assert.equal(before.executionOutcome,"NONE");
+const interrupt=new AbortController();
+const timer=setTimeout(()=>interrupt.abort(),160);
+const start=performance.now();
+const stopped=await first.invokeAsync("slow",{}, {signal:interrupt.signal});
+clearTimeout(timer);
+assert.equal(stopped.status,"CLI_CANCELLED");
+assert.equal(stopped.executionOutcome,"UNKNOWN");
+assert.ok(performance.now()-start<3500,"cancel failed to terminate child promptly");
+assert.equal(first.capabilities().operations.find(x=>x.name==="slow").verified,false);
+const asyncCompleted=await first.invokeAsync("echo");
+assert.equal(asyncCompleted.status,"EXECUTED");
+assert.equal(asyncCompleted.output.trim(),"42");
+assert.equal(asyncCompleted.connection_epoch,a.connection_epoch);
 assert.equal(first.verify().connection_epoch,a.connection_epoch);
 const port=createProductHostPort("atlas",async({operation,request})=>
  operation==="invoke"?second.invoke(request.operation,request.params):second[operation]());
@@ -79,5 +98,6 @@ console.log(JSON.stringify({
  independent_host_consumers:2,real_output:"42",
  installed_identity_verified:true,process_restart_invalidates_session:true,
  no_hidden_program_launch:true,preflight_effect:"NONE",
- attempted_effect:"UNKNOWN",connected_epoch_isolation:true
+ attempted_effect:"UNKNOWN",connected_epoch_isolation:true,
+ cancel_before_start:"NONE",cancel_after_start:"UNKNOWN",async_readback:"42"
 }));
