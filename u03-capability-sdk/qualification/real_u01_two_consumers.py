@@ -2,6 +2,7 @@
 from __future__ import annotations
 import hashlib
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -84,6 +85,27 @@ def qualify():
         from restart_host_qualification import qualify_restart_host
         restart = qualify_restart_host(executable)
         assert restart['status']=='PASS' and restart['result_readback']==[42, 56]
+        # Same SHA-pinned jq from U01 is now used by a separate Agent 0.5
+        # cross-owner Task source + K02 choice + U01 execution + U03 receipt test.
+        # No second installation, private checkout or new runtime.
+        extra=subprocess.run(
+          ['node','--test',str(ROOT/'u03-capability-sdk/qualification/agent05-current-owner-task.test.mjs')],
+          env={**os.environ,'U03_REAL_JQ_EXECUTABLE':str(executable),
+               'PYTHON':sys.executable},
+          capture_output=True,text=True,timeout=75,check=False)
+        if extra.returncode!=0:
+            raise RuntimeError('U03_AGENT05_CURRENT_OWNER_TASK_FAILED:\\n'+
+                               extra.stdout[-8000:]+'\\n'+extra.stderr[-3000:])
+        lines=[line.strip().removeprefix('# ').strip() for line in extra.stdout.splitlines()]
+        owner_reports=[]
+        for line in lines:
+            if line.startswith('{"schema":"IWXA_U03_AGENT05_CURRENT_OWNERS/1"'):
+                owner_reports.append(json.loads(line))
+        assert len(owner_reports)==1 and owner_reports[0]['status']=='PASS'
+        assert owner_reports[0]['javascriptInvocations']==1
+        assert owner_reports[0]['pythonInvocations']==0
+        assert owner_reports[0]['grandTotalCents']==174500
+        print(json.dumps(owner_reports[0],sort_keys=True))
         assert backend.recover(spec,str(installed_root)).installed
         removal=ApprovedRemoval(spec.program_id,spec.fingerprint,
           'PINS-u03-remove',str(installed_root),True)
