@@ -9,6 +9,7 @@ import {createAtlasGitHubSourcePort} from '../atlas-github.mjs';
 import {createLocalFileSourcePort} from '../local-file.mjs';
 import {readSelectedProjectSources,checkpointSelectedProjectSources,
   projectSourceObservationsForKnowledge,inspectSelectedProjectSources} from '../selected-project.mjs';
+import {revalidateSelectedProjectRead} from '../selected-project-revalidate.mjs';
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
@@ -123,6 +124,12 @@ if(phase==='initial'){
   assert.equal(projectSourceObservationsForKnowledge(again).length,5);
   assert.equal(again.metrics.refreshCalls,5);
   assert.equal(again.metrics.pinnedReadCalls,5);
+  const final=await revalidateSelectedProjectRead({view:again,sources:[...local(),github()]});
+  assert.equal(final.complete,true);
+  assert.equal(final.revalidation.refreshCalls,5);
+  assert.equal(final.revalidation.pinnedReadCalls,0);
+  assert.equal(final.revalidation.contentRead,false);
+  assert.equal(final.sources.every(s=>s.finalRevisionConfirmed===true),true);
   await writeFile(save,JSON.stringify(checkpointSelectedProjectSources(again)));
   await writeFile(view,JSON.stringify({...original,reopen:again.sources.map(s=>({
     key:s.key,revision:s.revision,contentRef:s.contentRef,change:s.change})),reopenMetrics:again.metrics}));
