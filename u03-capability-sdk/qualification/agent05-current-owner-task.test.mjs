@@ -48,7 +48,8 @@ const solution={solutionId:'u03-agent05-invoice-demo',requirements:[{
 }]};
 // A test-host executable recipe, NOT a new production owner or K02 executor.
 // Independent implementation using K02's declared input/output schemas.
-const calculationFilter='($orders | map((.quantity * .unitPriceCents) as $subtotal | (($subtotal * .discountBps / 10000 + 0.5) | floor) as $discount | {documentId, subtotalCents:$subtotal, discountCents:$discount, totalCents:($subtotal - $discount + .shippingCents)})) as $lines | {lines:$lines, grandTotalCents:($lines | map(.totalCents) | add)}';
+// Explicit element iteration avoids jq 1.8 parsing an array as an invoice row.
+const calculationFilter='([$orders[] | (.quantity * .unitPriceCents) as $subtotal | (($subtotal * .discountBps / 10000 + 0.5) | floor) as $discount | {documentId, subtotalCents:$subtotal, discountCents:$discount, totalCents:($subtotal - $discount + .shippingCents)}]) as $lines | {lines:$lines, grandTotalCents:($lines | map(.totalCents) | add)}';
 const executable=process.env.U03_REAL_JQ_EXECUTABLE;
 const stamp=x=>Number(x.toFixed(3));
 
