@@ -181,6 +181,15 @@ test('current U02 Task sources + current K02 choice + actual U01 jq + U03 eviden
     k02.validateInvocationOutput(plan.steps[0],result);
     assert.equal(result.grandTotalCents,174500);
     assert.deepEqual(result.lines.map(x=>x.totalCents),[141000,33500]);
+    // Cross-OS *semantic* proof belongs beside, not instead of, the raw U01
+    // receipt. The latter remains bound to exact host output bytes.
+    const canonicalResult={lines:result.lines.map(x=>({
+      documentId:x.documentId,subtotalCents:x.subtotalCents,
+      discountCents:x.discountCents,totalCents:x.totalCents
+    })),grandTotalCents:result.grandTotalCents};
+    const canonicalResultSha256=sha(JSON.stringify(canonicalResult));
+    const rawOutputLineEnding=receipt.output.includes('\r\n')?'CRLF':
+      receipt.output.includes('\n')?'LF':'NONE';
 
     const post=getStatus();
     assert.equal(post.operations[0].verified,true);
@@ -225,7 +234,7 @@ test('current U02 Task sources + current K02 choice + actual U01 jq + U03 eviden
         planDigest:plan.planDigest,invocationAuthority:plan.steps[0].invocationAuthority,
         invocationState:plan.steps[0].invocationState,proofOfInvoke:plan.steps[0].proofOfInvoke
       },status:qualified[0],result,outputSha256:sha(receipt.output),
-      expectedGrandTotalCents:174500};
+      canonicalResultSha256,expectedGrandTotalCents:174500};
     const py=spawnSync(process.env.PYTHON??(process.platform==='win32'?'python':'python3'),
       [join(root,'u03-capability-sdk/qualification/agent05_current_owner_task_python.py')],
       {encoding:'utf8',input:JSON.stringify(vector),timeout:15000});
@@ -234,6 +243,7 @@ test('current U02 Task sources + current K02 choice + actual U01 jq + U03 eviden
     assert.equal(checked.status,'PASS');
     assert.equal(checked.receiptRef,receiptRef);
     assert.equal(checked.grandTotalCents,result.grandTotalCents);
+    assert.equal(checked.canonicalResultSha256,canonicalResultSha256);
     assert.equal(checked.invocations,0);
 
     assert.equal(connection.disconnect().status,'DISCONNECTED');
@@ -249,7 +259,8 @@ test('current U02 Task sources + current K02 choice + actual U01 jq + U03 eviden
       realJq:true,sourceCount:2,sourceReads:counters.sourcePinnedReads,
       sourceRefreshOnly:true,javascriptInvocations:counters.invoke,
       pythonInvocations:checked.invocations,grandTotalCents:result.grandTotalCents,
-      receiptSha256:sha(receipt.output),sourceRevision,
+      receiptSha256:sha(receipt.output),canonicalResultSha256,
+      rawOutputLineEnding,sourceRevision,
       durationsMs:{sourceStage:sourceMs,k02Selection:k02Ms,externalInvoke:invocationMs,
         evidenceReadback:readbackMs,total:stamp(performance.now()-started)},
       installedAgentVerified:false,privateSourceUsed:false

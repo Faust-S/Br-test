@@ -53,6 +53,14 @@ def main():
             'CALCULATION_RESULT_INCONSISTENT')
     require([x['documentId'] for x in result['lines']]==['INV-1042','INV-1043'],
             'CALCULATION_DOCUMENT_REBOUND')
+    canonical={'lines':[{
+        'documentId':x['documentId'],'subtotalCents':x['subtotalCents'],
+        'discountCents':x['discountCents'],'totalCents':x['totalCents']
+    } for x in result['lines']],'grandTotalCents':result['grandTotalCents']}
+    canonical_digest=sha(json.dumps(canonical,ensure_ascii=False,
+                                   separators=(',',':')).encode('utf-8'))
+    require(canonical_digest==data['canonicalResultSha256'],
+            'CANONICAL_RESULT_NOT_PORTABLE')
     current=data['capabilities']
     require(current['schema']=='IWXA_PROGRAM_CONNECTION/1.0.0' and
             current['program_id']==data['programId'] and
@@ -101,7 +109,8 @@ def main():
             'U03_PYTHON_STALE_EPOCH_ACCEPTED')
     return {'schema':'IWXA_U03_AGENT05_PYTHON_CONSUMER/1','status':'PASS',
             'receiptRef':receipt['observationRef'],
-            'grandTotalCents':result['grandTotalCents'],'invocations':0,
+            'grandTotalCents':result['grandTotalCents'],
+            'canonicalResultSha256':canonical_digest,'invocations':0,
             'sourceCount':len(source),'authorityGranted':False}
 
 if __name__=='__main__':
