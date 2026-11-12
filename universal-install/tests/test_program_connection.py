@@ -26,6 +26,14 @@ class CliProcessHostTest(unittest.TestCase):
                          ["filter", "input"])
         self.assertEqual(argument_parameter_names(yq["operations"]["read_yaml_json"]),
                          ["input"])
+        self.assertEqual(jq["operations"]["query_json"],
+                         ["--", "{expression}", "{input}"])
+        self.assertEqual(yq["operations"]["query_yaml"],
+                         ["eval", "-o=json", "--expression", "{expression}", "{input}"])
+        self.assertEqual(argument_parameter_names(jq["operations"]["query_json"]),
+                         ["expression", "input"])
+        self.assertEqual(argument_parameter_names(yq["operations"]["query_yaml"]),
+                         ["expression", "input"])
         self.assertEqual(argument_parameter_names(["--","file={path}","{expression}"]),
                          ["expression","path"])
         with self.assertRaisesRegex(ValueError, "CLI_ARGUMENTS_INVALID"):

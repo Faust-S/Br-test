@@ -105,7 +105,7 @@ def qualify():
                    if x["name"]!="evaluate"):
                 raise RuntimeError("UNINVOKED_FILE_CAPABILITY_FALSELY_VERIFIED")
             # A user-selected source is actually read by the installed CLI.
-            source_path = root / ("file-source-" + name)
+            source_path = root / ("file source " + name)
             if name == "JQ_CLI_V1":
                 source_path = source_path.with_suffix(".json")
                 source_path.write_text('{"rows":[{"units":2,"price":19},{"units":3,"price":7}]}',
@@ -138,6 +138,38 @@ def qualify():
                         if x["name"] != "evaluate")["verified"]:
                 raise RuntimeError("FILE_OPERATION_CAPABILITY_NOT_VERIFIED")
             file_operation_pass=True
+            # A selectable query can work directly on the user's existing
+            # source without requiring an additional query/filter file.
+            query_op = "query_json" if name == "JQ_CLI_V1" else "query_yaml"
+            query_expression = (".rows | map(.units * .price) | add"
+                                if name == "JQ_CLI_V1" else ".rows[0].price")
+            query_expected = 59 if name == "JQ_CLI_V1" else 19
+            invalid_query = connection.invoke(query_op, {"expression":query_expression})
+            if (invalid_query["status"]!="CLI_INPUT_INVALID" or
+                    invalid_query["executionOutcome"]!="NONE"):
+                raise RuntimeError("FILE_QUERY_MISSING_INPUT_NOT_REJECTED")
+            missing_source = connection.invoke(query_op,{
+                "expression":query_expression,"input":str(root/"nonexistent-query-input")})
+            if (missing_source["status"]!="EXECUTION_FAILED" or
+                    missing_source["executionOutcome"]!="UNKNOWN"):
+                raise RuntimeError("FILE_QUERY_MISSING_SOURCE_FALSE_SUCCESS")
+            if next(x for x in connection.capabilities()["operations"]
+                    if x["name"]==query_op)["verified"]:
+                raise RuntimeError("FAILED_FILE_QUERY_FALSELY_VERIFIED")
+            queried = connection.invoke(query_op,{
+                "expression":query_expression,"input":str(source_path)})
+            if (queried["status"]!="EXECUTED" or
+                    queried["executionOutcome"]!="ACKNOWLEDGED" or
+                    queried["output"].strip()!=str(query_expected) or
+                    queried.get("connection_epoch")!=connected["connection_epoch"]):
+                raise RuntimeError("FILE_QUERY_REAL_RESULT_FAILED")
+            query_readback=root/("query-output-"+name+".txt")
+            query_readback.write_bytes(queried["output"].replace("\r\n","\n").encode("utf-8"))
+            if query_readback.read_bytes().decode("utf-8").strip()!=str(query_expected):
+                raise RuntimeError("FILE_QUERY_READBACK_FAILED")
+            if not next(x for x in connection.capabilities()["operations"]
+                        if x["name"]==query_op)["verified"]:
+                raise RuntimeError("FILE_QUERY_NOT_VERIFIED")
             if connection.invoke("not_declared")["status"]!="OPERATION_UNSUPPORTED":
                 raise RuntimeError("UNDECLARED_OPERATION_ACCEPTED")
             connection.disconnect()
@@ -224,7 +256,9 @@ def qualify():
                            "rust_binary_bytes":rust_binary_bytes,
                            "installed_binary_bytes":installed_binary_bytes,
                            "existing_install_reused":True,"reinstalled":False,
-                           "real_file_operation":file_operation_pass})
+                           "real_file_operation":file_operation_pass,
+                           "real_query_operation":query_op,
+                           "real_query_readback":True})
     print(json.dumps({"schema":"IWXA_PROGRAM_INTEGRATION_QUALIFICATION/1",
                       "status":"PASS","platform":platform,"results":report},sort_keys=True))
 

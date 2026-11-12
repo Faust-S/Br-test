@@ -18,6 +18,11 @@
           "-f",
           "{filter}",
           "{input}"
+        ],
+        "query_json": [
+          "--",
+          "{expression}",
+          "{input}"
         ]
       }
     },
@@ -38,6 +43,13 @@
           "eval",
           "-o=json",
           ".",
+          "{input}"
+        ],
+        "query_yaml": [
+          "eval",
+          "-o=json",
+          "--expression",
+          "{expression}",
           "{input}"
         ]
       }
