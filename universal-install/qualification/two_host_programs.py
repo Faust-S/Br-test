@@ -125,8 +125,12 @@ def qualify():
                     "rows":[{"units":2,"price":19},{"units":3,"price":7}]}:
                     raise RuntimeError("YQ_REAL_FILE_OPERATION_FAILED")
             file_readback = root / ("file-output-" + name + ".txt")
-            file_readback.write_text(document["output"],encoding="utf-8")
-            if file_readback.read_text(encoding="utf-8") != document["output"]:
+            # Text subprocess output can contain CRLF on Windows. The test
+            # writes a deliberate normalized UTF-8 artifact without altering
+            # the original U01 execution observation.
+            normalized_bytes=document["output"].replace("\r\n","\n").encode("utf-8")
+            file_readback.write_bytes(normalized_bytes)
+            if file_readback.read_bytes()!=normalized_bytes:
                 raise RuntimeError("FILE_OPERATION_OUTPUT_NOT_READABLE")
             if document.get("connection_epoch") != connected["connection_epoch"]:
                 raise RuntimeError("FILE_OPERATION_SESSION_CHANGED")
