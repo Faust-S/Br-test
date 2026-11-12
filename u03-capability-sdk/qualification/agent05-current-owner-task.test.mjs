@@ -162,6 +162,16 @@ test('current U02 Task sources + current K02 choice + actual U01 jq + U03 eviden
     const invokeStart=performance.now();
     const receipt=run({orders:JSON.stringify(parsed),filter:calculationFilter});
     const invocationMs=stamp(performance.now()-invokeStart);
+    if(receipt.status!=='EXECUTED'){
+      // Test-only reproduction of the same bounded, synthetic jq arguments;
+      // capture stderr because U01 intentionally returns only its exit code.
+      const diagnostic=spawnSync(path,['-nc','--argjson','orders',
+        JSON.stringify(parsed),calculationFilter],{encoding:'utf8',timeout:8000});
+      assert.fail('U03_JQ_DIAGNOSTIC:'+JSON.stringify({
+        u01Status:receipt.status,u01Exit:receipt.exit_code,
+        jqExit:diagnostic.status,stderr:(diagnostic.stderr??'').slice(0,900),
+        stdout:(diagnostic.stdout??'').slice(0,300)}));
+    }
     assert.equal(receipt.status,'EXECUTED');
     assert.equal(receipt.executed,true);
     assert.equal(receipt.operation,operation);
