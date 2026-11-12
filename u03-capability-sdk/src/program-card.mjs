@@ -25,7 +25,13 @@ const scoped=/^[A-Za-z0-9_-]{16,128}$/;
 const object=x=>x!==null&&typeof x==='object'&&!Array.isArray(x);
 const ref=x=>typeof x==='string'&&x.trim().length>0&&x.length<=512;
 const invalid=()=>{throw new TypeError('U03_PROGRAM_CARD_INPUT_INVALID');};
-const forbidden=new Set(['permissions','grants','invoke','install','connectedByU03']);
+// Failure observations from the existing U04 owner sometimes have no binding.
+// Keep the owner's actionable failure reason, never treat a missing proof as live.
+const UNBOUND_U04_FAILURES=new Set([
+  'SURFACE_LOST','SURFACE_IDENTITY_CHANGED','SURFACE_DETACHED',
+  'BINDING_NOT_FOUND','WINDOW_NOT_FOUND','PROCESS_IDENTITY_CHANGED',
+  'WINDOW_OBSERVATION_FAILED','REATTACH_UNSUPPORTED'
+]);
 
 function assertUI(snapshot){
   if(snapshot===null)return;
@@ -184,7 +190,16 @@ function present(row,presentation){
   const actual=presentation.observations?.[mode];
   if(!object(actual))return row;
   const binding=actual.binding;
-  if(!object(binding)||binding.appRef!==presentation.appRef||
+  if(!object(binding)){
+    if((actual.schema===BRIDGE||actual.schema===SURFACE)&&
+       UNBOUND_U04_FAILURES.has(actual.status)){
+      const reason=typeof actual.reason==='string'&&actual.reason.length>0&&
+        actual.reason.length<=256?actual.reason:actual.status;
+      return setState(row,'BLOCKED',reason,actual.schema);
+    }
+    return setState(row,'BLOCKED','PRESENTATION_BINDING_MISMATCH',BRIDGE);
+  }
+  if(binding.appRef!==presentation.appRef||
      binding.hostRef!==presentation.hostRef||!ref(binding.bindingRef))
     return setState(row,'BLOCKED','PRESENTATION_BINDING_MISMATCH',BRIDGE);
   if(mode==='LINKED_WINDOW'){

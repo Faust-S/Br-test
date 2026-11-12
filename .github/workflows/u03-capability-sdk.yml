@@ -51,6 +51,15 @@ jobs:
           persist-credentials: false
       - name: U02 source, K02 selection, U03 compatibility, real U01 execution and Python readback
         run: node --test u03-capability-sdk/qualification/u02-k02-u01-host.test.mjs
+      - name: Checkout pinned public U04 Presentation Bridge owner (read-only)
+        uses: actions/checkout@v4
+        with:
+          repository: Faust-S/Br-test
+          ref: 1548cf607616904f78085e1e6f32a984022efa5b
+          path: u04-owner-pinned
+          persist-credentials: false
+      - name: Real U04 owner window and official live surface into U03 JS and Python program cards
+        run: node --test u03-capability-sdk/qualification/u04-owner-program-card.test.mjs
       - name: Live local HTTP API, host-owned credential loss and reattachment
         run: node u03-capability-sdk/qualification/real-u01-http.mjs
       - name: Checkout pinned public K02 owner source (read-only)

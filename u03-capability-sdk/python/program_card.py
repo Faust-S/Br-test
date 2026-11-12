@@ -27,6 +27,13 @@ _PROGRAM = re.compile(r'[A-Z][A-Z0-9_]{2,79}\Z')
 _OP = re.compile(r'[a-z][a-z0-9_]*\Z')
 _EPOCH = re.compile(r'[A-Za-z0-9_-]{16,128}\Z')
 _ALLOWED_CHANNEL_FIELDS = {'id','kind','operation','target'}
+# Terminal U04 owner observations legitimately omit binding; preserve their
+# specific reason, without ever promoting them to a verified capability.
+_UNBOUND_U04_FAILURES = frozenset((
+    'SURFACE_LOST','SURFACE_IDENTITY_CHANGED','SURFACE_DETACHED',
+    'BINDING_NOT_FOUND','WINDOW_NOT_FOUND','PROCESS_IDENTITY_CHANGED',
+    'WINDOW_OBSERVATION_FAILED','REATTACH_UNSUPPORTED',
+))
 
 
 def _invalid():
@@ -232,7 +239,15 @@ def _present(row,presentation):
     actual=observations.get(mode) if isinstance(observations,dict) else None
     if not isinstance(actual,dict):return row
     binding=actual.get('binding')
-    if not isinstance(binding,dict) or binding.get('appRef')!=presentation.get('appRef') or \
+    if not isinstance(binding,dict):
+        if actual.get('schema') in (BRIDGE,SURFACE) and \
+                actual.get('status') in _UNBOUND_U04_FAILURES:
+            reason=actual.get('reason')
+            if not isinstance(reason,str) or not 0<len(reason)<=256:
+                reason=actual['status']
+            return _state(row,'BLOCKED',reason,actual['schema'])
+        return _state(row,'BLOCKED','PRESENTATION_BINDING_MISMATCH',BRIDGE)
+    if binding.get('appRef')!=presentation.get('appRef') or \
             binding.get('hostRef')!=presentation.get('hostRef') or \
             not _reference(binding.get('bindingRef')):
         return _state(row,'BLOCKED','PRESENTATION_BINDING_MISMATCH',BRIDGE)
