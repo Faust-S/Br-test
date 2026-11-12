@@ -72,7 +72,9 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
         let rollback = 'UNCONFIRMED';
         try {
           const confirmation = await adapter.detach(ref);
-          if (confirmation?.detached === true) rollback = 'DETACHED';
+          if (confirmation?.detached === true &&
+              (!Object.hasOwn(confirmation, 'bindingRef') ||
+                confirmation.bindingRef === ref)) rollback = 'DETACHED';
         } catch { /* Host owns recovery: do not claim detach. */ }
         return {attached: false, assessment, hostReceipt: result.hostReceipt,
           rollback, hostState: rollback === 'DETACHED' ? 'DETACHED' : 'UNKNOWN'};

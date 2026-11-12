@@ -93,7 +93,8 @@ class U03HostBinding:
             rollback = 'UNCONFIRMED'
             try:
                 confirmation = self._adapter.detach(ref)
-                if isinstance(confirmation, dict) and confirmation.get('detached') is True:
+                if isinstance(confirmation, dict) and confirmation.get('detached') is True and (
+                        'bindingRef' not in confirmation or confirmation['bindingRef'] == ref):
                     rollback = 'DETACHED'
             except Exception:
                 pass  # Host owns recovery. Never assert detach without confirmation.
