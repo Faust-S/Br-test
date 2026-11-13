@@ -334,3 +334,50 @@ test('rollback cannot claim DETACHED when host confirms another bindingRef',asyn
   assert.equal(detaches,1,label+' must request rollback exactly once');
  }
 });
+
+
+test('selection mutated during FIRST U01 observation must not attach a different program/operation/receipt',async()=>{
+ for(const change of ['program','operation','receipt']){
+  const selected={programId:'JQ_CLI_V1',
+    bindings:[{operation:'evaluate',id:'iwxa.cli.evaluate',version:'1.0.0'}],
+    receipts:{evaluate:receipt(epochA)}};
+  let reads=0,attaches=0,detaches=0;
+  const port={capabilities:async()=>{
+    reads++;
+    if(reads===1){
+      if(change==='program'){
+        selected.programId='ALT_CLI_V1';
+        selected.receipts.evaluate.observation.program_id='ALT_CLI_V1';
+        return {...source(epochA),program_id:'ALT_CLI_V1'};
+      }
+      if(change==='operation'){
+        selected.bindings[0].operation='recompute';
+        selected.receipts={recompute:{...receipt(epochA),
+          observation:{...receipt(epochA).observation,operation:'recompute'}}};
+        return {...source(epochA),
+          operations:[{name:'recompute',declared:true,verified:true}]};
+      }
+      selected.receipts.evaluate.observation.output='43';
+    }
+    if(change==='program')return {...source(epochA),program_id:'ALT_CLI_V1'};
+    if(change==='operation')return {...source(epochA),
+      operations:[{name:'recompute',declared:true,verified:true}]};
+    return source(epochA);
+  }};
+  const bridge=bindModuleToU01Host({
+    descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+    port,getBindings:()=>selected,
+    hooks:{
+      attach:async()=>{attaches++;return {attached:true,bindingRef:'host:wrong-selection'};},
+      detach:async()=>{detaches++;return {detached:true};}
+    }
+  });
+  const outcome=await bridge.attach();
+  assert.equal(outcome.attached,false,change+' must not silently attach a new selection');
+  assert.deepEqual(outcome.assessment.reasons,['U03_HOST_OBSERVATION_CHANGED']);
+  assert.equal(outcome.hostReceipt,null);
+  assert.equal(reads,1,'must refuse before host action or a second U01 probe');
+  assert.equal(attaches,0,'must never attach the newly selected program');
+  assert.equal(detaches,0);
+ }
+});

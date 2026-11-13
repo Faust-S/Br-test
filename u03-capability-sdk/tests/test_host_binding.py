@@ -321,3 +321,47 @@ class OwnerDetachReceiptTests(unittest.TestCase):
                                  ['U03_CAPABILITY_UNAVAILABLE:iwxa.cli.evaluate'])
                 self.assertEqual(connection.calls,2)
                 self.assertEqual(calls,['host:owned'])
+
+
+class MutableSelectionDuringReadTests(unittest.TestCase):
+    def test_switch_program_operation_or_receipt_during_first_read_is_rejected(self):
+        for change in ('program','operation','receipt'):
+            with self.subTest(change=change):
+                from copy import deepcopy
+                selection={**deepcopy(CFG),'receipts':{'evaluate':receipt(EPOCH_A)}}
+                counts={'reads':0,'attaches':0,'detaches':0}
+                class SwitchingConnection:
+                    def capabilities(self):
+                        counts['reads']+=1
+                        if counts['reads']==1:
+                            if change=='program':
+                                selection['programId']='ALT_CLI_V1'
+                                selection['receipts']['evaluate']['observation']['program_id']='ALT_CLI_V1'
+                            elif change=='operation':
+                                selection['bindings'][0]['operation']='recompute'
+                                old=receipt(EPOCH_A)
+                                old['observation']['operation']='recompute'
+                                selection['receipts']={'recompute':old}
+                            else:
+                                selection['receipts']['evaluate']['observation']['output']='43'
+                        return {'schema':SCHEMA,
+                                'program_id':selection['programId'],
+                                'transport':'cli','status':'DECLARED','connected':True,
+                                'connection_epoch':EPOCH_A,
+                                'operations':[{'name':selection['bindings'][0]['operation'],
+                                               'declared':True,'verified':True}]}
+                def attach(*_):
+                    counts['attaches']+=1
+                    return {'attached':True,'bindingRef':'host:wrong-selection'}
+                def detach(ref):
+                    counts['detaches']+=1
+                    return {'detached':True}
+                bridge=U03HostBinding(
+                    DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                    SwitchingConnection(),lambda:selection,attach,detach)
+                outcome=bridge.attach()
+                self.assertFalse(outcome['attached'])
+                self.assertEqual(outcome['assessment']['reasons'],
+                                 ['U03_HOST_OBSERVATION_CHANGED'])
+                self.assertIsNone(outcome['hostReceipt'])
+                self.assertEqual(counts,{'reads':1,'attaches':0,'detaches':0})
