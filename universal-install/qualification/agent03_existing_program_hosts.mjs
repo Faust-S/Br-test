@@ -1,8 +1,9 @@
 // Genuine Node executable, two independent U01 consumers, no new daemon.
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {readFileSync} from "node:fs";
-import {basename} from "node:path";
+import {readFileSync,writeFileSync,existsSync,mkdtempSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {basename,join} from "node:path";
 import {CliConnection} from "../host-bindings/program-connection.mjs";
 import {createProductHostPort} from "../host-bindings/product-hosts.mjs";
 
@@ -22,7 +23,15 @@ const spec={
   binary:["-e","process.stdout.write(Buffer.from([255]))"],
   dynamic:["-e","{script}"],
   large:["-e","process.stdout.write('X'.repeat(300000))"],
-  oversize:["-e","process.stdout.write('Y'.repeat(800000))"]
+  oversize:["-e","process.stdout.write('Y'.repeat(800000))"],
+  spawn_tree:["-e",
+    "const {spawn}=require('node:child_process');"+
+    "const fs=require('node:fs');"+
+    "const sub=\"setTimeout(()=>require('node:fs').writeFileSync(process.argv[1],'ORPHAN'),1500)\";"+
+    "spawn(process.execPath,['-e',sub,process.argv[2]],{stdio:'inherit'});"+
+    "fs.writeFileSync(process.argv[1],'STARTED');"+
+    "setTimeout(()=>process.exit(0),4000);",
+    "{started}","{marker}"]
  }
 };
 const observed={program_id:id,verified:true,status:"RUNNING",spawned:false,
@@ -104,6 +113,33 @@ assert.equal(failedDynamic.status,"EXECUTION_FAILED");
 assert.equal(failedDynamic.executionOutcome,"UNKNOWN");
 assert.equal(first.capabilities().operations.find(x=>x.name==="dynamic").verified,false);
 assert.equal(first.verify().connection_epoch,a.connection_epoch);
+// Cancellation/timeout must terminate the native CLI's descendants too.
+const treeDir=mkdtempSync(join(tmpdir(),"iwxa-u01-real-process-tree-"));
+const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+async function awaitFile(path){
+ const deadline=performance.now()+3200;
+ while(!existsSync(path)&&performance.now()<deadline)await sleep(15);
+ assert.ok(existsSync(path),"native CLI never started its descendant");
+}
+try{
+ for(const mode of ["cancel","timeout"]){
+  const started=join(treeDir,mode+"-started.txt");
+  const marker=join(treeDir,mode+"-descendant-effect.txt");
+  const controller=new AbortController();
+  const running=first.invokeAsync("spawn_tree",{started,marker},
+    mode==="cancel"?{signal:controller.signal,timeoutMs:3500}:{timeoutMs:350});
+  await awaitFile(started);
+  if(mode==="cancel")controller.abort();
+  const result=await running;
+  assert.equal(result.status,mode==="cancel"?"CLI_CANCELLED":"CLI_TIMED_OUT");
+  assert.equal(result.executionOutcome,"UNKNOWN");
+  await sleep(1700);
+  assert.equal(existsSync(marker),false,
+    "aborted native CLI left child process writing after stop");
+  assert.equal(first.capabilities().operations.find(x=>x.name==="spawn_tree").verified,
+    false);
+ }
+}finally{rmSync(treeDir,{recursive:true,force:true});}
 // An active child must not spawn a second operation on this connection.
 // Lifecycle recovery during that child must not credit its output to a new epoch.
 const competingAbort=new AbortController();
@@ -175,5 +211,7 @@ console.log(JSON.stringify({
  legacy_output_limit_rejected:true,output_overflow_rejected:true,
  single_flight_busy_preflight:"NONE",
  session_superseded_after_recovery:"UNKNOWN",
- no_implicit_reexecution:true
+ no_implicit_reexecution:true,
+ no_orphan_descendant_after_cancel:true,
+ no_orphan_descendant_after_timeout:true
 }));

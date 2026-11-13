@@ -111,6 +111,20 @@ function run(path,args,maxOutputBytes=DEFAULT_OUTPUT_BYTES) {
   catch{return {status:"CLI_OUTPUT_ENCODING_UNSUPPORTED"};}
   return {status:r.status===0?"EXECUTED":"EXECUTION_FAILED",code:r.status,output};
 }
+// Only an abnormal, cancelled asynchronous invocation terminates the spawned
+// process tree. Never terminate a normally completed application or a
+// separately observed existing GUI process.
+function terminateAsyncCliTree(proc){
+  if(!proc?.pid)return;
+  if(platform()==="win32"){
+    const r=spawnSync("taskkill.exe",["/PID",String(proc.pid),"/T","/F"],{
+      shell:false,windowsHide:true,stdio:"ignore",timeout:3000});
+    if(!r.error&&r.status===0)return;
+  }else{
+    try{process.kill(-proc.pid,"SIGKILL");return;}catch{}
+  }
+  try{proc.kill("SIGKILL");}catch{}
+}
 // Opt-in asynchronous invocation for desktop hosts that need interactive cancel.
 // Existing synchronous invoke() and all host-port contracts remain unchanged.
 function runAsync(path,args,signal,timeoutMs=20000,maxOutputBytes=DEFAULT_OUTPUT_BYTES){
@@ -130,10 +144,11 @@ function runAsync(path,args,signal,timeoutMs=20000,maxOutputBytes=DEFAULT_OUTPUT
     const stop=status=>{
       if(reason||complete)return;
       reason=status;
-      if(proc?.pid){try{proc.kill("SIGKILL");}catch{}}
+      terminateAsyncCliTree(proc);
     };
     const onAbort=()=>stop("CLI_CANCELLED");
     try{proc=spawn(path,args,{shell:false,windowsHide:true,
+      detached:platform()!=="win32",
       stdio:["ignore","pipe","pipe"]});}
     catch{return finish({status:"CLI_EXECUTION_FAILED",executionOutcome:"NONE"});}
     proc.once("spawn",()=>{started=true;});

@@ -468,6 +468,82 @@ class CliProcessHostTest(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "CLI_OUTPUT_LIMIT_INVALID"):
                     CliConnection({**spec, "max_output_bytes": invalid}, executable)
 
+    def test_cancel_or_timeout_stops_real_descendant_before_later_file_write(self):
+        import tempfile
+        import threading
+        parent_script = (
+            "import subprocess,sys,time\n"
+            "from pathlib import Path\n"
+            "start,marker=sys.argv[1:3]\n"
+            "child_script='import sys,time;from pathlib import Path;'"
+            "+'time.sleep(1.5);Path(sys.argv[1]).write_text(\"ORPHAN\",encoding=\"utf-8\")'\n"
+            "subprocess.Popen([sys.executable,'-c',child_script,marker],"
+            "stdin=subprocess.DEVNULL,stdout=sys.stdout,stderr=sys.stderr)\n"
+            "Path(start).write_text('STARTED',encoding='utf-8')\n"
+            "time.sleep(4)\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="iwxa-u01-tree-") as tmp:
+            for mode in ("cancel", "timeout"):
+                with self.subTest(mode=mode):
+                    start = Path(tmp) / (mode+"-started.txt")
+                    marker = Path(tmp) / (mode+"-descendant-effect.txt")
+                    cancel = threading.Event()
+                    watcher = None
+                    if mode == "cancel":
+                        def watch_start():
+                            deadline = time.monotonic()+3
+                            while not start.exists() and time.monotonic() < deadline:
+                                time.sleep(0.01)
+                            if start.exists():
+                                cancel.set()
+                        watcher = threading.Thread(target=watch_start,daemon=True)
+                        watcher.start()
+                    try:
+                        with self.assertRaisesRegex(
+                            ProgramError,
+                            "CLI_CANCELLED" if mode == "cancel" else "CLI_TIMED_OUT",
+                        ):
+                            run_command(
+                                str(Path(sys.executable).resolve()),
+                                ["-c", parent_script, str(start), str(marker)],
+                                cancel_event=cancel if mode == "cancel" else None,
+                                timeout_seconds=3 if mode == "cancel" else 0.35,
+                            )
+                    finally:
+                        if watcher:
+                            watcher.join(timeout=4)
+                    self.assertTrue(start.exists(),"native CLI did not spawn its child")
+                    # The grandchild writes only if the parent termination left it running.
+                    time.sleep(1.7)
+                    self.assertFalse(marker.exists(),
+                                     "cancelled CLI left its descendant performing work")
+
+    @unittest.skipIf(os.name == "nt", "Windows tree termination needs a live parent PID")
+    def test_parent_exits_but_descendant_holds_stdout_pipe(self):
+        import tempfile
+        parent_script = (
+            "import subprocess,sys\n"
+            "from pathlib import Path\n"
+            "start,marker=sys.argv[1:3]\n"
+            "sub='import sys,time;from pathlib import Path;'"
+            "+'time.sleep(1.5);Path(sys.argv[1]).write_text(\"ORPHAN\",encoding=\"utf-8\")'\n"
+            "subprocess.Popen([sys.executable,'-c',sub,marker],"
+            "stdin=subprocess.DEVNULL,stdout=sys.stdout,stderr=sys.stderr)\n"
+            "Path(start).write_text('STARTED',encoding='utf-8')\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="iwxa-u01-exited-leader-") as tmp:
+            started=Path(tmp)/"started.txt"
+            marker=Path(tmp)/"late-child-effect.txt"
+            with self.assertRaisesRegex(ProgramError,"CLI_TIMED_OUT"):
+                run_command(
+                    str(Path(sys.executable).resolve()),
+                    ["-c",parent_script,str(started),str(marker)],
+                    timeout_seconds=0.35,
+                )
+            self.assertTrue(started.exists())
+            time.sleep(1.7)
+            self.assertFalse(marker.exists(),"exited parent left an inherited-pipe child")
+
     def test_excessive_output_is_rejected_before_timeout(self):
         for stream in ("stdout", "stderr"):
             with self.subTest(stream=stream):

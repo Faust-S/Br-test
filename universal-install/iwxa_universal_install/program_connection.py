@@ -2,6 +2,7 @@
 import hashlib
 import os
 import secrets
+import signal
 from pathlib import Path
 import re
 import shutil
@@ -93,6 +94,38 @@ def executable_identity(path):
         return None
 
 
+def _terminate_cli_tree(child):
+    """Best-effort cleanup only for abnormal execution, never successful apps.
+
+    POSIX commands get their own process group. On Windows, taskkill /T
+    requests recursive termination while the original child is alive.
+    """
+    if os.name == "nt":
+        if child.poll() is None:
+            try:
+                subprocess.run(
+                    ["taskkill.exe", "/PID", str(child.pid), "/T", "/F"],
+                    shell=False, stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=subprocess.CREATE_NO_WINDOW, timeout=3,
+                    check=False,
+                )
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    else:
+        try:
+            os.killpg(child.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            pass
+    if child.poll() is None:
+        try:
+            child.kill()
+        except ProcessLookupError:
+            pass
+
+
 def run_command(path, args, *, cancel_event=None, timeout_seconds=20,
                 max_output_bytes=DEFAULT_OUTPUT_BYTES):
     """Run one native child, bounded by host cancellation, time and stream bytes."""
@@ -108,6 +141,7 @@ def run_command(path, args, *, cancel_event=None, timeout_seconds=20,
         child = subprocess.Popen(
             [path, *args], shell=False, stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=flags,
+            start_new_session=(os.name != "nt"),
         )
     except OSError:
         raise ProgramError("CLI_EXECUTION_FAILED") from None
@@ -133,6 +167,7 @@ def run_command(path, args, *, cancel_event=None, timeout_seconds=20,
     for reader in readers:
         reader.start()
     deadline = time.monotonic() + timeout_seconds
+    completed = False
     try:
         while child.poll() is None:
             if cancel_event is not None and cancel_event.is_set():
@@ -158,10 +193,11 @@ def run_command(path, args, *, cancel_event=None, timeout_seconds=20,
             output = buffers[0].decode("utf-8", errors="strict")
         except UnicodeDecodeError:
             raise ProgramError("CLI_OUTPUT_ENCODING_UNSUPPORTED") from None
+        completed = True
         return child.returncode, output
     finally:
-        if child.poll() is None:
-            child.kill()
+        if not completed:
+            _terminate_cli_tree(child)
         child.wait()
         for stream, reader in zip(streams, readers):
             reader.join(timeout=0.2)
