@@ -95,21 +95,72 @@ unsafe extern "C" {
     fn kill(pid: i32, signal: i32) -> i32;
 }
 
-fn terminate_cli_tree(child: &mut std::process::Child) {
+
+#[cfg(windows)]
+#[link(name="kernel32")]
+unsafe extern "system" {
+    fn CreateJobObjectW(attributes: *const std::ffi::c_void, name: *const u16)
+        -> *mut std::ffi::c_void;
+    fn AssignProcessToJobObject(job: *mut std::ffi::c_void, process: *mut std::ffi::c_void)
+        -> i32;
+    fn TerminateJobObject(job: *mut std::ffi::c_void, exit_code: u32) -> i32;
+    fn CloseHandle(handle: *mut std::ffi::c_void) -> i32;
+}
+
+#[cfg(windows)]
+struct NativeCliJob(*mut std::ffi::c_void);
+#[cfg(windows)]
+impl NativeCliJob {
+    fn assign(child: &std::process::Child) -> Option<Self> {
+        use std::os::windows::io::AsRawHandle;
+        unsafe {
+            let handle = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if handle.is_null() { return None; }
+            if AssignProcessToJobObject(handle, child.as_raw_handle()) == 0 {
+                let _ = CloseHandle(handle);
+                return None;
+            }
+            Some(Self(handle))
+        }
+    }
+    fn terminate(&self) -> bool {
+        unsafe { TerminateJobObject(self.0, 1) != 0 }
+    }
+}
+#[cfg(windows)]
+impl Drop for NativeCliJob {
+    fn drop(&mut self) {
+        unsafe { let _ = CloseHandle(self.0); }
+    }
+}
+#[cfg(not(windows))]
+struct NativeCliJob;
+#[cfg(not(windows))]
+impl NativeCliJob {
+    fn assign(_child: &std::process::Child) -> Option<Self> { None }
+}
+
+fn terminate_cli_tree(child: &mut std::process::Child, job: Option<&NativeCliJob>) {
     #[cfg(unix)]
-    if let Ok(pid) = i32::try_from(child.id()) {
-        // Each CLI is spawned in its own process group below.
-        unsafe { let _ = kill(-pid, 9); }
+    {
+        let _ = job;
+        if let Ok(pid) = i32::try_from(child.id()) {
+            // Each CLI is spawned in a private process group.
+            unsafe { let _ = kill(-pid, 9); }
+        }
     }
     #[cfg(windows)]
-    if child.try_wait().ok().flatten().is_none() {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let pid = child.id().to_string();
-        let _ = Command::new("taskkill.exe")
-            .args(["/PID", pid.as_str(), "/T", "/F"])
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
-            .creation_flags(CREATE_NO_WINDOW).status();
+    {
+        let terminated = job.is_some_and(NativeCliJob::terminate);
+        if !terminated && child.try_wait().ok().flatten().is_none() {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            let pid = child.id().to_string();
+            let _ = Command::new("taskkill.exe")
+                .args(["/PID", pid.as_str(), "/T", "/F"])
+                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW).status();
+        }
     }
     let _ = child.kill();
     let _ = child.wait();
@@ -132,6 +183,9 @@ fn execute(path: &PathBuf, argv: &[String], max_output_bytes: u64) -> Result<(i3
         command.creation_flags(CREATE_NO_WINDOW);
     }
     let mut child = command.spawn().map_err(|_| "CLI_EXECUTION_FAILED")?;
+    // Attach immediately: descendants inherit this Windows Job Object.
+    // Normal completion only closes the job handle; it never terminates them.
+    let native_job = NativeCliJob::assign(&child);
     let stdout = child.stdout.take().ok_or("CLI_EXECUTION_FAILED")?;
     let stderr = child.stderr.take().ok_or("CLI_EXECUTION_FAILED")?;
     // The reader stops at the approved limit+1. Without a signal the child can fill
@@ -164,18 +218,18 @@ fn execute(path: &PathBuf, argv: &[String], max_output_bytes: u64) -> Result<(i3
     let start = Instant::now();
     let status = loop {
         if oversized.load(Ordering::Acquire) {
-            terminate_cli_tree(&mut child);
+            terminate_cli_tree(&mut child, native_job.as_ref());
             break Err("CLI_OUTPUT_TOO_LARGE");
         }
         match child.try_wait() {
             Ok(Some(s)) => break Ok(s),
             Ok(None) if start.elapsed() < TIMEOUT => thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
-                terminate_cli_tree(&mut child);
+                terminate_cli_tree(&mut child, native_job.as_ref());
                 break Err("CLI_TIMED_OUT");
             },
             Err(_) => {
-                terminate_cli_tree(&mut child);
+                terminate_cli_tree(&mut child, native_job.as_ref());
                 break Err("CLI_EXECUTION_FAILED");
             }
         }
@@ -193,7 +247,7 @@ fn execute(path: &PathBuf, argv: &[String], max_output_bytes: u64) -> Result<(i3
         thread::sleep(Duration::from_millis(10));
     }
     if !out_done.load(Ordering::Acquire) || !err_done.load(Ordering::Acquire) {
-        if status.is_ok() { terminate_cli_tree(&mut child); }
+        if status.is_ok() { terminate_cli_tree(&mut child, native_job.as_ref()); }
         return Err(status.err().unwrap_or("CLI_TIMED_OUT"));
     }
     let out = out_thread.join().map_err(|_| "CLI_EXECUTION_FAILED")?
