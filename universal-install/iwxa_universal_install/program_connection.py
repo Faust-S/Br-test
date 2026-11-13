@@ -305,8 +305,14 @@ class CliConnection:
         return "RUNNING_PROCESS_UNVERIFIED"
 
 
-    def inspect(self):
-        """Never runs the program or modifies its installation."""
+    def inspect(self, *, verify_pin=True):
+        """Observe a program without launching it.
+
+        Bulk inventory may defer a costly executable digest. Explicit connect,
+        verify and invoke always revalidate the original owner identity.
+        """
+        if type(verify_pin) is not bool:
+            raise ValueError("CLI_VERIFY_PIN_INVALID")
         path = self.requested or shutil.which(self.spec["executable_name"])
         if path:
             file = Path(path)
@@ -314,9 +320,14 @@ class CliConnection:
                 os.name == "nt" or os.access(file, os.X_OK)
             ):
                 resolved = str(file.resolve())
-                identity = self.installation_identity(resolved)
+                identity = (self.installation_identity(resolved) if verify_pin else {
+                    "installation_verified": False,
+                    "installation_reason": ("PIN_CHECK_DEFERRED" if
+                                            self.spec.get("executable_sha256")
+                                            else "PIN_NOT_PROVIDED"),
+                })
                 return self.observation(
-                    "INSTALLATION_MISMATCH" if self.spec.get("executable_sha256") and
+                    "INSTALLATION_MISMATCH" if verify_pin and self.spec.get("executable_sha256") and
                     not identity["installation_verified"] else "DISCOVERED",
                     installed=True, path=resolved, connected=False,
                     architecture="UNKNOWN", ownership="UNKNOWN",

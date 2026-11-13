@@ -121,6 +121,32 @@ class CliProcessHostTest(unittest.TestCase):
         self.assertNotEqual(second.capabilities()["connection_epoch"],
                             connected["connection_epoch"])
 
+    def test_agent05_bulk_inventory_defers_pin_but_connect_verifies(self):
+        executable = str(Path(sys.executable).resolve())
+        digest = hashlib.sha256(Path(executable).read_bytes()).hexdigest()
+        spec = {
+            "schema": "IWXA_CLI_PROGRAM/1",
+            "program_id": "PYTHON_AGENT05_FAST_INVENTORY",
+            "executable_name": Path(executable).name,
+            "executable_sha256": digest,
+            "version_args": ["--version"],
+            "version_contains": "Python",
+            "operations": {"compute": ["-c", "print(42)"]},
+        }
+        conn = CliConnection(spec, executable)
+        with mock.patch.object(conn, "installation_identity",
+                               side_effect=AssertionError("inventory hashed binary")):
+            quick = conn.inspect(verify_pin=False)
+        self.assertEqual(quick["status"], "DISCOVERED")
+        self.assertEqual(quick["installation_reason"], "PIN_CHECK_DEFERRED")
+        self.assertFalse(quick["installation_verified"])
+        self.assertNotIn("installation_identity", quick)
+        connected = conn.connect()
+        self.assertEqual(connected["status"], "CONNECTED")
+        self.assertTrue(connected["installation_verified"])
+        with self.assertRaisesRegex(ValueError, "CLI_VERIFY_PIN_INVALID"):
+            conn.inspect(verify_pin="false")
+
     def test_pinned_installation_digest_mismatch_is_not_a_connected_program(self):
         executable = str(Path(sys.executable).resolve())
         spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_PIN_MISMATCH",
