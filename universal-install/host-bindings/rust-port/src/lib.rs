@@ -88,10 +88,42 @@ fn file_identity(path: &PathBuf) -> Option<FileIdentity> {
             .map(|dur| dur.as_nanos()),
     })
 }
+// The native port manages only children it spawned. It never kills an
+// already-running GUI or a host-owned process outside this invocation.
+#[cfg(unix)]
+unsafe extern "C" {
+    fn kill(pid: i32, signal: i32) -> i32;
+}
+
+fn terminate_cli_tree(child: &mut std::process::Child) {
+    #[cfg(unix)]
+    if let Ok(pid) = i32::try_from(child.id()) {
+        // Each CLI is spawned in its own process group below.
+        unsafe { let _ = kill(-pid, 9); }
+    }
+    #[cfg(windows)]
+    if child.try_wait().ok().flatten().is_none() {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let pid = child.id().to_string();
+        let _ = Command::new("taskkill.exe")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW).status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
 fn execute(path: &PathBuf, argv: &[String], max_output_bytes: u64) -> Result<(i32, String), &'static str> {
     let mut command = Command::new(path);
     command.args(argv).stdin(Stdio::null())
         .stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt;
@@ -106,45 +138,64 @@ fn execute(path: &PathBuf, argv: &[String], max_output_bytes: u64) -> Result<(i3
     // its pipe and block until the 20-second timeout instead of failing fast.
     let oversized = Arc::new(AtomicBool::new(false));
     let out_limit = Arc::clone(&oversized);
+    let out_done = Arc::new(AtomicBool::new(false));
+    let out_finished = Arc::clone(&out_done);
     let out_thread = thread::spawn(move || {
         let mut buffer = Vec::new();
         let result = stdout.take(max_output_bytes + 1).read_to_end(&mut buffer);
         if buffer.len() as u64 > max_output_bytes {
             out_limit.store(true, Ordering::Release);
         }
+        out_finished.store(true, Ordering::Release);
         result.map(|_| buffer)
     });
     let err_limit = Arc::clone(&oversized);
+    let err_done = Arc::new(AtomicBool::new(false));
+    let err_finished = Arc::clone(&err_done);
     let err_thread = thread::spawn(move || {
         let mut buffer = Vec::new();
         let result = stderr.take(DEFAULT_OUTPUT + 1).read_to_end(&mut buffer);
         if buffer.len() as u64 > DEFAULT_OUTPUT {
             err_limit.store(true, Ordering::Release);
         }
+        err_finished.store(true, Ordering::Release);
         result.map(|_| buffer)
     });
     let start = Instant::now();
     let status = loop {
         if oversized.load(Ordering::Acquire) {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_cli_tree(&mut child);
             break Err("CLI_OUTPUT_TOO_LARGE");
         }
         match child.try_wait() {
             Ok(Some(s)) => break Ok(s),
             Ok(None) if start.elapsed() < TIMEOUT => thread::sleep(Duration::from_millis(10)),
             Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_cli_tree(&mut child);
                 break Err("CLI_TIMED_OUT");
             },
             Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                terminate_cli_tree(&mut child);
                 break Err("CLI_EXECUTION_FAILED");
             }
         }
     };
+    // A child can exit while one of its descendants still holds stdout open.
+    // Never block the native host indefinitely on a reader thread.
+    let remaining = if status.is_ok() {
+        TIMEOUT.saturating_sub(start.elapsed())
+    } else {
+        Duration::from_millis(800)
+    };
+    let reader_deadline = Instant::now() + remaining;
+    while (!out_done.load(Ordering::Acquire) || !err_done.load(Ordering::Acquire))
+        && Instant::now() < reader_deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    if !out_done.load(Ordering::Acquire) || !err_done.load(Ordering::Acquire) {
+        if status.is_ok() { terminate_cli_tree(&mut child); }
+        return Err(status.err().unwrap_or("CLI_TIMED_OUT"));
+    }
     let out = out_thread.join().map_err(|_| "CLI_EXECUTION_FAILED")?
         .map_err(|_| "CLI_EXECUTION_FAILED")?;
     let err = err_thread.join().map_err(|_| "CLI_EXECUTION_FAILED")?
@@ -379,6 +430,43 @@ sys.{stream}.flush(); time.sleep(30)"
                 "oversized {stream} blocked until timeout");
         }
     }
+    #[test]
+    fn overflow_terminates_native_descendant_before_external_file_write() {
+        let root = std::env::temp_dir().join(format!(
+            "iwxa-rust-cli-tree-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now().duration_since(UNIX_EPOCH)
+                .expect("time").as_nanos()
+        ));
+        fs::create_dir_all(&root).expect("test directory");
+        let started = root.join("parent started.txt");
+        let marker = root.join("orphan effect.txt");
+        let script = concat!(
+            "import subprocess,sys,time\n",
+            "from pathlib import Path\n",
+            "started,marker=sys.argv[1:3]\n",
+            "sub='import sys,time;from pathlib import Path;'",
+            "+'time.sleep(1.5);Path(sys.argv[1]).write_text(\"ORPHAN\")'\n",
+            "subprocess.Popen([sys.executable,'-c',sub,marker],",
+            "stdin=subprocess.DEVNULL,stdout=sys.stdout,stderr=sys.stderr)\n",
+            "Path(started).write_text('STARTED')\n",
+            "sys.stdout.buffer.write(b'X'*262144);sys.stdout.flush()\n",
+            "time.sleep(4)\n"
+        );
+        let args = [
+            "-c".to_string(),
+            script.to_string(),
+            started.display().to_string(),
+            marker.display().to_string()
+        ];
+        let result = execute(&PathBuf::from("python"), &args, DEFAULT_OUTPUT);
+        assert_eq!(result, Err("CLI_OUTPUT_TOO_LARGE"));
+        assert!(started.exists(), "real nested CLI never started");
+        thread::sleep(Duration::from_millis(1700));
+        assert!(!marker.exists(), "aborted Rust CLI left a descendant alive");
+        let _ = fs::remove_dir_all(&root);
+    }
+
     #[test]
     fn non_utf8_output_is_not_reported_as_valid_text() {
         let args = ["-c".to_string(),
