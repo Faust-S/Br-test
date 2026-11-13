@@ -409,3 +409,22 @@ test('receipt mutated during SECOND U01 observation rolls back the one host atta
  assert.equal(reads,2,'one old and one new U01 observation, no extra probe');
  assert.equal(attached,1);
 });
+
+test('read-only assess does not show compatible after selection changes during U01 read',async()=>{
+ const selection={...cfg,receipts:{evaluate:receipt(epochA)}};
+ let reads=0,attachCalls=0;
+ const bridge=bindModuleToU01Host({
+  descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+  port:{capabilities:async()=>{
+    reads++;
+    selection.receipts.evaluate.observation.output='43';
+    return source(epochA);
+  }},
+  getBindings:()=>selection,
+  hooks:{attach:async()=>{attachCalls++;return {attached:true};},detach:async()=>null}
+ });
+ const assessment=await bridge.assess();
+ assert.deepEqual(assessment,{compatible:false,reasons:['U03_HOST_OBSERVATION_CHANGED']});
+ assert.equal(reads,1);
+ assert.equal(attachCalls,0);
+});

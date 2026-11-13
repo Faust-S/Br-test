@@ -46,7 +46,12 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
   let attaching = false; // Per-binding call guard, not a host registry or persistent state.
   return Object.freeze({
     describe,
-    assess: async () => assess(describe(), owner, (await observe()).observations),
+    assess: async () => {
+      const current = await observe();
+      return current.selectionChanged
+        ? {compatible:false,reasons:['U03_HOST_OBSERVATION_CHANGED']}
+        : assess(describe(), owner, current.observations);
+    },
     attach: async () => {
       if (attaching) return refusedInFlight();
       attaching = true;

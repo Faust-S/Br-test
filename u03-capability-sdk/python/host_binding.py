@@ -62,7 +62,11 @@ class U03HostBinding:
         return self._snapshot()[0]
 
     def assess(self):
-        return assess(self.describe(), deepcopy(self._host), self._observations())
+        observations, _, changed = self._snapshot()
+        if changed:
+            return {'compatible': False,
+                    'reasons': ['U03_HOST_OBSERVATION_CHANGED']}
+        return assess(self.describe(), deepcopy(self._host), observations)
 
     def attach(self):
         if not self._attach_lock.acquire(blocking=False):
