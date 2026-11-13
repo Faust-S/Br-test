@@ -1,36 +1,38 @@
 import {readSelectedProjectSources,checkpointSelectedProjectSources,
-  projectSourceObservationsForKnowledge} from './selected-project.mjs';
+  projectSourceObservationsForKnowledge,inspectSelectedProjectSources} from './selected-project.mjs';
 import {revalidateSelectedProjectRead} from './selected-project-revalidate.mjs';
 import {OBSERVATION_AUTHORITY} from './port.mjs';
 
 // Agent-facing orchestration over existing read-only U02 ports. This does not
 // own selection, credentials, persistence, Task, Review, or Result.
 export const TASK_INPUTS_SCHEMA = 'IWXA_U02_TASK_INPUTS/1';
+export const TASK_SOURCE_STATUS_SCHEMA = 'IWXA_U02_SAVED_TASK_SOURCE_STATUS/1';
+
+const currentToken = fn => () => {try{return fn() === true;}catch{return false;}};
+
+// Reuse the same cooperative cancellation gate in prepare and inspect.
+const guardSelectedPorts=(sources,current)=>Array.isArray(sources)?sources.map(entry=>{
+  const port=entry?.port;
+  if(typeof port?.describe!=='function'||
+     typeof port?.refresh!=='function'||typeof port?.read!=='function')return entry;
+  const guard=()=>{if(!current())throw Error('TASK_INPUTS_SUPERSEDED');};
+  return {...entry,port:{
+    describe:()=>port.describe(),
+    refresh:async()=>{guard();return port.refresh();},
+    read:async pin=>{guard();return port.read(pin);}
+  }};
+}):sources;
 
 export async function prepareSelectedTaskSources({scopeId,sources,previous=null,
   maxTotalBytes, isCurrent=()=>true}={}) {
   if (typeof isCurrent!=='function') throw Error('TASK_INPUTS_CURRENTNESS_INVALID');
-  const current=()=>{try {return isCurrent()===true;} catch {return false;}};
+  const current=currentToken(isCurrent);
   const blocked=(status,metrics,issues)=>({
     schema:TASK_INPUTS_SCHEMA,scopeId,status,ready:false,authority:OBSERVATION_AUTHORITY,
     observations:[],checkpoint:null,issues,metrics
   });
   if (!current()) return blocked('SUPERSEDED',null,[]);
-  // Snapshot the host's selected entries. A superseded Task must not keep
-  // reading other files or fetch remote sources just to discard their output.
-  // Existing SourceConnectorPort methods still own every authorization check.
-  const selected=Array.isArray(sources)?sources.map(entry=>{
-    const port=entry?.port;
-    if(typeof port?.describe!=='function'||
-       typeof port?.refresh!=='function'||typeof port?.read!=='function')
-      return entry;
-    const guard=()=>{if(!current())throw Error('TASK_INPUTS_SUPERSEDED');};
-    return {...entry,port:{
-      describe:()=>port.describe(),
-      refresh:async()=>{guard();return port.refresh();},
-      read:async pin=>{guard();return port.read(pin);}
-    }};
-  }):sources;
+  const selected=guardSelectedPorts(sources,current);
   const read=await readSelectedProjectSources({scopeId,sources:selected,previous,maxTotalBytes});
   const metrics={read:read.metrics,revalidation:null};
   if (!current()) return blocked('SUPERSEDED',metrics,[]);
@@ -74,4 +76,42 @@ export async function prepareSelectedTaskSources({scopeId,sources,previous=null,
   if (!current()) return blocked('SUPERSEDED',metrics,[]);
   return {schema:TASK_INPUTS_SCHEMA,scopeId,status:'READY',ready:true,
     authority:OBSERVATION_AUTHORITY,observations,checkpoint,issues:[],metrics};
+}
+
+// Historical Task/Result source status, not permission to reuse saved bytes.
+// No source.read, new checkpoint, inference or replacement of Human Review.
+export async function inspectSavedTaskSources({scopeId,sources,previous=null,
+  isCurrent=()=>true}={}) {
+  if(typeof isCurrent!=='function')throw Error('TASK_INPUTS_CURRENTNESS_INVALID');
+  const current=currentToken(isCurrent);
+  const superseded=metrics=>({
+    schema:TASK_SOURCE_STATUS_SCHEMA,scopeId,status:'SUPERSEDED',current:false,
+    authority:OBSERVATION_AUTHORITY,sources:[],issues:[],checkpointCoverage:null,
+    metrics,observations:[],checkpoint:null,contentRead:false,evidenceReady:false
+  });
+  if(!current())return superseded(null);
+  const inspected=await inspectSelectedProjectSources({scopeId,
+    sources:guardSelectedPorts(sources,current),previous});
+  if(!current())return superseded(inspected.metrics);
+  const coverage=inspected.checkpointCoverage,issues=[];
+  if(!coverage.hasCheckpoint)issues.push({key:null,status:'NO_SAVED_CHECKPOINT'});
+  for(const key of coverage.missingSavedKeys)
+    issues.push({key,status:'SAVED_SOURCE_NOT_SELECTED'});
+  for(const key of coverage.newSelectedKeys)
+    issues.push({key,status:'SOURCE_NOT_PINNED'});
+  for(const row of inspected.sources) {
+    if(row.status!=='OK'||row.freshness==='STALE')
+      issues.push({key:row.key,status:row.status==='OK'?'STALE':row.status,
+        freshness:row.freshness,change:row.change});
+  }
+  const status=inspected.allPinnedCurrent?'CURRENT':
+    (!coverage.matchesCheckpoint||
+     inspected.sources.some(row=>row.status!=='OK'||row.freshness==='NOT_PINNED'))
+      ?'INCOMPLETE':'STALE';
+  if(!current())return superseded(inspected.metrics);
+  return {schema:TASK_SOURCE_STATUS_SCHEMA,scopeId,status,
+    current:status==='CURRENT',authority:OBSERVATION_AUTHORITY,
+    sources:inspected.sources,issues,checkpointCoverage:coverage,
+    metrics:inspected.metrics,observations:[],checkpoint:null,
+    contentRead:false,evidenceReady:false};
 }

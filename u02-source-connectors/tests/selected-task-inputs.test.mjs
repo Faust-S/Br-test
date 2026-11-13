@@ -5,7 +5,8 @@ import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {createLocalFileSourcePort} from '../local-file.mjs';
 import {createHostSelectedSourcePort} from '../host-source.mjs';
-import {prepareSelectedTaskSources,TASK_INPUTS_SCHEMA} from '../selected-task-inputs.mjs';
+import {prepareSelectedTaskSources,inspectSavedTaskSources,
+  TASK_INPUTS_SCHEMA,TASK_SOURCE_STATUS_SCHEMA} from '../selected-task-inputs.mjs';
 
 const enc=text=>new TextEncoder().encode(text);
 async function fixture(){
@@ -263,4 +264,77 @@ test('Task inputs: cancellation in revalidation skips later owner refreshes',asy
  assert.equal(firstCalls,3,'one final revision observation is allowed');
  assert.equal(laterCalls,2,'second source must not be reobserved after cancel');
  assert.equal(result.metrics.revalidation.pinnedReadCalls,0);
+});
+
+test('saved Task inspection never promotes partial or stale sources into new evidence',async()=>{
+ const p=await fixture();
+ try{
+  const prepared=await prepareSelectedTaskSources({scopeId:'workspace_1',sources:p.select()});
+  assert.equal(prepared.status,'READY');
+  const previous=JSON.parse(JSON.stringify(prepared.checkpoint));
+  let reads=0;
+  const selected=p.select().map(entry=>({...entry,port:{
+    describe:()=>entry.port.describe(),
+    refresh:()=>entry.port.refresh(),
+    read:()=>{reads++;throw Error('SOURCE_READ_MUST_NOT_RUN');}
+  }}));
+  const current=await inspectSavedTaskSources({scopeId:'workspace_1',sources:selected,previous});
+  assert.equal(current.schema,TASK_SOURCE_STATUS_SCHEMA);
+  assert.equal(current.status,'CURRENT');
+  assert.equal(current.current,true);
+  assert.equal(current.checkpointCoverage.matchesCheckpoint,true);
+  assert.equal(current.metrics.pinnedReadCalls,0);
+  assert.equal(current.evidenceReady,false);
+  assert.equal(current.checkpoint,null);
+  assert.deepEqual(current.observations,[]);
+  const subset=await inspectSavedTaskSources({scopeId:'workspace_1',
+    sources:selected.slice(0,1),previous});
+  assert.equal(subset.status,'INCOMPLETE');
+  assert.deepEqual(subset.checkpointCoverage.missingSavedKeys,['status']);
+  assert.equal(subset.issues[0].status,'SAVED_SOURCE_NOT_SELECTED');
+  const none=await inspectSavedTaskSources({scopeId:'workspace_1',sources:[],previous});
+  assert.equal(none.status,'INCOMPLETE');
+  assert.equal(none.metrics.refreshCalls,0);
+  await writeFile(join(p.root,'docs','plan.md'),'Plan updated');
+  const stale=await inspectSavedTaskSources({scopeId:'workspace_1',sources:selected,previous});
+  assert.equal(stale.status,'STALE');
+  assert.equal(stale.issues[0].status,'STALE');
+  await rename(join(p.root,'docs','status.json'),join(p.root,'docs','lost.json'));
+  const missing=await inspectSavedTaskSources({scopeId:'workspace_1',sources:selected,previous});
+  assert.equal(missing.status,'INCOMPLETE');
+  assert.equal(missing.issues.some(i=>i.key==='status'&&i.status==='SOURCE_MISSING'),true);
+  assert.equal(reads,0);
+ }finally{await rm(p.root,{recursive:true,force:true});}
+});
+
+test('saved Task status aborts later host refreshes when user changes Workspace',async()=>{
+ let active=true,firstCalls=0,laterCalls=0;
+ const first=createHostSelectedSourcePort({hostId:'agent',scopeId:'workspace_1',
+   sourceId:'one',bindingId:'a',readSelected:()=>({status:'OK',bytes:enc('first')})});
+ const second=createHostSelectedSourcePort({hostId:'agent',scopeId:'workspace_1',
+   sourceId:'two',bindingId:'a',readSelected:()=>({status:'OK',bytes:enc('second')})});
+ const selection=[{key:'one',format:'text',port:first},
+   {key:'two',format:'text',port:second}];
+ const prepared=await prepareSelectedTaskSources({scopeId:'workspace_1',sources:selection});
+ assert.equal(prepared.status,'READY');
+ const wrapped=[{...selection[0],port:{describe:()=>first.describe(),
+   refresh:async()=>{firstCalls++;const r=await first.refresh();active=false;return r;},
+   read:()=>{throw Error('NO_CONTENT')}}},
+  {...selection[1],port:{describe:()=>second.describe(),
+   refresh:()=>{laterCalls++;return second.refresh();},
+   read:()=>{throw Error('NO_CONTENT')}}}];
+ const cancelled=await inspectSavedTaskSources({scopeId:'workspace_1',sources:wrapped,
+   previous:prepared.checkpoint,isCurrent:()=>active});
+ assert.equal(cancelled.status,'SUPERSEDED');
+ assert.equal(cancelled.metrics.pinnedReadCalls,0);
+ assert.equal(firstCalls,1);
+ assert.equal(laterCalls,0);
+ assert.deepEqual(cancelled.sources,[]);
+ assert.deepEqual(cancelled.observations,[]);
+ assert.equal(cancelled.checkpoint,null);
+ const immediate=await inspectSavedTaskSources({scopeId:'workspace_1',sources:wrapped,
+   previous:prepared.checkpoint,isCurrent:()=>active});
+ assert.equal(immediate.status,'SUPERSEDED');
+ assert.equal(immediate.metrics,null);
+ assert.equal(firstCalls,1);
 });

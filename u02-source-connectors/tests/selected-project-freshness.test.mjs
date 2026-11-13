@@ -172,6 +172,42 @@ test('corrupted persisted checkpoint size or pin metadata cannot be reported cur
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('reopening a saved Task requires every original source to remain selected',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'u02-source-coverage-'));
+ try{
+  await mkdir(join(root,'docs'));
+  await writeFile(join(root,'docs','one.md'),'One');
+  await writeFile(join(root,'docs','two.md'),'Two');
+  await writeFile(join(root,'docs','new.md'),'New');
+  const entry=(key,path)=>({key,format:'markdown',port:createLocalFileSourcePort({
+    root,rootId:'project_a',relativePath:path})});
+  const original=[entry('one','docs/one.md'),entry('two','docs/two.md')];
+  const first=await readSelectedProjectSources({scopeId:'project_a',sources:original});
+  const previous=JSON.parse(JSON.stringify(checkpointSelectedProjectSources(first)));
+  const full=await inspectSelectedProjectSources({scopeId:'project_a',sources:original,previous});
+  assert.equal(full.allPinnedCurrent,true);
+  assert.equal(full.checkpointCoverage.matchesCheckpoint,true);
+  const subset=await inspectSelectedProjectSources({scopeId:'project_a',sources:original.slice(0,1),previous});
+  assert.deepEqual(subset.sources.map(s=>s.freshness),['CURRENT']);
+  assert.equal(subset.observationsComplete,true);
+  assert.equal(subset.allPinnedCurrent,false);
+  assert.deepEqual(subset.checkpointCoverage.missingSavedKeys,['two']);
+  const empty=await inspectSelectedProjectSources({scopeId:'project_a',sources:[],previous});
+  assert.equal(empty.metrics.refreshCalls,0);
+  assert.equal(empty.allPinnedCurrent,false);
+  assert.deepEqual(empty.checkpointCoverage.missingSavedKeys,['one','two']);
+  const added=await inspectSelectedProjectSources({scopeId:'project_a',
+    sources:[...original,entry('new','docs/new.md')],previous});
+  assert.equal(added.sources[2].freshness,'NOT_PINNED');
+  assert.equal(added.allPinnedCurrent,false);
+  assert.deepEqual(added.checkpointCoverage.newSelectedKeys,['new']);
+  const unpinned=await inspectSelectedProjectSources({scopeId:'project_a',
+    sources:original,previous:null});
+  assert.equal(unpinned.allPinnedCurrent,false);
+  assert.equal(unpinned.checkpointCoverage.hasCheckpoint,false);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
 test('ambiguous unchanged revision with different contentRef fails closed',async()=>{
  const digest1='sha256:'+'a'.repeat(64),digest2='sha256:'+'b'.repeat(64);
  const d=sourceDescriptor({providerId:'host.file',sourceRef:'host://consistent'});

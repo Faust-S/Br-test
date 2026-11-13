@@ -180,10 +180,24 @@ export const PROJECT_FRESHNESS_SCHEMA = 'IWXA_U02_SELECTED_PROJECT_FRESHNESS/1';
 export async function inspectSelectedProjectSources({scopeId, sources, previous = null} = {}) {
   checkInput({scopeId, sources, previous, maxTotalBytes: limit});
   const prior = new Map((previous?.sources ?? []).map(s => [s.key, s]));
+  // Hold the same selection for this entire asynchronous freshness check.
+  const selected = sources.map(({key,format,port})=>({key,format,port}));
+  const selectedKeys = new Set(selected.map(row=>row.key));
+  const missingSavedKeys = (previous?.sources ?? [])
+    .filter(row=>!selectedKeys.has(row.key)).map(row=>row.key);
+  const newSelectedKeys = selected.filter(row=>!prior.has(row.key)).map(row=>row.key);
+  const checkpointCoverage = {
+    hasCheckpoint: previous !== null,
+    savedCount: previous?.sources.length ?? 0,
+    selectedCount: selected.length,
+    missingSavedKeys, newSelectedKeys,
+    matchesCheckpoint: previous !== null && previous.sources.length > 0 &&
+      missingSavedKeys.length === 0 && newSelectedKeys.length === 0
+  };
   const metrics = {refreshCalls: 0, pinnedReadCalls: 0, returnedTextBytes: 0, elapsedMs: 0};
   const rows = [];
   const begin = performance.now();
-  for (const {key, format, port} of sources) {
+  for (const {key, format, port} of selected) {
     const start = performance.now();
     const descriptor = port.describe();
     if (!validDescriptor(descriptor)) throw Error('PROJECT_SOURCE_DESCRIPTOR_INVALID');
@@ -257,7 +271,11 @@ export async function inspectSelectedProjectSources({scopeId, sources, previous 
         observedAt: observed.observedAt, provenance: observed.provenance}));
   }
   metrics.elapsedMs = elapsed(begin);
+  // A successful subset does not establish currentness of the saved Task.
+  const allPinnedCurrent = checkpointCoverage.matchesCheckpoint &&
+    rows.every(r=>r.status === 'OK' && r.freshness === 'CURRENT');
   return {schema: PROJECT_FRESHNESS_SCHEMA, scopeId, sources: rows, metrics,
+    checkpointCoverage, allPinnedCurrent,
     observationsComplete: rows.every(r => r.status === 'OK'),
     contentRead: false, evidenceReady: false};
 }

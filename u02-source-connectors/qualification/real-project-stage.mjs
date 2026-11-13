@@ -10,7 +10,7 @@ import {createLocalFileSourcePort} from '../local-file.mjs';
 import {readSelectedProjectSources,checkpointSelectedProjectSources,
   projectSourceObservationsForKnowledge,inspectSelectedProjectSources} from '../selected-project.mjs';
 import {revalidateSelectedProjectRead} from '../selected-project-revalidate.mjs';
-import {prepareSelectedTaskSources} from '../selected-task-inputs.mjs';
+import {prepareSelectedTaskSources,inspectSavedTaskSources} from '../selected-task-inputs.mjs';
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
@@ -250,12 +250,29 @@ if(phase==='initial'){
   assert.equal(check.evidenceReady,false);
   assert.equal(check.contentRead,false);
   assert.ok(check.sources.every(row=>!('text' in row)));
+  const localCheckpoint={...checkpoint,
+    sources:checkpoint.sources.filter(s=>s.key!=='github-license')};
+  const restored=await inspectSavedTaskSources({scopeId:'iwxa_selected_project',
+    sources:local(),previous:localCheckpoint});
+  assert.equal(restored.status,'CURRENT');
+  assert.deepEqual(restored.observations,[]);
+  assert.equal(restored.checkpoint,null);
+  const missing=await inspectSavedTaskSources({scopeId:'iwxa_selected_project',
+    sources:local().slice(0,3),previous:localCheckpoint});
+  assert.equal(missing.status,'INCOMPLETE');
+  assert.deepEqual(missing.checkpointCoverage.missingSavedKeys,['meta']);
+  const empty=await inspectSavedTaskSources({scopeId:'iwxa_selected_project',
+    sources:[],previous:localCheckpoint});
+  assert.equal(empty.status,'INCOMPLETE');
+  assert.equal(empty.metrics.refreshCalls,0);
   const old=JSON.parse(await readFile(view,'utf8'));
   await writeFile(view,JSON.stringify({...old,inspect:check.sources.map(s=>({
     key:s.key,freshness:s.freshness,change:s.change,revision:s.currentRevision
   })),inspectMetrics:check.metrics}));
   console.log(JSON.stringify({schema:'IWXA_U02_REAL_PROJECT/1',phase,status:'PASS',
     contentReads:0,freshnessOnly:true,externalGitHubStatus:check.sources[4].freshness,
+    savedLocalStatus:restored.status,partialStatus:missing.status,
+    missingSavedKeys:missing.checkpointCoverage.missingSavedKeys,
     metrics:check.metrics}));
 }else{
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
