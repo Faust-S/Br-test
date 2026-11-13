@@ -95,4 +95,5 @@ jobs:
           node u02-source-connectors/qualification/real-project-stage.mjs cancel
           node u02-source-connectors/qualification/real-project-stage.mjs corrupt
           node u02-source-connectors/qualification/real-project-stage.mjs inspect
+          node u02-source-connectors/qualification/real-project-stage.mjs outage
           node u02-source-connectors/qualification/real-project-stage.mjs change

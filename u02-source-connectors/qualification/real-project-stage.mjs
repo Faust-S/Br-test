@@ -14,7 +14,7 @@ import {prepareSelectedTaskSources,inspectSavedTaskSources} from '../selected-ta
 
 const root=process.env.U02_PROJECT_ROOT;
 const phase=process.argv[2];
-if(!root||!['initial','reopen','task','cancel','corrupt','inspect','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
+if(!root||!['initial','reopen','task','cancel','corrupt','inspect','outage','change'].includes(phase))throw Error('QUALIFICATION_INPUT_INVALID');
 const paths=[
  {key:'plan',format:'markdown',path:'docs/project-plan.md'},
  {key:'requirements',format:'markdown',path:'docs/requirements.md'},
@@ -200,6 +200,45 @@ if(phase==='initial'){
     phase,status:'PASS',actualFirstSourceReads:firstReads,
     actualLaterSourceRequests:otherNativeCalls,remoteGitHubRequests:0,
     noPartialTaskEvidence:true}));
+}else if(phase==='outage'){
+  const checkpoint=JSON.parse(await readFile(save,'utf8'));
+  const localCheckpoint={...checkpoint,
+    sources:checkpoint.sources.filter(s=>s.key!=='github-license')};
+  const selected=local();
+  let prohibitedCalls=0;
+  selected[1]={...selected[1],port:{
+    describe:()=>{throw Error('native host disconnected; private path should be hidden');},
+    refresh:()=>{prohibitedCalls++;throw Error('DISCONNECTED_HOST_REFRESH');},
+    read:()=>{prohibitedCalls++;throw Error('DISCONNECTED_HOST_READ');}
+  }};
+  const prepared=await prepareSelectedTaskSources({scopeId:'iwxa_selected_project',
+    sources:selected,previous:localCheckpoint});
+  assert.equal(prepared.status,'INCOMPLETE');
+  assert.equal(prepared.issues.length,1);
+  assert.equal(prepared.issues[0].key,'requirements');
+  assert.equal(prepared.issues[0].status,'SOURCE_UNAVAILABLE');
+  assert.equal(prepared.metrics.read.refreshCalls,3);
+  assert.equal(prepared.metrics.revalidation,null);
+  assert.equal(prepared.checkpoint,null);
+  assert.deepEqual(prepared.observations,[]);
+  const historical=await inspectSavedTaskSources({scopeId:'iwxa_selected_project',
+    sources:selected,previous:localCheckpoint});
+  assert.equal(historical.status,'INCOMPLETE');
+  assert.equal(historical.current,false);
+  assert.equal(historical.issues[0].status,'SOURCE_UNAVAILABLE');
+  assert.equal(historical.checkpointCoverage.matchesCheckpoint,true);
+  assert.equal(historical.metrics.pinnedReadCalls,0);
+  assert.equal(prohibitedCalls,0);
+  assert.equal(JSON.stringify(historical).includes('private path should be hidden'),false);
+  const reconnected=await inspectSavedTaskSources({scopeId:'iwxa_selected_project',
+    sources:local(),previous:localCheckpoint});
+  assert.equal(reconnected.status,'CURRENT');
+  assert.equal(reconnected.current,true);
+  console.log(JSON.stringify({schema:'IWXA_U02_REAL_HOST_DISCONNECT/1',
+    phase,status:'PASS',newTaskBlocked:true,historicalResultPreserved:true,
+    successfulNeighborReads:prepared.metrics.read.pinnedReadCalls,
+    unavailableSourceIssues:historical.issues.length,
+    restoredAfterReconnect:true,prohibitedCalls}));
 }else if(phase==='corrupt'){
   const checkpoint=JSON.parse(await readFile(save,'utf8'));
   const changed=JSON.parse(JSON.stringify(checkpoint));

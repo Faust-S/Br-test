@@ -208,6 +208,42 @@ test('reopening a saved Task requires every original source to remain selected',
  }finally{await rm(root,{recursive:true,force:true});}
 });
 
+test('cold restart reports disconnected host owner without aborting other selected source checks',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'u02-owner-absent-'));
+ try {
+   await mkdir(join(root,'docs'));
+   await writeFile(join(root,'docs','one.md'),'One verified document');
+   await writeFile(join(root,'docs','two.md'),'Two verified document');
+   const make=(key,path)=>({key,format:'markdown',port:createLocalFileSourcePort({
+     root,rootId:'project_a',relativePath:path})});
+   const original=[make('one','docs/one.md'),make('two','docs/two.md')];
+   const initial=await readSelectedProjectSources({scopeId:'project_a',sources:original});
+   const checkpoint=JSON.parse(JSON.stringify(checkpointSelectedProjectSources(initial)));
+   let forbiddenRefresh=0,forbiddenRead=0;
+   const disconnected={key:'one',format:'markdown',port:{
+     describe:()=>{throw Error('native connection missing: private host detail');},
+     refresh:()=>{forbiddenRefresh++;throw Error('MUST_NOT_REFRESH');},
+     read:()=>{forbiddenRead++;throw Error('MUST_NOT_READ');}
+   }};
+   const checked=await inspectSelectedProjectSources({scopeId:'project_a',
+     sources:[disconnected,original[1]],previous:checkpoint});
+   assert.equal(checked.observationsComplete,false);
+   assert.equal(checked.allPinnedCurrent,false);
+   assert.equal(checked.sources[0].status,'SOURCE_UNAVAILABLE');
+   assert.equal(checked.sources[0].freshness,'UNKNOWN');
+   assert.equal(checked.sources[1].freshness,'CURRENT');
+   assert.equal(checked.metrics.refreshCalls,1);
+   assert.equal(checked.metrics.pinnedReadCalls,0);
+   assert.equal(forbiddenRefresh,0);
+   assert.equal(forbiddenRead,0);
+   assert.equal(JSON.stringify(checked).includes('private host detail'),false);
+   const recovered=await inspectSelectedProjectSources({scopeId:'project_a',
+     sources:original,previous:checkpoint});
+   assert.equal(recovered.allPinnedCurrent,true);
+   assert.deepEqual(recovered.sources.map(x=>x.freshness),['CURRENT','CURRENT']);
+ } finally {await rm(root,{recursive:true,force:true});}
+});
+
 test('ambiguous unchanged revision with different contentRef fails closed',async()=>{
  const digest1='sha256:'+'a'.repeat(64),digest2='sha256:'+'b'.repeat(64);
  const d=sourceDescriptor({providerId:'host.file',sourceRef:'host://consistent'});

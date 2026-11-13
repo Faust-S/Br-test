@@ -61,9 +61,18 @@ export async function readSelectedProjectSources({scopeId, sources, previous = n
   for (const selected of sources) {
     const start = performance.now();
     const {key, port, format} = selected;
-    const d = port.describe();
-    if (!validDescriptor(d)) throw Error('PROJECT_SOURCE_DESCRIPTOR_INVALID');
     const previousGood = prior.get(key) ?? null;
+    let d;
+    try {d = port.describe();}
+    catch {
+      // The owner may disappear before selection can be resolved. Do not
+      // abort other permitted sources or expose host exception details.
+      rows.push({key,format,providerId:null,sourceRef:null,
+        authority:OBSERVATION_AUTHORITY,status:'SOURCE_UNAVAILABLE',
+        change:'UNKNOWN',lastKnown:previousGood,elapsedMs:elapsed(start)});
+      continue;
+    }
+    if (!validDescriptor(d)) throw Error('PROJECT_SOURCE_DESCRIPTOR_INVALID');
     const base = {key, format, providerId: d.providerId, sourceRef: d.sourceRef,
       authority: OBSERVATION_AUTHORITY};
     const row = (status, change, rest = {}) => ({...base, status, change,
@@ -199,7 +208,16 @@ export async function inspectSelectedProjectSources({scopeId, sources, previous 
   const begin = performance.now();
   for (const {key, format, port} of selected) {
     const start = performance.now();
-    const descriptor = port.describe();
+    let descriptor;
+    try {descriptor = port.describe();}
+    catch {
+      // A disconnected native owner is an unavailable saved source, not
+      // an exception that aborts restoration of every other source.
+      rows.push({key,format,providerId:null,sourceRef:null,
+        authority:OBSERVATION_AUTHORITY,status:'SOURCE_UNAVAILABLE',
+        freshness:'UNKNOWN',change:'UNKNOWN',elapsedMs:elapsed(start)});
+      continue;
+    }
     if (!validDescriptor(descriptor)) throw Error('PROJECT_SOURCE_DESCRIPTOR_INVALID');
     const saved = prior.get(key) ?? null;
     const base = {key, format, providerId: descriptor.providerId,

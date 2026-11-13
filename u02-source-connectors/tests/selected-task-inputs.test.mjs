@@ -266,6 +266,43 @@ test('Task inputs: cancellation in revalidation skips later owner refreshes',asy
  assert.equal(result.metrics.revalidation.pinnedReadCalls,0);
 });
 
+test('disconnected host owner does not crash Task preparation or publish partial input',async()=>{
+ const p=await fixture();
+ try{
+   const selection=p.select();
+   let refreshes=0,reads=0;
+   const disconnected={...selection[0],port:{
+     describe:()=>{throw Error('private native source not available');},
+     refresh:()=>{refreshes++;throw Error('FORBIDDEN_REFRESH');},
+     read:()=>{reads++;throw Error('FORBIDDEN_READ');}
+   }};
+   const incomplete=await prepareSelectedTaskSources({scopeId:'workspace_1',
+     sources:[disconnected,selection[1]]});
+   assert.equal(incomplete.status,'INCOMPLETE');
+   assert.equal(incomplete.ready,false);
+   assert.equal(incomplete.checkpoint,null);
+   assert.deepEqual(incomplete.observations,[]);
+   assert.equal(incomplete.issues.length,1);
+   assert.deepEqual([incomplete.issues[0].key,incomplete.issues[0].status],
+     ['plan','SOURCE_UNAVAILABLE']);
+   assert.equal(incomplete.metrics.read.refreshCalls,1);
+   assert.equal(incomplete.metrics.read.pinnedReadCalls,1);
+   assert.equal(incomplete.metrics.revalidation,null);
+   assert.equal(refreshes,0);
+   assert.equal(reads,0);
+   assert.equal(JSON.stringify(incomplete).includes('private native'),false);
+   const restored=await prepareSelectedTaskSources({scopeId:'workspace_1',sources:p.select()});
+   assert.equal(restored.status,'READY');
+   const historical=await inspectSavedTaskSources({scopeId:'workspace_1',
+     sources:[disconnected,selection[1]],previous:restored.checkpoint});
+   assert.equal(historical.status,'INCOMPLETE');
+   assert.equal(historical.issues[0].status,'SOURCE_UNAVAILABLE');
+   assert.equal(historical.checkpointCoverage.matchesCheckpoint,true);
+   assert.equal(historical.checkpoint,null);
+   assert.deepEqual(historical.observations,[]);
+ } finally {await rm(p.root,{recursive:true,force:true});}
+});
+
 test('saved Task inspection never promotes partial or stale sources into new evidence',async()=>{
  const p=await fixture();
  try{
