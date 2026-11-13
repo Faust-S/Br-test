@@ -14,6 +14,10 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
   // program, operation mapping and connection epoch stayed unchanged.
   const observe = async () => {
     const selected = await getBindings();
+    // The owner may mutate a shared bindings object while the async U01
+    // observation is in flight. Refuse before host.attach rather than silently
+    // attaching whichever program happens to be selected after the await.
+    const selectionAtStart = JSON.stringify(selected);
     let source = null;
     const observations = await observeU01CapabilitiesAsync({
       capabilities: async request => {
@@ -34,7 +38,8 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
            source.connected,source.connection_epoch??null,operations]
         : null,
     });
-    return {observations,identity};
+    return {observations,identity,
+      selectionChanged: JSON.stringify(selected) !== selectionAtStart};
   };
   const refusedInFlight = () => ({attached: false,
     assessment: {compatible: false, reasons: ['U03_HOST_ATTACH_IN_PROGRESS']}, hostReceipt: null});
@@ -47,6 +52,9 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
       attaching = true;
       try {
         const before = await observe();
+        if (before.selectionChanged)
+          return {attached:false,assessment:{compatible:false,
+            reasons:['U03_HOST_OBSERVATION_CHANGED']},hostReceipt:null};
         const result = await adapter.attach(owner, before.observations);
         if (!result.attached) return result;
         const ref = result.hostReceipt?.bindingRef;
@@ -63,7 +71,7 @@ export function bindModuleToU01Host({descriptor, host, port, getBindings, hooks}
         } catch {
           assessment = {compatible: false, reasons: ['U03_HOST_OBSERVATION_LOST']};
         }
-        if (assessment.compatible &&
+        if (assessment.compatible && !after.selectionChanged &&
             JSON.stringify(before.observations) === JSON.stringify(after.observations) &&
             before.identity === after.identity)
           return result;

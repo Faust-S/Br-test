@@ -26,6 +26,10 @@ class U03HostBinding:
         # Stable receipt references can be reused across different programs,
         # operation mappings or connection epochs: all three are owner identity.
         selected = self._get_bindings()
+        # The owning program/operation/receipt selection can mutate inside
+        # capabilities() (e.g. a user switches projects). Never attach against
+        # the new values under an observation started for the old selection.
+        selected_at_start = deepcopy(selected)
         actual = [None]
         connection = self._connection
 
@@ -52,7 +56,7 @@ class U03HostBinding:
         else:
             owner_identity = None
         identity = (selected['programId'], mapping, owner_identity)
-        return observations, identity
+        return observations, identity, selected != selected_at_start
 
     def _observations(self):
         return self._snapshot()[0]
@@ -67,7 +71,12 @@ class U03HostBinding:
                                    'reasons': ['U03_HOST_ATTACH_IN_PROGRESS']},
                     'hostReceipt': None}
         try:
-            before, owner_before = self._snapshot()
+            before, owner_before, before_changed = self._snapshot()
+            if before_changed:
+                return {'attached': False,
+                        'assessment': {'compatible': False,
+                                       'reasons': ['U03_HOST_OBSERVATION_CHANGED']},
+                        'hostReceipt': None}
             result = self._adapter.attach(deepcopy(self._host), before)
             if not result['attached']:
                 return result
@@ -80,13 +89,14 @@ class U03HostBinding:
                         'hostReceipt': receipt,
                         'rollback': 'UNCONFIRMED', 'hostState': 'UNKNOWN'}
             try:
-                after, owner_after = self._snapshot()
+                after, owner_after, after_changed = self._snapshot()
                 assessment = assess(self.describe(), deepcopy(self._host), after)
             except Exception:
                 after = None
                 owner_after = None
+                after_changed = True
                 assessment = {'compatible': False, 'reasons': ['U03_HOST_OBSERVATION_LOST']}
-            if assessment['compatible'] and before == after and owner_before == owner_after:
+            if assessment['compatible'] and not after_changed and before == after and owner_before == owner_after:
                 return result
             if assessment['compatible']:
                 assessment = {'compatible': False, 'reasons': ['U03_HOST_OBSERVATION_CHANGED']}
