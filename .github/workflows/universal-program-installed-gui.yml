@@ -75,6 +75,33 @@ jobs:
             out.write('IWXA_CLI_CATALOG='+str(Path('universal-install/catalog/cli-connectors-1.json').resolve())+'\n')
           print('GUI_PINNED_JQ_INSTALL_PASS')
           '@ | python -
+      - name: Current U01 fast inventory and verified connect on the installed jq
+        shell: pwsh
+        run: |
+          @'
+          import json,os,sys
+          from pathlib import Path
+          sys.path.insert(0,'universal-install')
+          from iwxa_universal_install.program_connection import CliConnection
+          from iwxa_universal_install.managed import _native_platform
+          catalog=json.loads(Path('universal-install/catalog/cli-connectors-1.json').read_text(encoding='utf8'))
+          spec=next(dict(row) for row in catalog['programs'] if row['program_id']=='JQ_CLI_V1')
+          release=json.loads(Path('universal-install/catalog/jq-1.8.1.json').read_text(encoding='utf8'))
+          spec['executable_sha256']=release['platforms'][_native_platform()]['sha256']
+          executable=Path(os.environ['IWXA_CLI_EXECUTABLE'])
+          connection=CliConnection(spec,str(executable))
+          quick=connection.inspect(verify_pin=False)
+          assert quick['status']=='DISCOVERED'
+          assert quick['installation_verified'] is False
+          assert quick['installation_reason']=='PIN_CHECK_DEFERRED'
+          ready=connection.connect()
+          assert ready['status']=='CONNECTED'
+          assert ready['installation_verified'] is True
+          assert ready['installation_identity']['sha256']==spec['executable_sha256']
+          assert connection.invoke('evaluate',{'expression':'6*7'})['output'].strip()=='42'
+          print('U01_NATIVE_JQ_FAST_INVENTORY_VERIFIED_CONNECT_PASS')
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw 'U01_NATIVE_JQ_FAST_INVENTORY_FAILED'}
       - name: Install native Windows UI automation tools
         shell: pwsh
         run: python -m pip install pywinauto==0.6.9 pillow==11.3.0 psutil==7.0.0
