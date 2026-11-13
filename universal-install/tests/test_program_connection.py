@@ -147,6 +147,23 @@ class CliProcessHostTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "CLI_VERIFY_PIN_INVALID"):
             conn.inspect(verify_pin="false")
 
+    def test_agent05_deferred_inventory_cannot_authorize_wrong_binary(self):
+        executable = str(Path(sys.executable).resolve())
+        spec = {
+            "schema": "IWXA_CLI_PROGRAM/1",
+            "program_id": "PYTHON_AGENT05_DEFERRED_MISMATCH",
+            "executable_name": Path(executable).name,
+            "executable_sha256": "0" * 64,
+            "version_args": ["--version"], "version_contains": "Python",
+            "operations": {"compute": ["-c", "print(42)"]},
+        }
+        conn = CliConnection(spec, executable)
+        inventory = conn.inspect(verify_pin=False)
+        self.assertEqual(inventory["status"], "DISCOVERED")
+        self.assertEqual(inventory["installation_reason"], "PIN_CHECK_DEFERRED")
+        self.assertEqual(conn.connect()["status"], "INSTALLATION_MISMATCH")
+        self.assertEqual(conn.invoke("compute")["executionOutcome"], "NONE")
+
     def test_pinned_installation_digest_mismatch_is_not_a_connected_program(self):
         executable = str(Path(sys.executable).resolve())
         spec = {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "PYTHON_PIN_MISMATCH",
