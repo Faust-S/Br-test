@@ -365,3 +365,37 @@ class MutableSelectionDuringReadTests(unittest.TestCase):
                                  ['U03_HOST_OBSERVATION_CHANGED'])
                 self.assertIsNone(outcome['hostReceipt'])
                 self.assertEqual(counts,{'reads':1,'attaches':0,'detaches':0})
+
+
+class MutableReceiptOnSecondObservation(unittest.TestCase):
+    def test_mutation_after_host_action_rolls_back_instead_of_accepting_stale_proof(self):
+        from copy import deepcopy
+        selected={**deepcopy(CFG),'receipts':{'evaluate':receipt(EPOCH_A)}}
+        counters={'reads':0,'attaches':0}
+        detach_refs=[]
+        class ConnectionWithReceiptChange:
+            def capabilities(self):
+                counters['reads']+=1
+                if counters['reads']==2:
+                    selected['receipts']['evaluate']['observation']['output']='43'
+                return {'schema':SCHEMA,'program_id':'JQ_CLI_V1',
+                        'transport':'cli','status':'DECLARED','connected':True,
+                        'connection_epoch':EPOCH_A,
+                        'operations':[{'name':'evaluate','declared':True,'verified':True}]}
+        def attach(*_):
+            counters['attaches']+=1
+            return {'attached':True,'bindingRef':'host:one-attach'}
+        def detach(ref):
+            detach_refs.append(ref)
+            return {'detached':True,'bindingRef':ref}
+        bridge=U03HostBinding(DESC,{'hostId':'iwxa.host.agent','version':'0.1.0'},
+                             ConnectionWithReceiptChange(),lambda:selected,
+                             attach,detach)
+        result=bridge.attach()
+        self.assertFalse(result['attached'])
+        self.assertEqual(result['assessment']['reasons'],
+                         ['U03_HOST_OBSERVATION_CHANGED'])
+        self.assertEqual(result['rollback'],'DETACHED')
+        self.assertEqual(result['hostState'],'DETACHED')
+        self.assertEqual(detach_refs,['host:one-attach'])
+        self.assertEqual(counters,{'reads':2,'attaches':1})

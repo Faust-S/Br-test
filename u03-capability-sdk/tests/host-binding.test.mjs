@@ -381,3 +381,31 @@ test('selection mutated during FIRST U01 observation must not attach a different
   assert.equal(detaches,0);
  }
 });
+
+
+test('receipt mutated during SECOND U01 observation rolls back the one host attach',async()=>{
+ const selected={...cfg,receipts:{evaluate:receipt(epochA)}};
+ let reads=0,attached=0;
+ const detached=[];
+ const bridge=bindModuleToU01Host({
+   descriptor:desc,host:{hostId:'iwxa.host.admin-center',version:'0.1.0'},
+   port:{capabilities:async()=>{
+     reads++;
+     if(reads===2)selected.receipts.evaluate.observation.output='43';
+     return source(epochA);
+   }},
+   getBindings:()=>selected,
+   hooks:{
+     attach:async()=>{attached++;return {attached:true,bindingRef:'host:one-attach'};},
+     detach:async ref=>{detached.push(ref);return {detached:true,bindingRef:ref};}
+   }
+ });
+ const result=await bridge.attach();
+ assert.equal(result.attached,false);
+ assert.deepEqual(result.assessment.reasons,['U03_HOST_OBSERVATION_CHANGED']);
+ assert.equal(result.rollback,'DETACHED');
+ assert.equal(result.hostState,'DETACHED');
+ assert.deepEqual(detached,['host:one-attach']);
+ assert.equal(reads,2,'one old and one new U01 observation, no extra probe');
+ assert.equal(attached,1);
+});
