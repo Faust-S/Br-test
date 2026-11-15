@@ -60,8 +60,9 @@ class PortTests(unittest.TestCase):
             self.controller, provider_id="obscura",binding_digest="b"*64,
             descriptor_digest={
                 "web.fetch":"a"*64,"web.inspect":"a"*64,
-                "web.follow_link":"a"*64,"web.click_control":"a"*64,
-            })
+                "web.follow_link":"a"*64,"web.list_links":"a"*64,
+                "web.click_control":"a"*64,
+            }, enable_experimental_click=True)
 
     def test_fetch_returns_observation_without_side_effect_claim(self):
         with patch.object(ObscuraInteractiveController,"observe",
@@ -81,6 +82,33 @@ class PortTests(unittest.TestCase):
             result=self.port.invoke(DummyRequest(
                 "web.follow_link",{"url":"https://example.org/","selector":"a"}))
         self.assertEqual(result["external_effect_state"],"NONE")
+
+    def test_list_links_read_only_and_uses_controller(self):
+        with patch.object(ObscuraInteractiveController, "list_links",
+                          return_value={"links": [{"url": "https://example.org/next"}]}) as call:
+            result = self.port.invoke(DummyRequest("web.list_links",
+                                                  {"url": "https://example.org/"}))
+        self.assertEqual(result["data"]["links"][0]["url"], "https://example.org/next")
+        self.assertEqual(result["external_effect_state"], "NONE")
+        call.assert_called_once_with("https://example.org/")
+
+    def test_list_links_rejects_unbound_limit(self):
+        with self.assertRaisesRegex(PortError, "PORT_PROTOCOL_ERROR"):
+            self.port.invoke(DummyRequest("web.list_links",
+                                          {"url": "https://example.org/", "max_links": 1000}))
+
+    def test_default_port_never_dispatches_unqualified_click(self):
+        port = ObscuraAgentToolPort(
+            self.controller, provider_id="obscura", binding_digest="b"*64,
+            descriptor_digest={"web.click_control": "a"*64},
+        )
+        args={"url":"https://example.org/","selector":"button","confirmation_selector":"#done","expected_text":"Done"}
+        with patch.object(ObscuraInteractiveController, "click_control") as click:
+            with self.assertRaises(PortError) as caught:
+                port.invoke(DummyRequest("web.click_control", args,
+                                         idempotency="key", plan="c"*64))
+        self.assertEqual(caught.exception.code, "PORT_UNAVAILABLE")
+        click.assert_not_called()
 
     def test_action_requires_plan_and_idempotency(self):
         args={"url":"https://example.org/","selector":"button","confirmation_selector":"#done","expected_text":"Done"}
