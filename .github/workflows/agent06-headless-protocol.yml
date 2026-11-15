@@ -4,6 +4,8 @@ on:
     branches: [work/2026-11-15-agent06-headless-obscura]
     paths:
       - 'agent-headless/**'
+      - 'universal-install/qualification/agent06_unsigned_release_candidate.py'
+      - 'universal-install/tests/test_agent06_unsigned_release_candidate.py'
       - '.github/workflows/agent06-headless-protocol.yml'
   workflow_dispatch:
 permissions:
@@ -27,3 +29,4 @@ jobs:
           set -euo pipefail
           python -m compileall -q agent-headless/iwxa_obscura agent-headless/qualification
           python -m unittest discover -s agent-headless/tests -p 'test_*.py' -v
+          python -m unittest discover -s universal-install/tests -p 'test_agent06_unsigned_release_candidate.py' -v
