@@ -17,6 +17,7 @@ import json,os,sys,time
 print("IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER", flush=True)
 assert os.environ["IWXA_OBSCURA_ALLOWED_ORIGIN"] == "https://example.org"
 url = "https://example.org/"
+clicked = False
 for line in sys.stdin:
     c=json.loads(line)
     cmd=c["cmd"]
@@ -33,9 +34,12 @@ for line in sys.stdin:
                 result["href"]="https://other.org/next"
         elif "dispatched:true" in expr:
             result={"dispatched":True}
-            if url.endswith("/not-clickable"):result={"dispatched":False}
+            clicked=True
+            if url.endswith("/not-clickable"):
+                result={"dispatched":False}
+                clicked=False
         elif "String(n.textContent)" in expr:
-            result="Confirmed" if url.endswith("/confirmed") else "Visible content"
+            result="Confirmed" if clicked and url.endswith("/confirmed") else "Visible content"
         else:result=None
     elif cmd in ("dump_text","dump_html"):
         result="real data from "+url
