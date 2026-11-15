@@ -112,7 +112,7 @@ diff --git a/crates/obscura-net/src/wreq_client.rs b/crates/obscura-net/src/wreq
 +         unsafe { std::env::set_var(key, "https://example.org"); }
 +         let client = super::StealthHttpClient::with_proxy(
 +             std::sync::Arc::new(crate::cookies::CookieJar::new()), None, false);
-+         let url = url::Url::parse("https://other.example.org/path").unwrap();
++         let url = url::Url::parse("http://127.0.0.1:1/").unwrap();
 +         let headers = std::collections::HashMap::new();
 +         let result = client.send_single("GET", &url, &headers, &[], false, false).await;
 +         if let Some(value) = previous {
