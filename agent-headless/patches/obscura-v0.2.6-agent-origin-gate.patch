@@ -91,7 +91,7 @@ diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
 diff --git a/crates/obscura-net/src/wreq_client.rs b/crates/obscura-net/src/wreq_client.rs
 --- a/crates/obscura-net/src/wreq_client.rs
 +++ b/crates/obscura-net/src/wreq_client.rs
-@@ -582,6 +582,12 @@
+@@ -582,5 +582,11 @@
          max_body_bytes: usize,
      ) -> Result<StealthResponseHeaders, ObscuraNetError> {
 +        // Scripted fetch/XHR uses this separate transport path. When the
