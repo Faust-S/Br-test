@@ -104,7 +104,7 @@ def files_binary_write_candidate(candidate: DocumentCandidate, *,
     }
     return {"operation": "files.write_binary", "target": destination_path,
             "arguments": args, "risk": "medium", "reversible": True,
-            "description": candidate.summary}
+            }
 
 
 def _docx_entries(raw: bytes) -> tuple[list, dict[str, bytes]]:
