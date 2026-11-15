@@ -1,0 +1,135 @@
+name: Agent 0.6 headless Obscura native qualification
+on:
+  push:
+    branches:
+      - work/2026-11-15-agent06-headless-obscura
+    paths:
+      - 'agent-headless/**'
+      - '.github/workflows/agent06-headless-obscura.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-headless:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    steps:
+      - name: Checkout public IWXA code
+        uses: actions/checkout@v4
+      - name: Checkout pinned original Obscura
+        uses: actions/checkout@v4
+        with:
+          repository: h4ckf0r0day/obscura
+          ref: 8534b401898ed17b62f69bdc3d5eb186bffb0d60
+          path: upstream
+          persist-credentials: false
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Rust build cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: upstream
+          key: agent06-headless-real
+      - name: Linux native prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y build-essential pkg-config libssl-dev
+      - name: Python protocol and installation regression suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s agent-headless/tests -p 'test_*.py' -v
+          PYTHONPATH=agent-headless:universal-install python -m unittest discover -s universal-install/tests -p 'test_*.py' -v
+      - name: Install resource sampler
+        shell: bash
+        run: python -m pip install psutil==7.0.0
+      - name: Verify original pinned source
+        shell: bash
+        run: |
+          test "$(cd upstream && git rev-parse HEAD)" = "8534b401898ed17b62f69bdc3d5eb186bffb0d60"
+      - name: Compile original unpatched headless worker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --manifest-path upstream/Cargo.toml --locked --release -p obscura-cli --bin obscura-worker
+          mkdir -p baseline
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            cp upstream/target/release/obscura-worker.exe baseline/obscura-worker.exe
+          else
+            cp upstream/target/release/obscura-worker baseline/obscura-worker
+          fi
+      - name: Apply specialized non-GUI origin gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd upstream && git apply --check ../agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch)
+          (cd upstream && git apply ../agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch)
+          cargo test --manifest-path upstream/Cargo.toml --locked -p obscura-net iwxa_agent_origin_guard_tests
+      - name: Compile actual patched headless worker
+        shell: bash
+        run: |
+          cargo build --manifest-path upstream/Cargo.toml --locked --release -p obscura-cli --bin obscura-worker
+      - name: Qualified native installation, greeting, restart and removal
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/agent06-headless
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            patched="upstream/target/release/obscura-worker.exe"
+          else
+            patched="upstream/target/release/obscura-worker"
+          fi
+          python universal-install/qualification/native_obscura_install.py \
+            --binary "$patched" \
+            --patch agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch \
+            --report artifacts/agent06-headless/installed.json
+      - name: Same-runner baseline and patched native benchmark
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            exe="obscura-worker.exe"
+          else
+            exe="obscura-worker"
+          fi
+          python agent-headless/qualification/compare_native.py \
+            --baseline "baseline/$exe" --patched "upstream/target/release/$exe" \
+            --url https://example.com/ --url https://example.org/ \
+            --runs 2 --timeout 45 \
+            --report artifacts/agent06-headless/baseline-comparison.json
+      - name: Real native HTTPS navigation DOM extraction and same-origin link
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            exe="obscura-worker.exe"
+          else
+            exe="obscura-worker"
+          fi
+          binary="upstream/target/release/$exe"
+          digest="$(python -c "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())" "$binary")"
+          python agent-headless/qualification/interactive_native.py \
+            --worker "$binary" --sha256 "$digest" \
+            --page https://example.com/ --page https://example.org/ \
+            --link-url https://www.python.org/ \
+            --link-selector 'a[href^="/"]' \
+            --iterations 2 --timeout 45 \
+            --report artifacts/agent06-headless/interactive-native.json
+      - name: Upload public-only numerical evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent06-headless-${{ matrix.os }}
+          path: artifacts/agent06-headless/
+          if-no-files-found: warn
+          retention-days: 14
