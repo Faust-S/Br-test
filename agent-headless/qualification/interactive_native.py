@@ -83,16 +83,35 @@ def qualify(binary: Path, pin: str, *, pages: list[str], link_url: str,
         }
     except ObscuraControllerError as error:
         follow = {"passed": False, "failure_code": error.code}
+    discovered = {"passed": False}
+    try:
+        listing = controller.list_links(link_url, max_links=50)
+        expected = follow.get("selected_href")
+        discovered = {
+            "passed": bool(expected) and any(
+                link["url"] == expected for link in listing["links"]),
+            "listed": len(listing["links"]),
+            "candidate_count": listing["candidate_count"],
+            "result_limit": listing["result_limit"],
+            "selected_link_present": any(
+                link["url"] == expected for link in listing["links"]),
+            "read_only": listing["external_effect_state"] == "NONE",
+            "elapsed_ms": listing["elapsed_ms"],
+        }
+    except ObscuraControllerError as error:
+        discovered = {"passed": False, "failure_code": error.code}
     times = [x["fetch_elapsed_ms"] for x in rows if x["passed"]]
     return {
         "schema": "IWXA_OBSCURA_AGENT06_NATIVE_QUALIFICATION/1.0",
         "platform": sys.platform, "binary_sha256": pin,
         "independent_https_pages": len(pages), "iterations": iterations,
         "navigation_and_dom": rows, "follow_link": follow,
+        "list_links": discovered,
         "median_fetch_elapsed_ms": statistics.median(times) if times else None,
         "cold_worker_each_operation": True, "gui": False,
         "remote_write_accepted": False,
-        "status": "PASS" if all(x["passed"] for x in rows) and follow["passed"] else "HOLD",
+        "status": "PASS" if all(x["passed"] for x in rows)
+                 and follow["passed"] and discovered["passed"] else "HOLD",
     }
 
 
@@ -121,7 +140,8 @@ def main():
     args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"status": report["status"], "checks": len(report["navigation_and_dom"]),
                       "passed": sum(x["passed"] for x in report["navigation_and_dom"]),
-                      "follow": report["follow_link"]["passed"]}))
+                      "follow": report["follow_link"]["passed"],
+                      "link_discovery": report["list_links"]["passed"]}))
     return 0 if report["status"] == "PASS" else 2
 
 
