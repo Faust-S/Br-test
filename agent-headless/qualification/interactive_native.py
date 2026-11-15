@@ -75,6 +75,7 @@ def qualify(binary: Path, pin: str, *, pages: list[str], link_url: str,
                       and result["content_bytes"] > 0
                       and result["selected_href"] != result["source_final_url"],
             "source_final_url": result["source_final_url"],
+            "selected_href": result["selected_href"],
             "final_url": result["final_url"],
             "http_status": result["http_status"],
             "content_sha256": result["content_sha256"],
