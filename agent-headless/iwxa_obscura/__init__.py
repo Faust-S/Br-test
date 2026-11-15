@@ -8,3 +8,6 @@ from .trust import PinnedCABundle, CertificateTrustError
 from .worker import ObscuraWorkerController, WorkerObservation
 
 from .preparer import ArtifactSpec, PreparedArtifact, ObscuraArtifactPreparer, ArtifactPreparationError
+
+from .interaction import ObscuraInteractiveController, ObscuraInteractionError
+__all__ += ["ObscuraInteractiveController", "ObscuraInteractionError"]
