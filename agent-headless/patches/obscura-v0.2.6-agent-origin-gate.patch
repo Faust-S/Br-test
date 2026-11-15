@@ -58,7 +58,17 @@ diff --git a/crates/obscura-net/src/client.rs b/crates/obscura-net/src/client.rs
 diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
 --- a/crates/obscura-cli/src/worker.rs
 +++ b/crates/obscura-cli/src/worker.rs
-@@ -72,4 +72,20 @@
+@@ -16,6 +16,8 @@
+     },
+     #[serde(rename = "evaluate")]
+     Evaluate { expression: String },
++    #[serde(rename = "sync_navigation")]
++    SyncNavigation,
+     #[serde(rename = "title")]
+     Title,
+     #[serde(rename = "dump_html")]
+@@ -71,6 +73,22 @@
+ 
  #[tokio::main(flavor = "current_thread")]
  async fn main() {
 +    // Probe the pinned IWXA no-render build, before creating V8/network context.
@@ -79,7 +89,9 @@ diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
 +    }
      tracing_subscriber::fmt()
          .with_env_filter("warn")
-@@ -99,3 +115,8 @@
+         .with_writer(std::io::stderr)
+@@ -98,6 +116,11 @@
+ 
      let stdin = tokio::io::stdin();
      let mut stdout = tokio::io::stdout();
 +    // Agent must verify the guard before sending the first navigation.
@@ -88,6 +100,38 @@ diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
 +        return;
 +    }
      let mut reader = BufReader::new(stdin);
+     let mut line = String::new();
+ 
+@@ -172,6 +195,29 @@
+                 };
+                 WorkerResponse::success(result)
+             }
++            // Evaluate intentionally does not advance page navigation. Only
++            // the explicitly invoked action workflow may process its queued
++            // click/form navigation, preserving existing upstream semantics.
++            WorkerCommand::SyncNavigation => {
++                match page.process_pending_navigation().await {
++                    Ok(navigated) => {
++                        let status = page.network_events.iter()
++                            .find(|event| event.resource_type == "Document")
++                            .filter(|event| {
++                                event.status != 0
++                                    && (event.url.starts_with("http://") || event.url.starts_with("https://"))
++                            })
++                            .map(|event| event.status);
++                        WorkerResponse::success(serde_json::json!({
++                            "navigated": navigated,
++                            "title": page.title,
++                            "url": page.url_string(),
++                            "status": status,
++                        }))
++                    },
++                    Err(e) => WorkerResponse::error(e.to_string()),
++                }
++            }
+             WorkerCommand::Title => {
+                 WorkerResponse::success(serde_json::json!(page.title))
+             }
 diff --git a/crates/obscura-net/src/wreq_client.rs b/crates/obscura-net/src/wreq_client.rs
 --- a/crates/obscura-net/src/wreq_client.rs
 +++ b/crates/obscura-net/src/wreq_client.rs
