@@ -32,6 +32,19 @@ for line in sys.stdin:
             result={"href":"https://example.org/next","text":"Next"}
             if url.endswith("/foreign-link"):
                 result["href"]="https://other.org/next"
+        elif "querySelectorAll('a[href]')" in expr:
+            if url.endswith("/bad-links"):
+                result={"invalid":"array_required"}
+            elif url.endswith("/no-links"):
+                result=[]
+            else:
+                result=[
+                    {"href":"https://example.org/next#fragment","text":"Next page"},
+                    {"href":"https://elsewhere.org/untrusted","text":"External"},
+                    {"href":"https://example.org/next","text":"Duplicate"},
+                    {"href":"https://example.org/help","text":"Help"},
+                    {"href":"javascript:alert(1)","text":"Unsafe"},
+                ]
         elif "dispatched:true" in expr:
             result={"dispatched":True}
             clicked=True
@@ -79,6 +92,30 @@ class InteractionTests(unittest.TestCase):
         self.assertEqual(result["final_url"], "https://example.org/next")
         self.assertIn("/next", result["content"])
         self.assertEqual(result["external_effect_state"], "NONE")
+
+    def test_discover_same_origin_links_deduplicated(self):
+        result = self.controller.list_links("https://example.org/start")
+        self.assertEqual([item["url"] for item in result["links"]], [
+            "https://example.org/next", "https://example.org/help",
+        ])
+        self.assertEqual(result["links"][0]["text"], "Next page")
+        self.assertEqual(result["candidate_count"], 5)
+        self.assertEqual(result["external_effect_state"], "NONE")
+
+    def test_link_list_limit_and_empty_list(self):
+        result = self.controller.list_links("https://example.org/start", max_links=1)
+        self.assertEqual(len(result["links"]), 1)
+        self.assertTrue(result["possibly_truncated"])
+        empty = self.controller.list_links("https://example.org/no-links")
+        self.assertEqual(empty["links"], [])
+        self.assertFalse(empty["possibly_truncated"])
+
+    def test_link_list_denies_bad_limit_or_worker_payload(self):
+        for limit in (0, 101, True, "3"):
+            with self.assertRaisesRegex(ObscuraInteractionError, "DOM_LINK_LIMIT_DENIED"):
+                self.controller.list_links("https://example.org/start", max_links=limit)
+        with self.assertRaisesRegex(ObscuraInteractionError, "DOM_LINK_LIST_INVALID"):
+            self.controller.list_links("https://example.org/bad-links")
 
     def test_cross_origin_link_rejected_before_second_navigation(self):
         with self.assertRaisesRegex(ObscuraInteractionError, "ORIGIN_DENIED"):
