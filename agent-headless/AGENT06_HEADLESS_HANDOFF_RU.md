@@ -1,48 +1,135 @@
-# IWXA Agent 0.6 - Headless Obscura handoff
+# IWXA Agent 0.6: передача компонента Headless Obscura
 
-Public branch: work/2026-11-15-agent06-headless-obscura in Faust-S/Br-test.
+Дата: 15.11.2026. Публичный репозиторий: Faust-S/Br-test. Независимая ветка:
+`work/2026-11-15-agent06-headless-obscura`. Общая ветка закрытого
+`Faust-S/iwxa-personal-agent@work/2026-11-15-agent-0-6-development` не изменялась.
 
-## Existing code reused
-- Original h4ckf0r0day/obscura at pinned commit 8534b401898ed17b62f69bdc3d5eb186bffb0d60.
-- Retained agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch. This is a transport-origin gate and no-render handshake, NOT a GUI patch or an OS network sandbox.
-- Existing ObscuraWorkerController, ObscuraArtifactPreparer, ObscuraManagedBackend and original native JSONL worker.
-- Existing Agent ToolProviderPort and U01 installation/lifecycle owners. No new browser engine or Task Engine.
+## Решение и границы
 
-## New public components
-- agent-headless/iwxa_obscura/interaction.py: ObscuraInteractiveController with bounded inspect(url, selector), follow_link(url, selector), click_control(url, selector, confirmation_selector, expected_text). The latter is a reviewed DOM action, not attested remote success.
-- agent-headless/iwxa_obscura/agent_port.py: opt-in adapter for web.fetch, web.inspect, web.follow_link, web.click_control, with individual descriptor digests, binding digest and provider identity. Private ToolProviderPort result types are imported only when invoked.
-- agent-headless/tests/test_interaction.py: protocol and lifecycle tests using a fake subprocess, NOT native browser acceptance.
-- agent-headless/qualification/compare_native.py: same-runner upstream versus patched native worker benchmarking of wall time, sampled RSS and CPU, content digests.
-- agent-headless/qualification/interactive_native.py: real public HTTPS navigation, actual body DOM reads, same-origin link navigation.
-- .github/workflows/agent06-headless-obscura.yml: public Windows 2022 and Ubuntu 24.04 compilation and qualification, no private Agent code or Actions.
+Используется **оригинальный нативный Obscura worker без GUI**, исходная ревизия
+`h4ckf0r0day/obscura@8534b401898ed17b62f69bdc3d5eb186bffb0d60`.
+Браузерную отрисовку, Tauri Browser, собственный renderer и скринкасты не развивать.
+Worker использует исходный JSONL-интерфейс: `navigate`, `evaluate`, `title`,
+`dump_html`, `dump_text`, `shutdown`.
 
-## Worker protocol
-Native JSONL commands: navigate (with waitUntil), evaluate, dump_text / dump_html, shutdown.
-The controller generates narrow JS templates internally. Task input is never interpreted as arbitrary JavaScript. A fresh private temporary profile and worker process is created for each workflow. Every run verifies pinned binary SHA256, requires the IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER greeting, and reaps the worker on exit. A Windows abnormal exit also attempts taskkill /T /F to clean child processes.
+Сохранён патч `agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch`.
+Он добавляет проверку разрешённого origin в сетевом коде и приветствие
+`IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER`. В ревизии от 15.11 обнаружен
+дополнительный сетевой путь `wreq_client::send_single_headers_with_context`,
+используемый для JavaScript fetch/XHR при включённой stealth-функции: он
+не вызывал `validate_url`. Патч дополнен проверкой на этом пути; добавлен
+Rust-регрессионный тест отказа в запросе к другому origin до сети.
+**Приветствие worker не является доказательством системной сетевой изоляции.**
+Это не полноценный OS sandbox. Испытания исходного патча не переносятся
+автоматически на его новую редакцию.
 
-## Port and action contract
-web.fetch requires exact arguments {url}.
-web.inspect requires {url, selector}.
-web.follow_link requires {url, selector}.
-web.click_control requires {url, selector, confirmation_selector, expected_text}, a nonempty idempotency key, a plan digest, and the independent Agent review/permission decision.
-All requests require a matching web_acquisition binding, provider identity and per-tool descriptor digest, and read target=None; consequential target must equal the approved URL. All other providers must delegate to the existing adapter.
-Read operations report external_effect_state=NONE, referring to intended provider operation, not a guarantee against side effects of third-party scripts.
-A browser click reports external_effect_state=UNKNOWN even with its local DOM postcondition verified. Failed or interrupted clicks after dispatch also return UNKNOWN; do NOT retry automatically. A remote server-side receipt and independent readback are required to call a write accepted.
+## Переиспользовано
 
-## Installation
-Use existing U01 ManagedArtifactBackend and ObscuraArtifactPreparer with the authoritative pinned archive and worker hash, explicit approval and verified installation receipt. Stage, install, connect, update, recover and remove using existing owner flows. Do not install a second service or add GUI rendering. No unpinned worker may be activated.
+- `agent-headless/iwxa_obscura/worker.py`: исходный ограниченный WorkerController.
+- `agent-headless/iwxa_obscura/preparer.py`: подготовка закреплённого бинарника.
+- `universal-install/iwxa_universal_install/obscura.py`: действующий U01
+  ManagedArtifactBackend, операции prepare/apply/verify/recover/update/remove.
+- Закрытый Agent остаётся владельцем `PA.PORT.TOOL_PROVIDER@1.0.0`,
+  Provider Registry, ToolRuntime, планов, разрешений, Task, Human Review и Result.
 
-## Tests and limitations
-Run python -m unittest discover -s agent-headless/tests -p test_*.py -v.
-Native qualification must report real Windows worker startup, navigation, DOM and link result, shutdown, cold restart, RSS/CPU, and comparison with original under the same runner. The unpatched original lacks the native origin restriction, so the two builds do not have identical egress policy.
-Remote consequential clicks, full Agent Task/Result, and installed Agent GUI are NOT accepted by this component alone.
+## Новые исполняемые интерфейсы
 
-## Central integrator steps
-1. Keep Agent 0.6 branch unchanged until independently merging this opt-in public module.
-2. Register the four descriptor digests through current Agent registry and ToolRuntime. Do not create a second Task Engine or permission system.
-3. Bind the installed pinned worker through existing U01 approved installation receipts and ToolProviderAdapter routing.
-4. Enable web.fetch, web.inspect, web.follow_link after native acceptance. Keep web.click_control disabled until real explicit user approval, idempotency and server-side remote write readback pass.
-5. Qualify a real Task: user-selected HTTPS origin, fetch, DOM inspect, same-origin link, actual observed output, Human Review, saved Result, cold reopen and precise receipts.
-6. Run controlled Windows end-to-end authorized action, cancellation, timeout, redirect, worker tree cleanup and installed restart scenarios.
+`iwxa_obscura.interaction.ObscuraInteractiveController` запускает один
+нативный worker на одну последовательность действий. Доступные методы:
 
-Privacy: Br-test contains public code and public numerical results only. Private Agent source, keys, installed product executables and user data must not be uploaded to this repository or its public Actions artifacts.
+| Метод | Назначение | Результат |
+| --- | --- | --- |
+| `observe(url)` | Получение документа | содержимое, HTTP-статус, URL, хеш |
+| `inspect(url, selector)` | Чтение текста выбранного DOM-узла | текст и SHA-256 |
+| `follow_link(url, selector)` | Выбор существующей DOM-ссылки, реальная навигация | конечный URL, HTTP, содержимое |
+| `click_control(url, selector, confirmation_selector, expected_text)` | Отправка DOM-click и ограниченное ожидание изменения DOM | только локальное подтверждение, эффект UNKNOWN |
+
+Общий `iwxa_obscura.agent_port.ObscuraAgentToolPort` реализует действующий
+контракт с `tool_id`: `web.fetch`, `web.inspect`, `web.follow_link`,
+`web.click_control`. Проверяются отдельные descriptor digests, provider ID,
+binding digest и слот `web_acquisition`. Читающие операции не требуют
+идемпотентности; для клика нужны существующие `tool_plan_digest`,
+`idempotency_key` и `target`, в точности равный URL. Подлинное
+разрешение и проверку плана обязан выполнять действующий Agent ToolRuntime,
+а не этот публичный мост.
+
+Произвольный пользовательский JavaScript не передаётся: встроенные
+JS-выражения строятся из ограниченных DOM-шаблонов. После нажатия
+`external_effect_state=UNKNOWN` даже при подтверждённом изменении DOM:
+это **не квитанция удалённого сервера**. Автоматически повторять такой клик
+при отмене, обрыве или таймауте запрещено.
+
+## Установка без GUI
+
+1. Сверить разрешённый каталог U01 и ревизию upstream + патча.
+2. Скачать или получить архив из проверенного источника, сверить SHA-256
+   архива и исполняемого `obscura-worker(.exe)`.
+3. Через штатный `ObscuraManagedBackend` подготовить версию без активации.
+4. После явного разрешения установить в управляемый Software Root и проверить
+   фактический SHA-256. Отдельно подключить provider в текущем Agent.
+5. Для вызова начать холодный процесс без пользовательского профиля, проверить
+   `IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER`, выполнить разрешённые команды,
+   запросить `shutdown`; при ошибке уничтожить процесс и потомков.
+
+Существующий `universal-install/qualification/package_native_release.py`
+используется для формирования архива из **нативного уже проверенного** файла.
+В CI добавлена упаковка неактивного кандидата и контрольный JSON-манифест;
+это не GitHub Release, не подписанный каталог и не принятое подключение.
+
+## Измерения и доказательства
+
+Публичный `GitHub Actions #43718499462` завершился SUCCESS на Windows 2022 и
+Ubuntu 24.04 на ревизии до дополнительного stealth-патча.
+Подтверждены нативные сборка, установка, тесты guard, холодный запуск,
+обнаружение испорченного обновления, удаление, запросы к двум независимым
+HTTPS-сайтам (4/4 на каждой ОС), реальное чтение DOM и переход
+`https://www.python.org/` → `https://www.python.org/downloads/` с HTTP 200.
+
+| ОС | Медиана исходного worker | Медиана IWXA-контроллера |
+| --- | ---: | ---: |
+| Ubuntu 24.04, прогон #43718022618 | 589,5 мс | 679 мс |
+| Windows 2022, прогон #43718022618 | 601,5 мс | 711 мс |
+
+Это небольшой сравнительный набор. Исходный worker запускается напрямую,
+IWXA-вариант включает проверку SHA, приветствие и контроллер; результат
+**не выделяет отдельно стоимость Rust-патча**. RSS: около 34 МБ на Windows,
+36–37 МБ на Linux; CPU в раннем прогоне измерялся как нижняя оценка
+с интервалом 20 мс. Новая версия измерителя чередует порядок вариантов
+и на POSIX учитывает CPU завершённых дочерних процессов.
+
+Отдельный быстрый GitHub CI `#43719142772`: Python-протокол/синтаксис
+PASS на Windows и Linux. Тесты с поддельным worker не считать нативными.
+
+## Незавершённая приёмка
+
+- Новая редакция патча для stealth fetch/XHR и контрольные суммы на разных ОС
+  требуют завершившегося собственного CI-прогона.
+- Нативное разрешённое действие `click_control` проходит отдельный probe;
+  без фактического DOM-изменения статус HOLD, а не PASS.
+- Удалённая запись, серверная квитанция, независимое чтение после действия,
+  полный Agent Task → Human Review → Result → холодный readback **НЕ ПРИНЯТЫ**.
+- Поддержка Web UI не предполагает графический браузер. Код приватного Agent
+  не переносился в Br-test, приватные Actions не запускались.
+
+## Точные действия центрального интегратора
+
+1. Выбрать проверенную ревизию публичного компонента и закрепить манифест
+   собранного worker (включая новую редакцию сетевого патча).
+2. Подключить `ObscuraAgentToolPort` **как необязательный** provider к
+   существующему `ToolProviderAdapter`, с делегированием других провайдеров.
+3. Зарегистрировать только проверенные descriptor digests и соединить их
+   с существующей проверкой пользовательского разрешения в ToolRuntime.
+4. Использовать U01 для install/inspect/connect/invoke/update/recover/remove;
+   не создавать новый установщик, Kernel, Task Engine или браузер.
+5. Провести реальный Task: разрешённая страница → захват данных → DOM →
+   переход по ссылке → Human Review → сохранённый Result → холодное открытие.
+6. Держать `web.click_control` выключенным до независимой приёмки
+   разрешённого действия на контролируемом сайте с фактической серверной
+   квитанцией и исключением повторного действия при UNKNOWN.
+7. Отдельно проверить нативный Windows-процесс, закрытие дочерних процессов,
+   отмену, ошибки сети/редиректов, ресурсы и полное восстановление после
+   перезапуска установленного Agent.
+
+Приватность: только публичный `Faust-S/Br-test` и публичные runner.
+В артефакты допускаются нативные публичные бинарники, хеши и обезличенные
+статусы; закрытые исходники Agent, токены и пользовательские данные отсутствуют.
