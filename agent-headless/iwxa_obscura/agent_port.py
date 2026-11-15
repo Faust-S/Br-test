@@ -12,7 +12,7 @@ from .controller import ObscuraControllerError
 from .interaction import ObscuraInteractiveController, ObscuraInteractionError
 
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
-_READ = frozenset({"web.fetch", "web.inspect", "web.follow_link"})
+_READ = frozenset({"web.fetch", "web.inspect", "web.follow_link", "web.list_links"})
 _ACTION = "web.click_control"
 
 
@@ -22,7 +22,7 @@ class ObscuraAgentToolPort:
 
     def __init__(self, controller, *, provider_id: str,
                  binding_digest: str, descriptor_digest: str | dict[str, str],
-                 delegate: Any = None):
+                 delegate: Any = None, enable_experimental_click: bool = False):
         if not isinstance(provider_id, str) or not provider_id.strip():
             raise ValueError("provider identity required")
         if not isinstance(binding_digest, str) or _SHA.fullmatch(binding_digest) is None:
@@ -43,7 +43,12 @@ class ObscuraAgentToolPort:
         self.controller = controller
         self.provider_id = provider_id
         self.binding_digest = binding_digest
+        if type(enable_experimental_click) is not bool:
+            raise ValueError("experimental click flag must be boolean")
         self.delegate = delegate
+        # A local DOM postcondition is not a remote action receipt. Do not
+        # expose an unqualified consequential action by default.
+        self.enable_experimental_click = enable_experimental_click
 
     def invoke(self, request):
         from providers.tool_provider_port import ToolProviderPortError, ToolProviderResult
@@ -65,6 +70,8 @@ class ObscuraAgentToolPort:
         if not isinstance(args.get("url"), str):
             raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_url_required")
         is_action = operation == _ACTION
+        if is_action and not self.enable_experimental_click:
+            raise ToolProviderPortError("PORT_UNAVAILABLE", "obscura_action_not_qualified")
         if (is_action and request.target != args["url"]) or (not is_action and request.target is not None):
             raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_target_binding_denied")
         if is_action:
@@ -80,6 +87,8 @@ class ObscuraAgentToolPort:
             raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_inspect_arguments_denied")
         if operation == "web.follow_link" and set(args) != {"url", "selector"}:
             raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_follow_arguments_denied")
+        if operation == "web.list_links" and set(args) != {"url"}:
+            raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_list_links_arguments_denied")
         if operation != "web.fetch" and not isinstance(self.controller, ObscuraInteractiveController):
             raise ToolProviderPortError("PORT_UNAVAILABLE", "obscura_interactive_worker_not_qualified")
         try:
@@ -90,6 +99,8 @@ class ObscuraAgentToolPort:
                 data = self.controller.inspect(args["url"], selector=args["selector"])
             elif operation == "web.follow_link":
                 data = self.controller.follow_link(args["url"], selector=args["selector"])
+            elif operation == "web.list_links":
+                data = self.controller.list_links(args["url"])
             else:
                 data = self.controller.click_control(
                     args["url"], selector=args["selector"],
