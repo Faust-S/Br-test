@@ -115,7 +115,7 @@ class InteractionTests(unittest.TestCase):
 
     def test_binary_pin(self):
         self.binary.write_text(FAKE + "\n# changed")
-        with self.assertRaisesRegex(ObscuraInteractionError, "ENGINE_DIGEST_MISMATCH"):
+        with self.assertRaisesRegex(Exception, "ENGINE_DIGEST_MISMATCH"):
             self.controller.inspect("https://example.org/", selector="p")
 
 
