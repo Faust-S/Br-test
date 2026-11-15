@@ -54,6 +54,11 @@ for line in sys.stdin:
         elif "String(n.textContent)" in expr:
             result="Confirmed" if clicked and url.endswith("/confirmed") else "Visible content"
         else:result=None
+    elif cmd=="sync_navigation":
+        navigated=clicked and url.endswith(("/link-click","/foreign-nav"))
+        if navigated:
+            url="https://other.org/" if url.endswith("/foreign-nav") else "https://example.org/confirmed"
+        result={"navigated":navigated,"url":url,"status":200,"title":"Fixture"}
     elif cmd in ("dump_text","dump_html"):
         result="real data from "+url
     elif cmd=="shutdown":
@@ -140,7 +145,28 @@ class InteractionTests(unittest.TestCase):
             confirmation_selector="#result", expected_text="Confirmed",
         )
         self.assertTrue(result["dom_postcondition_observed"])
+        self.assertFalse(result["navigation_observed"])
+        self.assertEqual(result["final_url"], "https://example.org/confirmed")
         self.assertEqual(result["external_effect_state"], "UNKNOWN")
+
+    def test_native_pending_navigation_protocol_reports_real_final_page(self):
+        result = self.controller.click_control(
+            "https://example.org/link-click", selector="a.next",
+            confirmation_selector="#result", expected_text="Confirmed",
+        )
+        self.assertEqual(result["source_final_url"], "https://example.org/link-click")
+        self.assertEqual(result["final_url"], "https://example.org/confirmed")
+        self.assertTrue(result["navigation_observed"])
+        self.assertEqual(result["external_effect_state"], "UNKNOWN")
+
+    def test_cross_origin_navigation_after_click_keeps_unknown_effect(self):
+        with self.assertRaises(ObscuraInteractionError) as caught:
+            self.controller.click_control(
+                "https://example.org/foreign-nav", selector="a.next",
+                confirmation_selector="#result", expected_text="Confirmed",
+            )
+        self.assertEqual(caught.exception.code, "WORKER_FINAL_ORIGIN_DENIED")
+        self.assertEqual(caught.exception.external_effect_state, "UNKNOWN")
 
     def test_rejected_selector(self):
         with self.assertRaisesRegex(ObscuraInteractionError, "DOM_SELECTOR_DENIED"):
