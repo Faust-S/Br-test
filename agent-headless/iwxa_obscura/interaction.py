@@ -283,6 +283,65 @@ class ObscuraInteractiveController(ObscuraWorkerController):
             "evidence_status": "WORKER_DOM_TEXT_OBSERVED_NOT_U1_VERIFIED",
         }
 
+    def list_links(self, url: str, *, max_links: int = 50, is_cancelled=None) -> dict:
+        """Discover bounded same-origin links from the actual no-GUI DOM.
+
+        This is read-only. The worker observes the page's first bounded set
+        of anchors; the Python boundary rejects external/invalid URLs before
+        returning link candidates to Agent. A link listing is not a crawl.
+        """
+        if type(max_links) is not int or not 1 <= max_links <= 100:
+            raise ObscuraInteractionError("DOM_LINK_LIMIT_DENIED")
+        requested = approved_url(url, self.allowed_origins)
+        origin = "https://" + urlsplit(requested).hostname
+        # A page can place external links before local navigation; read a
+        # bounded surplus and filter in the trusted Python controller.
+        candidate_limit = max_links * 8
+        script = (
+            "(function(){const n=document.querySelectorAll('a[href]');"
+            "const out=[];const cap=" + str(candidate_limit) + ";"
+            "for(let i=0;i<n.length&&out.length<cap;i++){"
+            "const a=n[i];out.push({href:String(a.href),"
+            "text:String(a.textContent||'').trim().slice(0,256)});}"
+            "return out;})()"
+        )
+        with self._dialog(requested, is_cancelled=is_cancelled) as (dialog, trust, ca, start):
+            info = dialog.request({"cmd": "navigate", "url": requested, "waitUntil": self.wait_until})
+            final, status, title = self._nav_info(info, origin)
+            raw = dialog.request({"cmd": "evaluate", "expression": script})
+            if not isinstance(raw, list) or len(raw) > candidate_limit:
+                raise ObscuraInteractionError("DOM_LINK_LIST_INVALID")
+            dialog.shutdown()
+        links = []
+        seen = set()
+        for index, item in enumerate(raw):
+            if (not isinstance(item, dict) or not isinstance(item.get("href"), str)
+                    or not isinstance(item.get("text"), str)
+                    or len(item["href"]) > 4096 or len(item["text"]) > 256):
+                continue
+            try:
+                target = approved_url(item["href"], frozenset({origin}))
+            except ObscuraControllerError:
+                continue
+            if target in seen:
+                continue
+            seen.add(target)
+            links.append({"url": target, "text": item["text"].strip(), "dom_index": index})
+            if len(links) == max_links:
+                break
+        return {
+            "requested_url": requested, "final_url": final, "http_status": status,
+            "page_title": title, "links": links,
+            "candidate_count": len(raw), "candidate_limit": candidate_limit,
+            "result_limit": max_links,
+            "possibly_truncated": len(raw) >= candidate_limit or len(links) >= max_links,
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_ms": max(0, round((time.monotonic() - start) * 1000)),
+            "tls_trust": {"mode": trust, "additional_ca_bundle_sha256": ca},
+            "evidence_status": "WORKER_DOM_LINKS_OBSERVED_NOT_U1_VERIFIED",
+            "external_effect_state": "NONE",
+        }
+
     def follow_link(self, url: str, *, selector: str, format: str = "text",
                     is_cancelled=None) -> dict:
         """Follow an existing anchor on one approved origin, then read result."""
