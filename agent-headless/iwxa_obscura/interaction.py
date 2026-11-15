@@ -411,6 +411,14 @@ class ObscuraInteractiveController(ObscuraWorkerController):
                 if not isinstance(response, dict) or response.get("dispatched") is not True:
                     attempted = False if response == {"dispatched": False} else True
                     raise ObscuraInteractionError("DOM_CLICK_NOT_CONFIRMED")
+                # The upstream worker's evaluate does not process a pending
+                # navigation from an anchor click or form submit. The IWXA
+                # no-GUI command advances this exactly once; never repeat
+                # either the click or its potential remote side effect.
+                after = dialog.request({"cmd": "sync_navigation"})
+                if not isinstance(after, dict) or type(after.get("navigated")) is not bool:
+                    raise ObscuraInteractionError("WORKER_PROTOCOL_INVALID")
+                current_url, current_status, current_title = self._nav_info(after, origin)
                 # Client-side actions often update the DOM asynchronously.
                 # Poll within a strict subdeadline; never retry the click.
                 confirmation_deadline = min(dialog.deadline, time.monotonic() + 3)
@@ -429,9 +437,10 @@ class ObscuraInteractiveController(ObscuraWorkerController):
             ) from None
         raw = text.encode("utf-8")
         return {
-            "requested_url": requested, "final_url": final, "http_status": status,
-            "page_title": title, "selector": selector,
-            "confirmation_selector": confirmation_selector,
+            "requested_url": requested, "source_final_url": final,
+            "final_url": current_url, "http_status": current_status,
+            "page_title": current_title, "navigation_observed": after["navigated"],
+            "selector": selector, "confirmation_selector": confirmation_selector,
             "expected_text": expected_text, "observed_text_sha256": hashlib.sha256(raw).hexdigest(),
             "dom_postcondition_observed": True,
             "elapsed_ms": max(0, round((time.monotonic() - start) * 1000)),
