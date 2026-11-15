@@ -1,4 +1,18 @@
 # IWXA Agent 0.6: передача компонента Headless Obscura
+## 15.11.2026 — единый неподписанный U01 release candidate
+
+Публичный [CI №43739318017](https://github.com/Faust-S/Br-test/actions/runs/43739318017) на точном публичном SHA `6c4abcfd5b03f26c18ba01415958d1b5729051f5` завершён **SUCCESS** на Windows 2022, Ubuntu 24.04 и отдельном job сборки кандидата. Нативные Obscura/U01 install, recovery, Rust guard, HTTPS/DOM и проверка архива подтверждены.
+
+Реализовано в `universal-install/qualification/agent06_unsigned_release_candidate.py`: два пакета из одного CI run, проверка SHA-256 ZIP/TAR и исполняемого файла, точного единственного члена архива, upstream SHA, V2 guard, SHA-256 patch и лицензии; выдаются исходные `ArtifactSpec` U01 для Windows/Linux. Используется штатный публичный backend U01 без автоматической установки.
+
+Новый набор `universal-install/tests/test_agent06_unsigned_release_candidate.py`: 9 адресных тестов. Быстрый [CI №43739329521](https://github.com/Faust-S/Br-test/actions/runs/43739329521) — SUCCESS на обеих ОС. В полный нативный workflow добавлен post-matrix job. Выгружен только публичный artifact `agent06-u01-unsigned-release-candidate` №14172355610 (до 29.11.2026), без приватных исходников.
+
+**Уровень результата:** `IWXA_OBSCURA_U01_RELEASE_CANDIDATE/1`, `intent=AWAITING_PUBLISHER_SIGNATURE_NOT_FOR_USERS`, `signed=false`, `published=false`, `approved_for_end_user_install=false`. Это не официальный GitHub Release, не подписанный дистрибутив и не установленный Windows-продукт.
+
+**Следующий блокер:** код установленного Agent закрепляет U01 в `config/public-module-sources.json` на старом `4b177996...` и не включает `agent-headless/iwxa_obscura`. Предыдущий source CI использовал внешний checkout U01, поэтому не доказывает присутствие `iwxa_obscura` и `iwxa_universal_install` в пользовательском Setup. После утверждения и подписи выпуска необходимо включить оба оригинальных Python-модуля через штатный build-time source lock/packager, реализовать явное первое U01 install/connect через существующие ProgramInstallManager/ProviderRegistry и проверить установленный Tauri GUI, Qwen3 и `.iwxa`. Не создавать отдельный установщик/Core/Store/Router.
+
+**Приватность:** этот публичный CI не читал закрытый Agent, приватные Actions не запускались, приватные EXE, источники и `.iwxa` не публиковались.
+
 
 Дата: 15.11.2026. Публичный репозиторий: Faust-S/Br-test. Независимая ветка:
 `work/2026-11-15-agent06-headless-obscura`. Общая ветка закрытого
