@@ -20,6 +20,7 @@ sys.path.insert(0, str(ROOT))
 from iwxa_universal_install.document_operations import (
     convert_to_pdf_via_u01, digest, discover_document_programs,
     make_document_cli_spec, pdf_text_coverage, verify_cold_readback,
+    ocr_image_via_u01,
 )
 from iwxa_universal_install.program_connection import CliConnection
 
@@ -92,13 +93,71 @@ def run(out: Path) -> dict:
         owner.disconnect()
 
 
+def run_ocr(out: Path) -> dict:
+    """Real installed Tesseract U01 roundtrip; no software installation here."""
+    from PIL import Image, ImageDraw, ImageFont
+    exe = shutil.which('tesseract')
+    if not exe or not Path(exe).is_file():
+        return {'status': 'BLOCKED_NOT_INSTALLED' if os.environ.get('IWXA_REQUIRE_INSTALLED_TESSERACT') == '1' else 'SKIPPED_NOT_INSTALLED',
+                'program': 'TESSERACT', 'real_cli': False}
+    exe = str(Path(exe).resolve())
+    version = subprocess.run([exe, '--version'], capture_output=True, text=True, timeout=10)
+    match = re.search(r'tesseract\s+(\d+(?:\.\d+){2,})', version.stdout + version.stderr, flags=re.I)
+    if version.returncode != 0 or match is None:
+        return {'status': 'BLOCKED_VERSION_NOT_VERIFIED', 'program': 'TESSERACT'}
+    binary_sha = hashlib.sha256(Path(exe).read_bytes()).hexdigest()
+    spec = make_document_cli_spec('TESSERACT', exe, binary_sha256=binary_sha,
+                                  version_contains=match.group(1))
+    connection = CliConnection(spec, executable=exe)
+    if connection.inspect().get('installation_verified') is not True:
+        return {'status': 'FAIL_U01_INSPECT', 'program': 'TESSERACT'}
+    if connection.connect().get('status') != 'CONNECTED':
+        return {'status': 'FAIL_U01_CONNECT', 'program': 'TESSERACT'}
+    try:
+        # Guaranteed synthetic data; the recognized file is not a user document.
+        image = Image.new('RGB', (1150, 280), 'white')
+        draw = ImageDraw.Draw(image)
+        font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+        font = ImageFont.truetype(font_path, 56) if Path(font_path).is_file() else ImageFont.load_default()
+        draw.text((45, 65), 'INVOICE 1500 USD', fill='black', font=font)
+        source = out / 'ocr-invoice.png'
+        image.save(source, format='PNG')
+        source_sha = digest(source.read_bytes())
+        result = ocr_image_via_u01(connection, source_path=source,
+                                  expected_source_sha256=source_sha,
+                                  scratch_root=out, approved=True, language='eng')
+        text = result.output_bytes.decode('utf-8-sig')
+        if 'INVOICE' not in text.upper() or '1500' not in text:
+            raise RuntimeError('OCR_SEMANTIC_READBACK_MISMATCH')
+        target = out / 'recognized.txt'
+        with target.open('xb') as writer:
+            writer.write(result.output_bytes)
+            writer.flush()
+            os.fsync(writer.fileno())
+        if (digest(target.read_bytes()) != result.output_sha256
+                or digest(source.read_bytes()) != source_sha):
+            raise RuntimeError('OCR_COLD_READBACK_MISMATCH')
+        return {'status': 'PASS', 'program': 'TESSERACT', 'real_cli': True,
+                'transport': 'U01_CLI_CONNECTION', 'version': match.group(1),
+                'program_binary_sha256': binary_sha,
+                'source_sha256': source_sha, 'output_sha256': result.output_sha256,
+                'text_readback': True, 'source_preserved': True,
+                'new_file_readback': True, 'task_result_persisted': False,
+                'receipt_authority': 'QUALIFICATION_ONLY',
+                'source_file': source.name, 'output_file': target.name}
+    finally:
+        connection.disconnect()
+
+
 if __name__ == "__main__":
     destination = Path(sys.argv[1]) if len(sys.argv) == 2 else Path(tempfile.mkdtemp(prefix="iwxa-office-u01-"))
     try:
         report = run(destination)
+        report['ocr_image'] = run_ocr(destination)
         (destination / "REPORT.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(json.dumps(report, sort_keys=True))
-        sys.exit(0 if report["status"] in ("PASS", "SKIPPED_NOT_INSTALLED") else 1)
+        sys.exit(0 if report['status'] in ('PASS', 'SKIPPED_NOT_INSTALLED')
+                 and report['ocr_image']['status'] in ('PASS', 'SKIPPED_NOT_INSTALLED') else 1)
     except Exception as exc:
         report = {"status": "FAIL", "reason": type(exc).__name__ + ":" + str(exc)}
         (destination / "REPORT.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

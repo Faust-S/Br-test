@@ -25,7 +25,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install document readers (not office applications)
-        run: python -m pip install 'pypdf==6.21.4' 'python-docx==1.2.0'
+        run: python -m pip install 'pypdf==6.21.4' 'python-docx==1.2.0' 'Pillow==12.3.0'
       - name: U01 document unit tests and cold readback
         run: python -m unittest discover -s universal-install/tests -p test_document_operations.py -v
       - name: Existing U01 Python contract regression tests
@@ -34,11 +34,12 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core
+          sudo apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core tesseract-ocr
       - name: Real installed LibreOffice through pinned U01 CLI
         if: runner.os == 'Linux'
         env:
           IWXA_REQUIRE_INSTALLED_LIBREOFFICE: '1'
+          IWXA_REQUIRE_INSTALLED_TESSERACT: '1'
         run: python universal-install/qualification/office_document_u01.py artifacts/office-document
       - name: Preserve public synthetic evidence only
         if: always() && runner.os == 'Linux'
