@@ -35,10 +35,14 @@ def main():
         navigated = bool(result["navigation_observed"])
         final_matches = a.expected_final_url is None or (
             navigated and result["final_url"] == a.expected_final_url)
+        conservative_effect = result["external_effect_state"] == "UNKNOWN"
+        qualified = final_matches and conservative_effect
         record={
-            "status":"DOM_NAVIGATION_OBSERVED" if a.expected_final_url and final_matches
-                     else ("DOM_POSTCONDITION_OBSERVED" if final_matches else "HOLD"),
-            "failure_code":None if final_matches else "DOM_NAVIGATION_NOT_OBSERVED",
+            "status":"DOM_NAVIGATION_OBSERVED" if a.expected_final_url and qualified
+                     else ("DOM_POSTCONDITION_OBSERVED" if qualified else "HOLD"),
+            "failure_code":None if qualified else (
+                "REMOTE_EFFECT_MISREPORTED" if not conservative_effect
+                else "DOM_NAVIGATION_NOT_OBSERVED"),
             "remote_mutation_verified":False,
             "external_effect_state":result["external_effect_state"],
             "observed_text_sha256":result["observed_text_sha256"],
