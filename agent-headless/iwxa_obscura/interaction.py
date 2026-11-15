@@ -352,8 +352,16 @@ class ObscuraInteractiveController(ObscuraWorkerController):
                 if not isinstance(response, dict) or response.get("dispatched") is not True:
                     attempted = False if response == {"dispatched": False} else True
                     raise ObscuraInteractionError("DOM_CLICK_NOT_CONFIRMED")
-                text = dialog.request({"cmd": "evaluate", "expression": read_js})
-                if not isinstance(text, str) or expected_text not in text:
+                # Client-side actions often update the DOM asynchronously.
+                # Poll within a strict subdeadline; never retry the click.
+                confirmation_deadline = min(dialog.deadline, time.monotonic() + 3)
+                text = None
+                while time.monotonic() < confirmation_deadline:
+                    text = dialog.request({"cmd": "evaluate", "expression": read_js})
+                    if isinstance(text, str) and expected_text in text:
+                        break
+                    time.sleep(0.05)
+                else:
                     raise ObscuraInteractionError("DOM_POSTCONDITION_NOT_OBSERVED")
                 dialog.shutdown()
         except ObscuraControllerError as exc:
