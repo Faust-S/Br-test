@@ -122,7 +122,7 @@ jobs:
             --worker "$binary" --sha256 "$digest" \
             --page https://example.com/ --page https://example.org/ \
             --link-url https://www.python.org/ \
-            --link-selector 'a[href^="/"]' \
+            --link-selector 'a[href="/downloads/"]' \
             --iterations 2 --timeout 45 \
             --report artifacts/agent06-headless/interactive-native.json
       - name: Upload public-only numerical evidence
