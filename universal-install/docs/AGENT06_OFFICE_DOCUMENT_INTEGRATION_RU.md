@@ -60,3 +60,15 @@ Agent 0.6, только чтение: `Faust-S/iwxa-personal-agent@work/2026-11-
 GitHub Actions #43717967716: SUCCESS, все три jobs Windows 2022, macOS 15 и Ubuntu 24.04 завершились SUCCESS на commit `6698985112d35bd05e57da97b834028a1e22fbfb`. В публичном Ubuntu runner LibreOffice 24.2.7.2 был явно установлен только для квалификации; настоящий `CliConnection` выполнил DOCX -> PDF и повторное чтение. `real_cli=true`, `text_readback=true`, `source_preserved=true`, `status=PASS`.
 
 Источник: https://github.com/Faust-S/Br-test/actions/runs/43717967716 , публичный артефакт `agent06-office-public-ubuntu-24.04` (синтетические `original.docx`, `converted.pdf`, `REPORT.json`). Исходный SHA-256: `5d179ff0eaa2687967a4fbb07707614bd566d8e45e469d06a629dfdd33571bbd`. PDF SHA-256: `669159927d78223dc325748a314e653085224cb31f70d4db20a73586b55242c2`. `task_result_persisted=false`: это не подтверждает приватный Agent Result/GUI и не изменяет его исходники.
+
+## Реальный OCR / окончательная публичная квалификация 15.11.2026
+
+- Run [#43719968885](https://github.com/Faust-S/Br-test/actions/runs/43719968885) на commit `793d1abe5fa12b013d5b05524b188d5b494e069c`: **SUCCESS** Windows 2022, Ubuntu 24.04, macOS 15. Новые адресные Python-тесты: 13/13 PASS на Ubuntu, также PASS на Windows/macOS. Действующие тесты U01 CliConnection: PASS.
+- В отдельной Ubuntu CI среде на самом деле установлены LibreOffice 24.2.7.2, Tesseract 5.3.4, OCRmyPDF 15.2.0. Все три вызова выполняются через прежний U01 `CliConnection` с pinned SHA-256, предварительным `inspect/connect` и физической проверкой результата.
+- DOCX → PDF: `real_cli=true`, PDF разобран pypdf, исходник сохранён, output readback подтверждён.
+- PNG → TXT: OCR прочитал синтетическую строку `INVOICE 1500 USD`, результат сохранён и повторно проверен.
+- Сканированный PDF → поисковый PDF: исходная страница без извлекаемого текста, `ocr_pdf.real_cli=true`, `ocr_pdf.searchable_after=true`, `ocr_pdf.source_preserved=true`, `ocr_pdf.status=PASS`, точный SHA-256 нового PDF `88599a29a663d05c04f3a98c79446d19cec844ad47c4debe17d89e8c7b763dfe`.
+- Публичный артефакт `agent06-office-public-ubuntu-24.04`, artifact ID `14164600158`, включает только синтетические файлы (`original.docx`, `converted.pdf`, `ocr-invoice.png`, `recognized.txt`, `scanned.pdf`, `searchable.pdf`) и проверочный `REPORT.json`. Данные частного Agent не использованы.
+- Сборка установленного приватного Agent, настоящая UI-приёмка U04, сохранённый Agent Result и проверка холодного перезапуска Tauri **NOT_RUN**. Публичная квалификация этого не заменяет.
+
+В закрытом `iwxa-personal-agent` ведётся самостоятельная feature-ветка с использованием точного U01 source blob `8afd19e70b01c03fbd193d1f1007c698bd905735`, без нового U01 manager и без изменений общей ветки 0.6. Одна офисная операция не означает полной поддержки DOCX/XLSX/PPTX/PDF. Приватные Actions не запускались.
