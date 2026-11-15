@@ -1,0 +1,28 @@
+name: Agent 0.6 headless protocol tests
+on:
+  push:
+    branches: [work/2026-11-15-agent06-headless-obscura]
+    paths:
+      - 'agent-headless/**'
+      - '.github/workflows/agent06-headless-protocol.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  python-headless:
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Python headless protocol and subprocess tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s agent-headless/tests -p 'test_*.py' -v
