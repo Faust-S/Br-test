@@ -9,6 +9,9 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: agent06-native-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   native-headless:
     runs-on: ${{ matrix.os }}
