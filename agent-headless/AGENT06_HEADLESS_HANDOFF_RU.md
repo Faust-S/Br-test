@@ -42,13 +42,18 @@ Rust-регрессионный тест отказа в запросе к др�
 | `observe(url)` | Получение документа | содержимое, HTTP-статус, URL, хеш |
 | `inspect(url, selector)` | Чтение текста выбранного DOM-узла | текст и SHA-256 |
 | `follow_link(url, selector)` | Выбор существующей DOM-ссылки, реальная навигация | конечный URL, HTTP, содержимое |
+| `list_links(url, max_links=50)` | Обнаружение ссылок в DOM без ручного CSS-селектора | ограниченный список URL/названий, только разрешённый origin, без записи |
 | `click_control(url, selector, confirmation_selector, expected_text)` | Отправка DOM-click и ограниченное ожидание изменения DOM | только локальное подтверждение, эффект UNKNOWN |
 
 Общий `iwxa_obscura.agent_port.ObscuraAgentToolPort` реализует действующий
-контракт с `tool_id`: `web.fetch`, `web.inspect`, `web.follow_link`,
+контракт с `tool_id`: `web.fetch`, `web.inspect`, `web.follow_link`, `web.list_links`,
 `web.click_control`. Проверяются отдельные descriptor digests, provider ID,
 binding digest и слот `web_acquisition`. Читающие операции не требуют
-идемпотентности; для клика нужны существующие `tool_plan_digest`,
+идемпотентности; клик **выключен по умолчанию** параметром моста
+`enable_experimental_click=False`. Даже наличие descriptor в реестре
+не включает его. Режим `True` предусмотрен исключительно для отдельных
+контролируемых экспериментов.
+Для клика нужны существующие `tool_plan_digest`,
 `idempotency_key` и `target`, в точности равный URL. Подлинное
 разрешение и проверку плана обязан выполнять действующий Agent ToolRuntime,
 а не этот публичный мост.
@@ -118,6 +123,23 @@ Windows `obscura-windows-x86_64.zip`, SHA-256 EXE
 Отдельный нативный benign DOM-click на обеих ОС HOLD:
 `DOM_POSTCONDITION_NOT_OBSERVED`, внешний эффект `UNKNOWN`.
 Не считать это принятой удалённой операцией.
+
+## Новая функция: обнаружение ссылок без CSS-селектора
+
+Реализовано `list_links` с реальным последовательным worker-протоколом
+`navigate → evaluate(querySelectorAll) → shutdown`. Страница не передаёт
+произвольный JavaScript в worker: используется фиксированный шаблон.
+Читаются первые `max_links * 8` DOM-кандидатов (не более 800), затем
+Python-контроллер проверяет каждый URL на исходный HTTPS origin, удаляет
+дубли и ограничивает выдачу `max_links`. Отчёт помечается
+`WORKER_DOM_LINKS_OBSERVED_NOT_U1_VERIFIED`: это не обход всего сайта и
+не подтверждение неизменности ссылок между вызовами.
+
+Добавлены unit-тесты отсева внешних, повторных и запрещённых URL,
+граничных значений, пустого списка и контракта `web.list_links`.
+Нативный квалификатор отдельно проверяет обнаружение `/downloads/` на
+реальном `python.org` в Windows и Linux. До завершения нового прогона
+этот нативный результат не следует считать подтверждённым.
 
 ## Незавершённая приёмка
 
