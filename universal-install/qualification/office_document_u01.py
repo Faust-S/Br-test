@@ -20,7 +20,7 @@ sys.path.insert(0, str(ROOT))
 from iwxa_universal_install.document_operations import (
     convert_to_pdf_via_u01, digest, discover_document_programs,
     make_document_cli_spec, pdf_text_coverage, verify_cold_readback,
-    ocr_image_via_u01,
+    ocr_image_via_u01, ocr_pdf_via_u01,
 )
 from iwxa_universal_install.program_connection import CliConnection
 
@@ -149,15 +149,76 @@ def run_ocr(out: Path) -> dict:
         connection.disconnect()
 
 
+def run_scanned_pdf_ocr(out: Path) -> dict:
+    """Synthetic image-only PDF -> searchable PDF via real U01 OCRmyPDF."""
+    from PIL import Image, ImageDraw, ImageFont
+    exe = shutil.which('ocrmypdf')
+    if not exe or not Path(exe).is_file():
+        return {'status': 'BLOCKED_NOT_INSTALLED' if os.environ.get('IWXA_REQUIRE_INSTALLED_OCRMY_PDF') == '1' else 'SKIPPED_NOT_INSTALLED',
+                'program': 'OCRMY_PDF', 'real_cli': False}
+    exe = str(Path(exe).resolve())
+    version = subprocess.run([exe, '--version'], capture_output=True, text=True, timeout=10)
+    version_match = re.search(r'\b(\d+\.\d+\.\d+)\b', version.stdout + version.stderr)
+    if version.returncode != 0 or version_match is None:
+        return {'status': 'BLOCKED_VERSION_NOT_VERIFIED', 'program': 'OCRMY_PDF'}
+    binary_sha = hashlib.sha256(Path(exe).read_bytes()).hexdigest()
+    spec = make_document_cli_spec('OCRMY_PDF', exe, binary_sha256=binary_sha,
+                                  version_contains=version_match.group(1))
+    owner = CliConnection(spec, executable=exe)
+    if owner.inspect().get('installation_verified') is not True:
+        return {'status': 'FAIL_U01_INSPECT', 'program': 'OCRMY_PDF'}
+    if owner.connect().get('status') != 'CONNECTED':
+        return {'status': 'FAIL_U01_CONNECT', 'program': 'OCRMY_PDF'}
+    try:
+        img = Image.new('RGB', (1500, 380), 'white')
+        draw = ImageDraw.Draw(img)
+        font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
+        font = ImageFont.truetype(font_path, 63) if Path(font_path).is_file() else ImageFont.load_default()
+        draw.text((55, 95), 'SCAN DOCUMENT 1500 USD', font=font, fill='black')
+        source = out / 'scanned.pdf'
+        img.save(source, 'PDF', resolution=200.0)
+        raw_source = source.read_bytes()
+        missing = pdf_text_coverage(raw_source)
+        if missing.get('status') != 'OCR_OFFER' or missing.get('pages_without_text') != [1]:
+            raise RuntimeError('SCAN_TEXT_LAYER_DETECTION_WRONG')
+        source_sha = digest(raw_source)
+        result = ocr_pdf_via_u01(owner, source_path=source,
+                                 expected_source_sha256=source_sha,
+                                 scratch_root=out, approved=True)
+        from pypdf import PdfReader
+        target = out / 'searchable.pdf'
+        with target.open('xb') as f:
+            f.write(result.output_bytes)
+            f.flush()
+            os.fsync(f.fileno())
+        extracted = '\n'.join(page.extract_text() or '' for page in PdfReader(str(target)).pages).upper()
+        if 'SCAN DOCUMENT' not in extracted or '1500' not in extracted:
+            raise RuntimeError('OCR_PDF_SEMANTIC_READBACK_MISMATCH')
+        if digest(target.read_bytes()) != result.output_sha256 or digest(source.read_bytes()) != source_sha:
+            raise RuntimeError('OCR_PDF_COLD_READBACK_MISMATCH')
+        return {'status': 'PASS', 'program': 'OCRMY_PDF', 'transport': 'U01_CLI_CONNECTION',
+                'real_cli': True, 'version': version_match.group(1),
+                'program_binary_sha256': binary_sha,
+                'source_sha256': source_sha, 'output_sha256': result.output_sha256,
+                'no_text_before': True, 'searchable_after': True,
+                'source_preserved': True, 'new_file_readback': True,
+                'receipt_authority': 'QUALIFICATION_ONLY', 'task_result_persisted': False,
+                'source_file': source.name, 'output_file': target.name}
+    finally:
+        owner.disconnect()
+
+
 if __name__ == "__main__":
     destination = Path(sys.argv[1]) if len(sys.argv) == 2 else Path(tempfile.mkdtemp(prefix="iwxa-office-u01-"))
     try:
         report = run(destination)
         report['ocr_image'] = run_ocr(destination)
+        report['ocr_pdf'] = run_scanned_pdf_ocr(destination)
         (destination / "REPORT.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         print(json.dumps(report, sort_keys=True))
         sys.exit(0 if report['status'] in ('PASS', 'SKIPPED_NOT_INSTALLED')
-                 and report['ocr_image']['status'] in ('PASS', 'SKIPPED_NOT_INSTALLED') else 1)
+                 and report['ocr_image']['status'] in ('PASS', 'SKIPPED_NOT_INSTALLED')
+                 and report['ocr_pdf']['status'] in ('PASS', 'SKIPPED_NOT_INSTALLED') else 1)
     except Exception as exc:
         report = {"status": "FAIL", "reason": type(exc).__name__ + ":" + str(exc)}
         (destination / "REPORT.json").write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")

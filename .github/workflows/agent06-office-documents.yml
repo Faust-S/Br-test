@@ -34,12 +34,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core tesseract-ocr
+          sudo apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core tesseract-ocr ocrmypdf ghostscript
       - name: Real installed LibreOffice through pinned U01 CLI
         if: runner.os == 'Linux'
         env:
           IWXA_REQUIRE_INSTALLED_LIBREOFFICE: '1'
           IWXA_REQUIRE_INSTALLED_TESSERACT: '1'
+          IWXA_REQUIRE_INSTALLED_OCRMY_PDF: '1'
         run: python universal-install/qualification/office_document_u01.py artifacts/office-document
       - name: Preserve public synthetic evidence only
         if: always() && runner.os == 'Linux'
