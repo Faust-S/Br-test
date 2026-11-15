@@ -88,3 +88,18 @@ diff --git a/crates/obscura-cli/src/worker.rs b/crates/obscura-cli/src/worker.rs
 +        return;
 +    }
      let mut reader = BufReader::new(stdin);
+diff --git a/crates/obscura-net/src/wreq_client.rs b/crates/obscura-net/src/wreq_client.rs
+--- a/crates/obscura-net/src/wreq_client.rs
++++ b/crates/obscura-net/src/wreq_client.rs
+@@ -582,6 +582,12 @@
+         max_body_bytes: usize,
+     ) -> Result<StealthResponseHeaders, ObscuraNetError> {
++        // Scripted fetch/XHR uses this separate transport path. When the
++        // IWXA worker origin gate is active, enforce it here as well, before
++        // constructing or sending a request. Keep upstream behavior otherwise.
++        if std::env::var_os("IWXA_OBSCURA_ALLOWED_ORIGIN").is_some() {
++            validate_url(url, self.allow_private_network)?;
++        }
+         if is_tracker_blocked(url, self.block_trackers) {
+             tracing::debug!("Blocked tracker: {}", url);
+             return Ok(StealthResponseHeaders {
