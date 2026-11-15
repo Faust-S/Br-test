@@ -151,6 +151,7 @@ jobs:
             --worker "$binary" --url https://www.python.org/ \
             --selector 'a[href="/downloads/"]' \
             --confirmation-selector title --expected-text Download \
+            --expected-final-url https://www.python.org/downloads/ \
             --output artifacts/agent06-headless/dom-click-probe.json
       - name: Package verified native worker as inactive U01 candidate
         if: success()
