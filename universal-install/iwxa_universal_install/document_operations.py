@@ -104,7 +104,7 @@ def files_binary_write_candidate(candidate: DocumentCandidate, *,
     }
     return {"operation": "files.write_binary", "target": destination_path,
             "arguments": args, "risk": "medium", "reversible": True,
-            }
+            "description": candidate.summary}
 
 
 def _docx_entries(raw: bytes) -> tuple[list, dict[str, bytes]]:
@@ -389,9 +389,15 @@ def make_document_cli_spec(program_id: str, executable: str, *, binary_sha256: s
     }
     if program_id not in ops or not re.fullmatch(r"[0-9a-f]{64}", binary_sha256):
         raise DocumentOperationError("U01_SPEC_UNSUPPORTED")
+    # OCRmyPDF writes its --version response to stderr on several packaged
+    # releases, whereas U01's existing version probe intentionally validates
+    # stdout. Use the official read-only --help CLI interface for U01 connect;
+    # the caller separately records the exact --version and binary SHA-256.
+    probe_args = ["--help"] if program_id == "OCRMY_PDF" else ["--version"]
+    probe_text = "ocrmypdf" if program_id == "OCRMY_PDF" else version_contains
     return {"schema": "IWXA_CLI_PROGRAM/1", "program_id": "DOCUMENT_" + program_id,
             "executable_name": name, "executable_sha256": binary_sha256,
-            "version_args": ["--version"], "version_contains": version_contains,
+            "version_args": probe_args, "version_contains": probe_text,
             "operations": ops[program_id]}
 
 

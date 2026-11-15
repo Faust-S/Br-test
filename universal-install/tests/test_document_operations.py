@@ -235,6 +235,15 @@ class DocumentTests(unittest.TestCase):
         self.assertEqual(candidate.output_format, 'pdf')
         self.assertEqual(self.owner.source.read_bytes(), self.raw)
 
+    def test_ocrmypdf_u01_connect_uses_help_when_version_goes_to_stderr(self):
+        spec = make_document_cli_spec('OCRMY_PDF', '/usr/bin/ocrmypdf',
+                                      binary_sha256='b'*64,
+                                      version_contains='15.2.0')
+        self.assertEqual(spec['version_args'], ['--help'])
+        self.assertEqual(spec['version_contains'], 'ocrmypdf')
+        self.assertEqual(spec['executable_sha256'], 'b'*64)
+        self.assertEqual(spec['operations']['ocr_pdf'][0], '--skip-text')
+
     def test_pdf_coverage_requires_proof_not_guess(self):
         self.assertEqual(pdf_text_coverage(b'garbage')['status'], 'UNDETERMINED')
 
