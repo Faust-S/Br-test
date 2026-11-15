@@ -60,6 +60,18 @@ class ObscuraAgentToolPort:
             return self.delegate.invoke(request)
         ref = request.tool_descriptor_ref
         operation = request.operation
+        # The Agent's existing web_acquisition slot requires both search
+        # and fetch. Obscura is a verified fetch/DOM executor, NOT a search
+        # provider. Keep search in the selected original provider, using
+        # its own registry/route guard and unchanged approval contracts.
+        # No fallback after an Obscura fetch error: that would silently
+        # change execution authority and source provenance.
+        if operation == "web.search" and self.delegate is not None:
+            if (ref.get("provider_slot") != "web_acquisition"
+                    or ref.get("provider_binding_digest") != self.binding_digest
+                    or ref.get("tool_id") != "web.search"):
+                raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_search_binding_denied")
+            return self.delegate.invoke(request)
         if (ref.get("provider_slot") != "web_acquisition"
                 or ref.get("provider_binding_digest") != self.binding_digest
                 or ref.get("descriptor_digest") != self.descriptor_digests.get(operation)
