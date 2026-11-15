@@ -9,6 +9,8 @@ on:
       - 'agent-headless/qualification/**'
       - 'agent-headless/tests/**'
       - 'universal-install/qualification/package_native_release.py'
+      - 'universal-install/qualification/agent06_unsigned_release_candidate.py'
+      - 'universal-install/tests/test_agent06_unsigned_release_candidate.py'
       - 'universal-install/qualification/native_obscura_install.py'
       - '.github/workflows/agent06-headless-obscura.yml'
   workflow_dispatch:
@@ -196,4 +198,70 @@ jobs:
           name: agent06-headless-${{ matrix.os }}
           path: artifacts/agent06-headless/
           if-no-files-found: warn
+          retention-days: 14
+
+  unsigned-release-candidate:
+    name: Verify and stage unsigned U01 release candidate (not for users)
+    needs: native-headless
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout public U01 release preparation code
+        uses: actions/checkout@v4
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Checkout original pinned Obscura license
+        uses: actions/checkout@v4
+        with:
+          repository: h4ckf0r0day/obscura
+          ref: 8534b401898ed17b62f69bdc3d5eb186bffb0d60
+          path: upstream-license
+          persist-credentials: false
+      - name: Verify unsigned candidate contract offline
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m unittest discover -s universal-install/tests \
+            -p 'test_agent06_unsigned_release_candidate.py' -v
+      - name: Download same-runner qualified public native candidates
+        uses: actions/download-artifact@v4
+        with:
+          pattern: agent06-headless-*
+          merge-multiple: false
+          path: native-source
+      - name: Verify and assemble data-only U01 release candidates
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f upstream-license/LICENSE
+          python universal-install/qualification/agent06_unsigned_release_candidate.py \
+            --artifacts native-source \
+            --output artifacts/unsigned-u01-candidate \
+            --release-id "obscura-06-rc-${GITHUB_SHA:0:12}" \
+            --source-head "$GITHUB_SHA" \
+            --source-run "$GITHUB_RUN_ID" \
+            --patch agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch \
+            --license upstream-license/LICENSE
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          doc=json.loads(Path("artifacts/unsigned-u01-candidate/manifest.candidate.json").read_text())
+          assert doc["intent"] == "AWAITING_PUBLISHER_SIGNATURE_NOT_FOR_USERS"
+          assert not doc["signed"] and not doc["published"]
+          assert not doc["approved_for_end_user_install"]
+          assert set(doc["platforms"]) == {"windows-x86_64","linux-x86_64"}
+          print("U01_AGENT06_UNSIGNED_CANDIDATE_READY_NOT_RELEASED")
+          PY
+      - name: Retain public unsigned candidate for Publisher handoff
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent06-u01-unsigned-release-candidate
+          path: artifacts/unsigned-u01-candidate/
+          if-no-files-found: error
           retention-days: 14
