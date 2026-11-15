@@ -43,7 +43,7 @@ class DummyRequest:
         }
         self.operation=operation
         self.arguments=args
-        self.target=None
+        self.target=args.get("url") if idempotency is not None else None
         self.idempotency_key_or_none=idempotency
         self.tool_plan_digest_or_none=plan
         self.request_id="req-test"
@@ -87,6 +87,13 @@ class PortTests(unittest.TestCase):
         for idk,plan in ((None,None),("key",None),(None,"c"*64)):
             with self.assertRaisesRegex(PortError,"PORT_PROTOCOL_ERROR"):
                 self.port.invoke(DummyRequest("web.click_control",args,idempotency=idk,plan=plan))
+
+    def test_action_target_must_match_url(self):
+        args={"url":"https://example.org/","selector":"button","confirmation_selector":"#done","expected_text":"Done"}
+        req=DummyRequest("web.click_control",args,idempotency="key",plan="c"*64)
+        req.target="https://other.org/"
+        with self.assertRaisesRegex(PortError,"PORT_PROTOCOL_ERROR"):
+            self.port.invoke(req)
 
     def test_action_uncertain_even_with_dom_confirmation(self):
         args={"url":"https://example.org/","selector":"button","confirmation_selector":"#done","expected_text":"Done"}
