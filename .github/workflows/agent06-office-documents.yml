@@ -1,0 +1,43 @@
+name: IWXA Agent06 U01 Office Documents
+on:
+  push:
+    branches:
+      - work/2026-11-15-agent06-office-document-integration
+    paths:
+      - universal-install/iwxa_universal_install/document_operations.py
+      - universal-install/qualification/office_document_u01.py
+      - universal-install/tests/test_document_operations.py
+      - .github/workflows/agent06-office-documents.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  document-contract:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022, macos-15]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install document readers (not office applications)
+        run: python -m pip install 'pypdf==6.21.4' 'python-docx==1.2.0'
+      - name: U01 document unit tests and cold readback
+        run: python -m unittest discover -s universal-install/tests -p test_document_operations.py -v
+      - name: Existing U01 Python contract regression tests
+        run: python -m unittest discover -s universal-install/tests -p test_program_connection.py -v
+      - name: Installed LibreOffice through actual U01 CLI when available
+        if: runner.os == 'Linux'
+        run: python universal-install/qualification/office_document_u01.py artifacts/office-document
+      - name: Preserve public synthetic evidence only
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent06-office-public-${{ matrix.os }}
+          path: artifacts/office-document/
+          retention-days: 7
+          if-no-files-found: ignore
