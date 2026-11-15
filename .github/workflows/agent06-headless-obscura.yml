@@ -4,7 +4,12 @@ on:
     branches:
       - work/2026-11-15-agent06-headless-obscura
     paths:
-      - 'agent-headless/**'
+      - 'agent-headless/iwxa_obscura/**'
+      - 'agent-headless/patches/**'
+      - 'agent-headless/qualification/**'
+      - 'agent-headless/tests/**'
+      - 'universal-install/qualification/package_native_release.py'
+      - 'universal-install/qualification/native_obscura_install.py'
       - '.github/workflows/agent06-headless-obscura.yml'
   workflow_dispatch:
 permissions:
