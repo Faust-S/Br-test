@@ -195,7 +195,20 @@ class ObscuraInteractiveController(ObscuraWorkerController):
                         except ProcessLookupError:
                             pass
                     else:
-                        proc.kill()
+                        # Windows Popen.kill() only terminates the parent PID.
+                        # taskkill /T also reaps descendants of a hung worker.
+                        try:
+                            subprocess.run(
+                                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL, timeout=5,
+                                creationflags=subprocess.CREATE_NO_WINDOW,
+                                check=False,
+                            )
+                        except (OSError, subprocess.TimeoutExpired):
+                            pass
+                        if proc.poll() is None:
+                            proc.kill()
                 try:
                     proc.wait(timeout=5)
                 except subprocess.TimeoutExpired:
@@ -328,6 +341,9 @@ class ObscuraInteractiveController(ObscuraWorkerController):
             with self._dialog(requested, is_cancelled=is_cancelled) as (dialog, trust, ca, start):
                 before = dialog.request({"cmd": "navigate", "url": requested, "waitUntil": self.wait_until})
                 final, status, title = self._nav_info(before, origin)
+                prior_text = dialog.request({"cmd": "evaluate", "expression": read_js})
+                if isinstance(prior_text, str) and expected_text in prior_text:
+                    raise ObscuraInteractionError("DOM_POSTCONDITION_ALREADY_PRESENT")
                 attempted = True  # From here, even a lost response may hide an effect.
                 response = dialog.request({"cmd": "evaluate", "expression": click_js})
                 if not isinstance(response, dict) or response.get("dispatched") is not True:
