@@ -30,8 +30,15 @@ jobs:
         run: python -m unittest discover -s universal-install/tests -p test_document_operations.py -v
       - name: Existing U01 Python contract regression tests
         run: python -m unittest discover -s universal-install/tests -p test_program_connection.py -v
-      - name: Installed LibreOffice through actual U01 CLI when available
+      - name: Prepare isolated Linux CI qualification software
         if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends libreoffice-writer fonts-dejavu-core
+      - name: Real installed LibreOffice through pinned U01 CLI
+        if: runner.os == 'Linux'
+        env:
+          IWXA_REQUIRE_INSTALLED_LIBREOFFICE: '1'
         run: python universal-install/qualification/office_document_u01.py artifacts/office-document
       - name: Preserve public synthetic evidence only
         if: always() && runner.os == 'Linux'

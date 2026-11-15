@@ -6,6 +6,7 @@ NOT an installed Agent Result receipt. Never downloads an office program.
 from __future__ import annotations
 
 import hashlib
+import os
 import json
 from pathlib import Path
 import re
@@ -35,7 +36,7 @@ def run(out: Path) -> dict:
     out.mkdir(parents=True, exist_ok=True)
     exe = program()
     if not exe:
-        return {"status": "SKIPPED_NOT_INSTALLED", "program": "LIBREOFFICE", "real_cli": False}
+        return {"status": "BLOCKED_NOT_INSTALLED" if os.environ.get("IWXA_REQUIRE_INSTALLED_LIBREOFFICE") == "1" else "SKIPPED_NOT_INSTALLED", "program": "LIBREOFFICE", "real_cli": False}
     version_result = subprocess.run([exe, "--version"], stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True, timeout=10, check=False)
     match = re.search(r"LibreOffice\s+(\d+(?:\.\d+){2,})", version_result.stdout)
