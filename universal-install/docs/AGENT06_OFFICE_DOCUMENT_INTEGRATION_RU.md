@@ -54,3 +54,9 @@ Agent 0.6, только чтение: `Faust-S/iwxa-personal-agent@work/2026-11-
 Следующий интеграционный этап для владельца Agent 0.6: добавить штатную **бинарную операцию записи новой копии** в существующий `LocalFilesV1`/ToolRuntime с разрешением Human Review и receipt; не использовать `files.write_text` для ZIP-байтов. Отобразить выбор исполнителя в существующем `document-workflow.tsx`, связать `result_persisted` с реально сохранённым Agent Result и проверить cold restart установленного Tauri Windows приложения. Объединение веток и принятие Agent 0.6 не выполнялись.
 
 Приватность: публичный `Br-test` хранит лишь новую открытую реализацию, тесты и синтетические файлы CI. Приватные исходники, реальные пользовательские документы и токены не передавались; приватные Actions не запускались. Действует узкое разрешение на публичный Center ↔ закрытый Agent, но оно здесь **не использовано**.
+
+## Финальное наблюдение публичного CI от 15.11.2026
+
+GitHub Actions #43717967716: SUCCESS, все три jobs Windows 2022, macOS 15 и Ubuntu 24.04 завершились SUCCESS на commit `6698985112d35bd05e57da97b834028a1e22fbfb`. В публичном Ubuntu runner LibreOffice 24.2.7.2 был явно установлен только для квалификации; настоящий `CliConnection` выполнил DOCX -> PDF и повторное чтение. `real_cli=true`, `text_readback=true`, `source_preserved=true`, `status=PASS`.
+
+Источник: https://github.com/Faust-S/Br-test/actions/runs/43717967716 , публичный артефакт `agent06-office-public-ubuntu-24.04` (синтетические `original.docx`, `converted.pdf`, `REPORT.json`). Исходный SHA-256: `5d179ff0eaa2687967a4fbb07707614bd566d8e45e469d06a629dfdd33571bbd`. PDF SHA-256: `669159927d78223dc325748a314e653085224cb31f70d4db20a73586b55242c2`. `task_result_persisted=false`: это не подтверждает приватный Agent Result/GUI и не изменяет его исходники.
