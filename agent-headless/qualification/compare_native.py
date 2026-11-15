@@ -85,9 +85,18 @@ def benchmark(baseline, patched, urls, runs, timeout):
             "same_runner":True,"headless_only":True,
             "caveat":"baseline lacks network origin gate; equal requested URL, unequal egress restrictions",
             "results":[]}
+    try:
+        import resource
+    except ImportError:
+        resource=None
     for url in urls:
-        for name,path in (("upstream",baseline),("iwxa_patched",patched)):
-            for i in range(runs):
+        for i in range(runs):
+            # Alternate baseline/patch order to reduce first-request warmup bias.
+            ordered=(("upstream",baseline),("iwxa_patched",patched))
+            if i % 2:
+                ordered=tuple(reversed(ordered))
+            for name,path in ordered:
+                usage_before=resource.getrusage(resource.RUSAGE_CHILDREN) if resource else None
                 stop=threading.Event()
                 rss,cpu=[],[]
                 sampler=threading.Thread(target=monitor,args=(stop,rss,cpu),daemon=True)
@@ -113,12 +122,20 @@ def benchmark(baseline, patched, urls, runs, timeout):
                 finally:
                     stop.set()
                     sampler.join(timeout=1)
+                usage_after=resource.getrusage(resource.RUSAGE_CHILDREN) if resource else None
+                exact_cpu_ms=(
+                    round((usage_after.ru_utime + usage_after.ru_stime
+                           - usage_before.ru_utime - usage_before.ru_stime)*1000,3)
+                    if usage_before is not None else None
+                )
                 result["results"].append({
                     "url":url,"variant":name,"iteration":i,"state":state,
                     "wall_ms":round((time.monotonic()-began)*1000),
                     "peak_sampled_rss_bytes":max(rss) if rss else None,
                     "peak_sampled_cpu_time_ms":max(cpu) if cpu else None,
-                    "cpu_quality":"20ms sampled CPU-time lower bound" if cpu else "unavailable",
+                    "reaped_child_cpu_time_ms":exact_cpu_ms,
+                    "cpu_quality":("OS cumulative reaped child CPU time" if resource else
+                                   "20ms sampled CPU-time lower bound" if cpu else "unavailable"),
                     **observation})
     result["median_wall_ms_by_variant"]={
         name:statistics.median([x["wall_ms"] for x in result["results"]
