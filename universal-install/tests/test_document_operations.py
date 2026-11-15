@@ -126,6 +126,7 @@ class DocumentTests(unittest.TestCase):
         action = files_binary_write_candidate(c, root_id='personal',
                     source_path='original.docx', destination_path='reviewed.docx')
         self.assertEqual(action['operation'], 'files.write_binary')
+        self.assertEqual(set(action), {'operation','target','arguments','risk','reversible'})
         self.assertEqual(action['target'], 'reviewed.docx')
         self.assertEqual(action['arguments']['mode'], 'create')
         self.assertEqual(action['arguments']['expected_source_sha256'], digest(self.raw))
