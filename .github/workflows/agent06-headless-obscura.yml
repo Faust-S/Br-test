@@ -125,6 +125,22 @@ jobs:
             --link-selector 'a[href="/downloads/"]' \
             --iterations 2 --timeout 45 \
             --report artifacts/agent06-headless/interactive-native.json
+      - name: Probe real non-mutating DOM click (separate qualification)
+        if: success()
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            binary="upstream/target/release/obscura-worker.exe"
+          else
+            binary="upstream/target/release/obscura-worker"
+          fi
+          python agent-headless/qualification/real_dom_click.py \
+            --worker "$binary" --url https://www.python.org/ \
+            --selector 'a[href="/downloads/"]' \
+            --confirmation-selector title --expected-text Download \
+            --output artifacts/agent06-headless/dom-click-probe.json
       - name: Package verified native worker as inactive U01 candidate
         if: success()
         shell: bash
