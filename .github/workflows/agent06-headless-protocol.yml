@@ -25,4 +25,5 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          python -m compileall -q agent-headless/iwxa_obscura agent-headless/qualification
           python -m unittest discover -s agent-headless/tests -p 'test_*.py' -v
