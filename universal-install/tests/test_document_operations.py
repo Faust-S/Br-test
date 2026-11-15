@@ -12,6 +12,7 @@ from iwxa_universal_install.document_operations import (
     DocumentOperationError, append_docx_paragraph, publish_approved,
     verify_cold_readback, discover_document_programs, select_document_executor,
     make_document_cli_spec, convert_to_pdf_via_u01, pdf_text_coverage, digest,
+    files_binary_write_candidate, DocumentCandidate,
 )
 
 
@@ -117,6 +118,34 @@ class DocumentTests(unittest.TestCase):
         restarted.output = self.root / 'result.docx'
         self.assertEqual(verify_cold_readback(candidate, read_source=restarted.read_source,
                                               read_output=restarted.read_output)['status'], 'PASS')
+
+    def test_binary_write_action_binds_source_destination_and_exact_payload(self):
+        import base64
+        c = append_docx_paragraph(self.raw, 'User-approved change',
+                                  expected_source_sha256=digest(self.raw))
+        action = files_binary_write_candidate(c, root_id='personal',
+                    source_path='original.docx', destination_path='reviewed.docx')
+        self.assertEqual(action['operation'], 'files.write_binary')
+        self.assertEqual(action['target'], 'reviewed.docx')
+        self.assertEqual(action['arguments']['mode'], 'create')
+        self.assertEqual(action['arguments']['expected_source_sha256'], digest(self.raw))
+        self.assertEqual(base64.b64decode(action['arguments']['content_base64']), c.output_bytes)
+        self.assertEqual(action['arguments']['expected_content_sha256'], c.output_sha256)
+        for source, output in [('a.docx', 'a.docx'), ('a.docx', '../escape.docx'),
+                               ('a.docx', '.hidden.docx'), ('a.docx', 'output.pdf')]:
+            with self.assertRaises(DocumentOperationError):
+                files_binary_write_candidate(c, root_id='personal',
+                                             source_path=source, destination_path=output)
+        tampered = DocumentCandidate(c.operation, c.executor, c.source_sha256,
+                                     'f'*64, c.output_format, c.output_bytes, c.summary)
+        with self.assertRaisesRegex(DocumentOperationError, 'BINARY_ACTION_PAYLOAD_MISMATCH'):
+            files_binary_write_candidate(tampered, root_id='personal',
+                    source_path='original.docx', destination_path='edited.docx')
+        oversize = DocumentCandidate('pdf.convert','DOCUMENT_LIBREOFFICE',c.source_sha256,
+                                     digest(b'Z'*700001),'pdf',b'Z'*700001,'big')
+        with self.assertRaisesRegex(DocumentOperationError,'BINARY_ACTION_TOO_LARGE'):
+            files_binary_write_candidate(oversize,root_id='personal',
+                    source_path='original.docx',destination_path='big.pdf')
 
     def test_preserve_source_revision_and_do_not_overwrite(self):
         candidate = append_docx_paragraph(self.raw, 'First change', expected_source_sha256=digest(self.raw))

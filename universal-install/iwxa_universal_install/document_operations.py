@@ -7,6 +7,7 @@ bytes and selects declared executors; external CLIs use U01 CliConnection.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import base64
 from hashlib import sha256
 from io import BytesIO
 import os
@@ -54,6 +55,56 @@ class DocumentCandidate:
         fields = (SCHEMA, self.operation, self.executor, self.source_sha256,
                   self.output_sha256, self.output_format)
         return digest("\n".join(fields).encode("utf-8"))
+
+
+
+# Keep the complete reviewed payload within the existing ToolRuntime argument
+# bound. Larger files must use a future host-approved existing Files transfer,
+# never silently route around Task and Human Review.
+MAX_INLINE_DOCUMENT_BYTES = 700_000
+
+
+def files_binary_write_candidate(candidate: DocumentCandidate, *,
+                                 root_id: str, source_path: str,
+                                 destination_path: str) -> dict:
+    """Adapt reviewed U01 bytes to the *existing* Agent Task action shape.
+
+    This is pure serialization, NOT an execution/approval/receipt. Agent's
+    ToolRuntime must bind the returned arguments to its own accepted Task,
+    review and scoped Files provider before performing a no-clobber create.
+    """
+    if candidate.output_format not in ("docx", "pdf") or not isinstance(candidate.output_bytes, bytes):
+        raise DocumentOperationError("BINARY_ACTION_FORMAT_UNSUPPORTED")
+    if not candidate.output_bytes or len(candidate.output_bytes) > MAX_INLINE_DOCUMENT_BYTES:
+        raise DocumentOperationError("BINARY_ACTION_TOO_LARGE")
+    if digest(candidate.output_bytes) != candidate.output_sha256:
+        raise DocumentOperationError("BINARY_ACTION_PAYLOAD_MISMATCH")
+    if not re.fullmatch(r"[a-f0-9]{64}", candidate.source_sha256):
+        raise DocumentOperationError("BINARY_ACTION_SOURCE_INVALID")
+    for path in (source_path, destination_path):
+        if (not isinstance(path, str) or not path or len(path) > 160
+                or path.startswith(("/", "\\")) or "\\" in path
+                or any(piece in ("", ".", "..") or piece.startswith(".")
+                       for piece in path.split("/"))):
+            raise DocumentOperationError("BINARY_ACTION_PATH_INVALID")
+    if not isinstance(root_id, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,39}", root_id):
+        raise DocumentOperationError("BINARY_ACTION_ROOT_INVALID")
+    if source_path.casefold() == destination_path.casefold():
+        raise DocumentOperationError("BINARY_ACTION_SOURCE_OVERWRITE_FORBIDDEN")
+    if not destination_path.lower().endswith("." + candidate.output_format):
+        raise DocumentOperationError("BINARY_ACTION_FORMAT_MISMATCH")
+    args = {
+        "root_id": root_id,
+        "path": destination_path,
+        "source_path": source_path,
+        "expected_source_sha256": candidate.source_sha256,
+        "content_base64": base64.b64encode(candidate.output_bytes).decode("ascii"),
+        "expected_content_sha256": candidate.output_sha256,
+        "mode": "create",
+    }
+    return {"operation": "files.write_binary", "target": destination_path,
+            "arguments": args, "risk": "medium", "reversible": True,
+            "description": candidate.summary}
 
 
 def _docx_entries(raw: bytes) -> tuple[list, dict[str, bytes]]:
