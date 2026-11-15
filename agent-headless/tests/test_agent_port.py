@@ -110,6 +110,49 @@ class PortTests(unittest.TestCase):
         self.assertEqual(caught.exception.code, "PORT_UNAVAILABLE")
         click.assert_not_called()
 
+    def test_search_keeps_original_selected_provider(self):
+        class ExistingWebProvider:
+            def __init__(self):
+                self.calls = []
+            def invoke(self, request):
+                self.calls.append(request)
+                return {"search": "existing-provider-result"}
+
+        delegate = ExistingWebProvider()
+        port = ObscuraAgentToolPort(
+            self.controller, provider_id="obscura", binding_digest="b"*64,
+            descriptor_digest={"web.fetch": "a"*64}, delegate=delegate,
+        )
+        request = DummyRequest("web.search", {"query": "IWXA Obscura"})
+        self.assertEqual(port.invoke(request)["search"], "existing-provider-result")
+        self.assertEqual(delegate.calls, [request])
+
+    def test_search_delegate_requires_same_authoritative_binding(self):
+        class ExistingWebProvider:
+            def invoke(self, _):
+                raise AssertionError("invalid binding reached original provider")
+        port = ObscuraAgentToolPort(
+            self.controller, provider_id="obscura", binding_digest="b"*64,
+            descriptor_digest={"web.fetch": "a"*64}, delegate=ExistingWebProvider(),
+        )
+        request = DummyRequest("web.search", {"query": "iwxa"})
+        request.tool_descriptor_ref["provider_binding_digest"] = "c"*64
+        with self.assertRaises(PortError) as caught:
+            port.invoke(request)
+        self.assertEqual(caught.exception.code, "PORT_PROTOCOL_ERROR")
+
+    def test_search_delegate_cannot_expand_unreviewed_operations(self):
+        class ExistingWebProvider:
+            def invoke(self, _):
+                raise AssertionError("unsupported operation reached delegate")
+        port = ObscuraAgentToolPort(
+            self.controller, provider_id="obscura", binding_digest="b"*64,
+            descriptor_digest={"web.fetch": "a"*64}, delegate=ExistingWebProvider(),
+        )
+        with self.assertRaises(PortError) as caught:
+            port.invoke(DummyRequest("web.eval", {"js": "alert(1)"}))
+        self.assertEqual(caught.exception.code, "PORT_PROTOCOL_ERROR")
+
     def test_action_requires_plan_and_idempotency(self):
         args={"url":"https://example.org/","selector":"button","confirmation_selector":"#done","expected_text":"Done"}
         for idk,plan in ((None,None),("key",None),(None,"c"*64)):
