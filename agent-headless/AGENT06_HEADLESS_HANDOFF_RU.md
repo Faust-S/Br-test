@@ -25,7 +25,7 @@ web.fetch requires exact arguments {url}.
 web.inspect requires {url, selector}.
 web.follow_link requires {url, selector}.
 web.click_control requires {url, selector, confirmation_selector, expected_text}, a nonempty idempotency key, a plan digest, and the independent Agent review/permission decision.
-All requests require a matching web_acquisition binding, provider identity and per-tool descriptor digest, and target=None. All other providers must delegate to the existing adapter.
+All requests require a matching web_acquisition binding, provider identity and per-tool descriptor digest, and read target=None; consequential target must equal the approved URL. All other providers must delegate to the existing adapter.
 Read operations report external_effect_state=NONE, referring to intended provider operation, not a guarantee against side effects of third-party scripts.
 A browser click reports external_effect_state=UNKNOWN even with its local DOM postcondition verified. Failed or interrupted clicks after dispatch also return UNKNOWN; do NOT retry automatically. A remote server-side receipt and independent readback are required to call a write accepted.
 
