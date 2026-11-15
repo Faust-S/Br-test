@@ -103,3 +103,26 @@ diff --git a/crates/obscura-net/src/wreq_client.rs b/crates/obscura-net/src/wreq
          if is_tracker_blocked(url, self.block_trackers) {
              tracing::debug!("Blocked tracker: {}", url);
              return Ok(StealthResponseHeaders {
+@@ -665,3 +671,22 @@
+ mod tests {
++     #[tokio::test]
++     async fn iwxa_stealth_scripted_cross_origin_denied_before_network() {
++         let key = "IWXA_OBSCURA_ALLOWED_ORIGIN";
++         let previous = std::env::var_os(key);
++         unsafe { std::env::set_var(key, "https://example.org"); }
++         let client = super::StealthHttpClient::with_proxy(
++             std::sync::Arc::new(crate::cookies::CookieJar::new()), None, false);
++         let url = url::Url::parse("https://other.example.org/path").unwrap();
++         let headers = std::collections::HashMap::new();
++         let result = client.send_single("GET", &url, &headers, &[], false, false).await;
++         if let Some(value) = previous {
++             unsafe { std::env::set_var(key, value); }
++         } else {
++             unsafe { std::env::remove_var(key); }
++         }
++         let error = result.err().expect("cross-origin scripted fetch must be denied");
++         assert!(error.to_string().contains("IWXA_ORIGIN_GUARD_DENIED"));
++     }
++
+     use std::io::{Read, Write};
+     use std::sync::Arc;
