@@ -301,7 +301,10 @@ class ObscuraInteractiveController(ObscuraWorkerController):
                     or len(link["text"]) > 8192):
                 raise ObscuraInteractionError("DOM_LINK_NOT_OBSERVED")
             # Reject the target BEFORE sending a second navigation command.
-            target = approved_url(link["href"], frozenset({origin}))
+            try:
+                target = approved_url(link["href"], frozenset({origin}))
+            except ObscuraControllerError as exc:
+                raise ObscuraInteractionError(exc.code) from None
             second = dialog.request({"cmd": "navigate", "url": target, "waitUntil": self.wait_until})
             content = dialog.request({"cmd": "dump_html" if format == "html" else "dump_text"})
             dialog.shutdown()
