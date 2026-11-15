@@ -59,13 +59,14 @@ class ObscuraAgentToolPort:
                 or ref.get("provider_binding_digest") != self.binding_digest
                 or ref.get("descriptor_digest") != self.descriptor_digests.get(operation)
                 or ref.get("tool_id") != operation
-                or operation not in self.descriptor_digests
-                or request.target is not None):
+                or operation not in self.descriptor_digests):
             raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_binding_denied")
         args = request.arguments
         if not isinstance(args.get("url"), str):
             raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_url_required")
         is_action = operation == _ACTION
+        if (is_action and request.target != args["url"]) or (not is_action and request.target is not None):
+            raise ToolProviderPortError("PORT_PROTOCOL_ERROR", "obscura_target_binding_denied")
         if is_action:
             if (not request.idempotency_key_or_none or
                     not request.tool_plan_digest_or_none or
