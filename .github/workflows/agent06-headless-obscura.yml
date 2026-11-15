@@ -83,6 +83,9 @@ jobs:
           (cd upstream && git apply --check ../agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch)
           (cd upstream && git apply ../agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch)
           cargo test --manifest-path upstream/Cargo.toml --locked -p obscura-net iwxa_agent_origin_guard_tests
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            cargo test --manifest-path upstream/Cargo.toml --locked -p obscura-net --features stealth iwxa_stealth_scripted_cross_origin_denied_before_network
+          fi
       - name: Compile actual patched headless worker
         shell: bash
         run: |
