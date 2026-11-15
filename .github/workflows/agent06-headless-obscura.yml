@@ -125,6 +125,43 @@ jobs:
             --link-selector 'a[href="/downloads/"]' \
             --iterations 2 --timeout 45 \
             --report artifacts/agent06-headless/interactive-native.json
+      - name: Package verified native worker as inactive U01 candidate
+        if: success()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "universal-install/qualification")
+          from package_native_release import create_archive
+          from iwxa_obscura.preparer import UPSTREAM_COMMIT, GUARD_PROTOCOL
+          platform = ("windows-x86_64" if os.name == "nt" else "linux-x86_64")
+          executable = "obscura-worker.exe" if os.name == "nt" else "obscura-worker"
+          source = Path("upstream/target/release") / executable
+          dest = Path("artifacts/agent06-headless/candidate")
+          dest.mkdir(parents=True, exist_ok=True)
+          suffix = ".zip" if os.name == "nt" else ".tar.gz"
+          archive = dest / ("obscura-" + platform + suffix)
+          create_archive(source, archive, executable)
+          digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()
+          record = {
+              "status": "BUILT_INACTIVE_NOT_RELEASED",
+              "platform": platform,
+              "upstream_commit": UPSTREAM_COMMIT,
+              "guard_protocol": GUARD_PROTOCOL,
+              "origin_guard_patch_sha256": digest(Path("agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch")),
+              "archive_name": archive.name,
+              "archive_sha256": digest(archive),
+              "executable_name": executable,
+              "executable_sha256": digest(source),
+              "agent_private_source_included": False,
+          }
+          (dest / "candidate-manifest.json").write_text(json.dumps(record, sort_keys=True, indent=2) + "\n")
+          print(json.dumps({k: record[k] for k in ("status", "platform", "archive_sha256", "executable_sha256")}))
+          PY
       - name: Upload public-only numerical evidence
         if: always()
         uses: actions/upload-artifact@v4
