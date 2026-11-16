@@ -1,0 +1,119 @@
+# PUBLIC U01 only. Owner-approved unsigned headless preview, not signed.
+# No private Agent checkout, binaries, credentials or user data.
+name: IWXA Obscura 0.6 owner opt-in unsigned preview
+on:
+  push:
+    branches:
+      - work/2026-11-16-agent06-owner-optin-obscura-preview
+permissions:
+  contents: write
+  actions: read
+jobs:
+  publish-public-native-preview:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SOURCE_RUN_ID: "43739318017"
+      SOURCE_COMMIT: "6c4abcfd5b03f26c18ba01415958d1b5729051f5"
+      CANDIDATE_ARTIFACT_ID: "14172355610"
+      RELEASE_TAG: "obscura-06-rc-6c4abcfd5b03"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Download exact PUBLIC U01 native candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p candidate
+          curl --fail --silent --show-error --location --retry 2 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/Faust-S/Br-test/actions/artifacts/$CANDIDATE_ARTIFACT_ID/zip" \
+            --output "$RUNNER_TEMP/u01-candidate.zip"
+          unzip -q "$RUNNER_TEMP/u01-candidate.zip" -d candidate
+          test -f candidate/manifest.candidate.json
+      - name: Verify public source, guard, archives and EXE SHA-256
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import hashlib, json, os, pathlib, tarfile, zipfile
+          root=pathlib.Path("candidate")
+          doc=json.loads((root/"manifest.candidate.json").read_text(encoding="utf-8"))
+          def require(ok,code):
+              if not ok: raise ValueError("U01_PREVIEW_"+code)
+          sha=lambda raw:hashlib.sha256(raw).hexdigest()
+          tag=os.environ["RELEASE_TAG"]
+          require(doc.get("schema")=="IWXA_OBSCURA_U01_RELEASE_CANDIDATE/1","SCHEMA")
+          require(doc.get("intent")=="AWAITING_PUBLISHER_SIGNATURE_NOT_FOR_USERS","INTENT")
+          require(doc.get("source_ci_run")==int(os.environ["SOURCE_RUN_ID"]),"RUN")
+          require(doc.get("source_ci_head_sha")==os.environ["SOURCE_COMMIT"],"SOURCE")
+          require(doc.get("release_id")==tag,"TAG")
+          require(doc.get("upstream_commit")=="8534b401898ed17b62f69bdc3d5eb186bffb0d60","UPSTREAM")
+          require(doc.get("signed") is False and doc.get("published") is False,"ORIGINAL_STATUS")
+          require(doc.get("approved_for_end_user_install") is False,"ORIGINAL_UNRELEASED")
+          require(doc.get("private_agent_artifacts_included") is False,"NO_PRIVATE_ARTIFACT")
+          require(set(doc["platforms"])=={"windows-x86_64","linux-x86_64"},"PLATFORMS")
+          patch=pathlib.Path("agent-headless/patches/obscura-v0.2.6-agent-origin-gate.patch").read_bytes()
+          patch_lf=sha(patch)
+          patch_crlf=sha(patch.replace(b"\n",b"\r\n"))
+          require(patch_lf==doc["canonical_patch_sha256"],"PATCH")
+          for platform,spec in doc["platforms"].items():
+              name="obscura-"+platform+(".zip" if platform.startswith("windows") else ".tar.gz")
+              require(spec["archive_name"]==name and spec["platform"]==platform,"NAME")
+              require(spec["release_id"]==tag and spec["source_commit"]==doc["upstream_commit"],"IDENTITY")
+              require(spec["guard_protocol"]=="IWXA_ORIGIN_NET_GUARD_V2_READY_NO_RENDER","GUARD")
+              require(spec["download_url"]=="https://github.com/Faust-S/Br-test/releases/download/"+tag+"/"+name,"URL")
+              allowed_patch=({patch_lf,patch_crlf} if platform.startswith("windows") else {patch_lf})
+              require(spec["origin_guard_patch_sha256"] in allowed_patch,"PATCH_PLATFORM")
+              archive=root/name
+              require(archive.is_file() and not archive.is_symlink() and 0<archive.stat().st_size<150*1024*1024,"ARCHIVE")
+              require(sha(archive.read_bytes())==spec["archive_sha256"],"ARCHIVE_HASH")
+              if platform.startswith("windows"):
+                  with zipfile.ZipFile(archive) as z:
+                      entries=z.infolist()
+                      require(len(entries)==1 and entries[0].filename=="obscura-worker.exe","ZIP_SHAPE")
+                      binary=z.read(entries[0])
+              else:
+                  with tarfile.open(archive,"r:gz") as z:
+                      entries=z.getmembers()
+                      require(len(entries)==1 and entries[0].name=="obscura-worker" and entries[0].isfile(),"TAR_SHAPE")
+                      binary=z.extractfile(entries[0]).read()
+              require(0<len(binary)<350*1024*1024 and sha(binary)==spec["executable_sha256"],"BINARY_HASH")
+              print("U01_PUBLIC_"+platform.upper().replace("-","_")+"_PREVIEW_SHA_PASS")
+          license_file=root/"LICENSE-OBSCURA.txt"
+          require(license_file.is_file() and sha(license_file.read_bytes())==doc["license_sha256"],"LICENSE")
+          preview={
+              "schema":"IWXA_OBSCURA_OWNER_OPT_IN_UNSIGNED_PREVIEW/1",
+              "user_requested_without_signature":True,"signed":False,
+              "auto_install":False,"auto_web_access":False,
+              "source_ci_run":doc["source_ci_run"],
+              "source_ci_head_sha":doc["source_ci_head_sha"],
+              "upstream_commit":doc["upstream_commit"],
+              "release_id":tag,"platforms":doc["platforms"],
+              "private_agent_artifacts_included":False,
+          }
+          (root/"manifest.preview.json").write_text(json.dumps(preview,sort_keys=True,indent=2)+"\n",encoding="utf-8")
+          print("U01_OWNER_OPT_IN_PUBLIC_ARCHIVES_VALIDATED")
+          PY
+      - name: Publish clearly unsigned owner opt-in prerelease
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$RELEASE_TAG" --repo Faust-S/Br-test >/dev/null 2>&1; then
+            echo "U01_PREVIEW_RELEASE_ALREADY_EXISTS_REFUSING_OVERWRITE"
+            exit 2
+          fi
+          gh release create "$RELEASE_TAG" \
+            candidate/obscura-windows-x86_64.zip \
+            candidate/obscura-linux-x86_64.tar.gz \
+            candidate/LICENSE-OBSCURA.txt \
+            candidate/manifest.preview.json \
+            --repo Faust-S/Br-test --target "$SOURCE_COMMIT" \
+            --title "IWXA Obscura 0.6 headless - unsigned owner opt-in preview" \
+            --notes "Public original U01 native worker, checked in run 43739318017. This is an UNSIGNED preview, not a signed official publisher release. Agent installation requires explicit user approval and archive/EXE SHA-256 verification through original U01; website reading requires separate consent. No renderer and no private Agent code." \
+            --prerelease --latest=false
+          gh release view "$RELEASE_TAG" --repo Faust-S/Br-test --json tagName,isPrerelease,assets --jq '{tag:.tagName,prerelease:.isPrerelease,assets:[.assets[].name]}'
+          echo "U01_OWNER_OPT_IN_PREVIEW_PUBLIC_RELEASE_CREATED"
