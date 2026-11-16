@@ -116,3 +116,14 @@ jobs:
           # User-facing Agent will distribute the archive as a module
           # inside its checked product package, not from GitHub Releases.
           # No private data, token material or unsigned public Release created.
+      - name: Preserve identical verified PUBLIC U01 native bytes for Agent packaging
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent06-u01-owner-approved-unsigned-native-bundle
+          path: |
+            candidate/manifest.candidate.json
+            candidate/obscura-windows-x86_64.zip
+            candidate/obscura-linux-x86_64.tar.gz
+            candidate/LICENSE-OBSCURA.txt
+          if-no-files-found: error
+          retention-days: 90
