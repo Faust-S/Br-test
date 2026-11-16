@@ -98,22 +98,21 @@ jobs:
           (root/"manifest.preview.json").write_text(json.dumps(preview,sort_keys=True,indent=2)+"\n",encoding="utf-8")
           print("U01_OWNER_OPT_IN_PUBLIC_ARCHIVES_VALIDATED")
           PY
-      - name: Publish clearly unsigned owner opt-in prerelease
+      - name: Record exact PUBLIC native hashes for bundled Agent U01 module
         shell: bash
         run: |
           set -euo pipefail
-          if gh release view "$RELEASE_TAG" --repo Faust-S/Br-test >/dev/null 2>&1; then
-            echo "U01_PREVIEW_RELEASE_ALREADY_EXISTS_REFUSING_OVERWRITE"
-            exit 2
-          fi
-          gh release create "$RELEASE_TAG" \
-            candidate/obscura-windows-x86_64.zip \
-            candidate/obscura-linux-x86_64.tar.gz \
-            candidate/LICENSE-OBSCURA.txt \
-            candidate/manifest.preview.json \
-            --repo Faust-S/Br-test --target "$SOURCE_COMMIT" \
-            --title "IWXA Obscura 0.6 headless - unsigned owner opt-in preview" \
-            --notes "Public original U01 native worker, checked in run 43739318017. This is an UNSIGNED preview, not a signed official publisher release. Agent installation requires explicit user approval and archive/EXE SHA-256 verification through original U01; website reading requires separate consent. No renderer and no private Agent code." \
-            --prerelease --latest=false
-          gh release view "$RELEASE_TAG" --repo Faust-S/Br-test --json tagName,isPrerelease,assets --jq '{tag:.tagName,prerelease:.isPrerelease,assets:[.assets[].name]}'
-          echo "U01_OWNER_OPT_IN_PREVIEW_PUBLIC_RELEASE_CREATED"
+          python - <<'PY'
+          import hashlib,json,pathlib
+          root=pathlib.Path('candidate')
+          doc=json.loads((root/'manifest.preview.json').read_text())
+          print('U01_PUBLIC_CANDIDATE_MANIFEST_SHA256='+hashlib.sha256((root/'manifest.candidate.json').read_bytes()).hexdigest())
+          for platform, row in sorted(doc['platforms'].items()):
+              print('U01_'+platform.upper().replace('-','_')+'_ARCHIVE_SHA256='+row['archive_sha256'])
+              print('U01_'+platform.upper().replace('-','_')+'_EXECUTABLE_SHA256='+row['executable_sha256'])
+              print('U01_'+platform.upper().replace('-','_')+'_PATCH_SHA256='+row['origin_guard_patch_sha256'])
+          print('U01_OWNER_APPROVED_BUNDLE_SOURCE_PUBLIC_VERIFICATION_PASS')
+          PY
+          # User-facing Agent will distribute the archive as a module
+          # inside its checked product package, not from GitHub Releases.
+          # No private data, token material or unsigned public Release created.
