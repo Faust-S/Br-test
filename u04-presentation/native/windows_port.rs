@@ -27,6 +27,8 @@ mod os {
         fn GetWindowTextLengthW(hwnd: isize) -> i32;
         fn SetForegroundWindow(hwnd: isize) -> i32;
         fn GetForegroundWindow() -> isize;
+        fn IsIconic(hwnd: isize) -> i32;
+        fn ShowWindowAsync(hwnd: isize, command: i32) -> i32;
     }
 
     pub fn process_stamp(pid: u32) -> Option<u64> {
@@ -62,10 +64,26 @@ mod os {
     }
 
     pub fn focus(hwnd: isize) -> bool {
+        // SetForegroundWindow is permitted only when Windows authorizes the
+        // activating process. No synthetic ALT input, foreground-lock
+        // override or unverified "focused" receipt is used here.
         unsafe {
+            // A minimized external program can have a valid visible HWND.
+            // Restore that exact window only when the user requested focus.
+            if IsIconic(hwnd) != 0 { ShowWindowAsync(hwnd, 9); } // SW_RESTORE
             SetForegroundWindow(hwnd);
-            GetForegroundWindow() == hwnd
         }
+        // Foreground activation is communicated between GUI threads; on a
+        // busy installed WebView2/Windows desktop the transition can lag the
+        // return from SetForegroundWindow. Verify the actual HWND, not just
+        // the call's BOOL or the existence of an Atlas process.
+        for attempt in 0..16 {
+            if unsafe { GetForegroundWindow() } == hwnd { return true; }
+            if attempt < 15 {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+        }
+        false
     }
 }
 
