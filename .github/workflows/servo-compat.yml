@@ -1,9 +1,7 @@
 name: Servo IndexedDB
 on:
-  push:
-    branches: ['work/**']
-    paths: ['.github/workflows/servo-compat.yml','tests/**','probes/**']
   workflow_dispatch:
+
 permissions:
   contents: read
 env:

@@ -1,11 +1,7 @@
 name: Servo nightly / Windows
 on:
-  push:
-    branches: ['work/**']
-    paths:
-      - 'nightly/**'
-      - '.github/workflows/servo-nightly.yml'
   workflow_dispatch:
+
 permissions:
   contents: read
 env:
