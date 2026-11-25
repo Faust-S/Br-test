@@ -1,13 +1,7 @@
 name: Agent 0.6 headless protocol tests
 on:
-  push:
-    branches: [work/2026-11-15-agent06-headless-obscura]
-    paths:
-      - 'agent-headless/**'
-      - 'universal-install/qualification/agent06_unsigned_release_candidate.py'
-      - 'universal-install/tests/test_agent06_unsigned_release_candidate.py'
-      - '.github/workflows/agent06-headless-protocol.yml'
   workflow_dispatch:
+
 permissions:
   contents: read
 jobs:
