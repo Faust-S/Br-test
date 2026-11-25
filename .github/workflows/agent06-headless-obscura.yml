@@ -1,19 +1,7 @@
 name: Agent 0.6 headless Obscura native qualification
 on:
-  push:
-    branches:
-      - work/2026-11-15-agent06-headless-obscura
-    paths:
-      - 'agent-headless/iwxa_obscura/**'
-      - 'agent-headless/patches/**'
-      - 'agent-headless/qualification/**'
-      - 'agent-headless/tests/**'
-      - 'universal-install/qualification/package_native_release.py'
-      - 'universal-install/qualification/agent06_unsigned_release_candidate.py'
-      - 'universal-install/tests/test_agent06_unsigned_release_candidate.py'
-      - 'universal-install/qualification/native_obscura_install.py'
-      - '.github/workflows/agent06-headless-obscura.yml'
   workflow_dispatch:
+
 permissions:
   contents: read
 concurrency:
