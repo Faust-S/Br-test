@@ -2,9 +2,8 @@
 # No private Agent checkout, binaries, credentials or user data.
 name: IWXA Obscura 0.6 owner opt-in unsigned preview
 on:
-  push:
-    branches:
-      - work/2026-11-16-agent06-owner-optin-obscura-preview
+  workflow_dispatch:
+
 permissions:
   contents: write
   actions: read
