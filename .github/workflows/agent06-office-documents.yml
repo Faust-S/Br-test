@@ -1,14 +1,7 @@
 name: IWXA Agent06 U01 Office Documents
 on:
-  push:
-    branches:
-      - work/2026-11-15-agent06-office-document-integration
-    paths:
-      - universal-install/iwxa_universal_install/document_operations.py
-      - universal-install/qualification/office_document_u01.py
-      - universal-install/tests/test_document_operations.py
-      - .github/workflows/agent06-office-documents.yml
   workflow_dispatch:
+
 permissions:
   contents: read
 jobs:
