@@ -1,12 +1,7 @@
 name: IWXA Universal Program Connection - Two Hosts
 on:
-  push:
-    branches: [work/2026-11-04-universal-program-integration]
-    paths:
-      - 'universal-install/**'
-      - '!universal-install/qualification/desktop-host/**'
-      - '.github/workflows/universal-program-integration.yml'
   workflow_dispatch:
+
 permissions:
   contents: read
 concurrency:
