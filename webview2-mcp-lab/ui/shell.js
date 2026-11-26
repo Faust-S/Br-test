@@ -8,7 +8,7 @@ if(typeof api?.core?.invoke!=='function'){
 const invoke=api.core.invoke;
 const toggle=document.getElementById('toggle'), slot=document.getElementById('guest-slot');
 const status=document.getElementById('status'), address=document.getElementById('address'), width=document.getElementById('width');
-let visible=true, running=false, dirty=false, frame=0, retries=0;
+let visible=true, running=false, dirty=false, frame=0, retries=0, addressReady=false;
 function schedule(){
   dirty=true;
   if(!frame) frame=requestAnimationFrame(()=>{frame=0;void flush()});
@@ -26,10 +26,21 @@ async function flush(){
         retries=0;
         status.textContent=visible?'Browser visible':'Browser hidden';
         report('native_layout_ack',String(visible));
+        if(!addressReady){
+          try{updateUrl(await invoke('browser_url'));addressReady=true}
+          catch(error){report('browser_url_error',String(error))}
+        }
       }catch(error){
-        status.textContent='ERROR: '+String(error);
-        report('native_layout_error',String(error));
-        if(retries++<10)setTimeout(schedule,100);
+        const code=String(error);
+        if(code==='browser_guest_unavailable'&&retries++<60){
+          status.textContent='Preparing browser';
+          report('native_layout_wait',code);
+          setTimeout(schedule,250);
+        }else{
+          status.textContent='ERROR: '+code;
+          report('native_layout_error',code);
+          if(code!=='browser_guest_unavailable'&&retries++<10)setTimeout(schedule,100);
+        }
       }
     }
   }finally{running=false;if(dirty)schedule()}
@@ -54,5 +65,4 @@ if(api.event?.listen){
   void api.event.listen('lab-browser-url',event=>updateUrl(event.payload)).catch(error=>report('event_listen_error',String(error)));
   void api.event.listen('lab-browser-error',event=>{status.textContent='ERROR: '+String(event.payload)}).catch(error=>report('event_listen_error',String(error)));
 }
-void invoke('browser_url').then(updateUrl).catch(error=>report('browser_url_error',String(error)));
 report('shell_controller_ready');

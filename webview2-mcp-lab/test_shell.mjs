@@ -6,8 +6,8 @@ import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('./ui/shell.js',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function harness({deferSync=false}={}){
-  const calls=[], frames=[], nativeEvents=new Map(), resizeObservers=[], timers=[], elements=new Map();
+function harness({deferSync=false,guestUnavailable=0}={}){
+  const calls=[], frames=[], nativeEvents=new Map(), resizeObservers=[], timers=[], elements=new Map(), reports=[];
   let rect={left:380,top:54,right:1000,bottom:700,width:620,height:646};
   let active=0,maxActive=0;
   const pending=[];
@@ -26,21 +26,23 @@ function harness({deferSync=false}={}){
   const api={core:{invoke(name,args){
     calls.push({name,args:args===undefined?null:JSON.parse(JSON.stringify(args))});
     if(name==='browser_url')return Promise.resolve('http://127.0.0.1:1/form');
+    if(name==='sync_pane'&&guestUnavailable>0){guestUnavailable--;return Promise.reject('browser_guest_unavailable')}
     if(name==='sync_pane'&&deferSync){
       active++;maxActive=Math.max(maxActive,active);
       return new Promise(resolve=>pending.push(()=>{active--;resolve()}));
     }
     return Promise.resolve();
   }},event:{listen(name,cb){nativeEvents.set(name,cb);return Promise.resolve(()=>{})}}};
-  const win={__TAURI__:api,innerWidth:1000,innerHeight:700,addEventListener(){}};
+  const win={__TAURI__:api,__IWXA_LAB_REPORT:(stage,message)=>reports.push({stage,message}),innerWidth:1000,innerHeight:700,addEventListener(){}};
   vm.runInNewContext(source,{window:win,document,ResizeObserver:class{
     constructor(cb){resizeObservers.push(cb)} observe(){}
   },requestAnimationFrame(cb){frames.push(cb);return frames.length},setTimeout(cb){timers.push(cb)}});
-  return {calls,el,document,body,nativeEvents,pending,
+  return {calls,el,document,body,nativeEvents,pending,reports,
     get maxActive(){return maxActive},
     syncs(){return calls.filter(c=>c.name==='sync_pane').map(c=>c.args)},
     setRect(value){rect=value;resizeObservers.forEach(cb=>cb())},
     async frame(){assert.ok(frames.length);frames.shift()();await tick()},
+    async timer(){assert.ok(timers.length);timers.shift()();await tick()},
     async settle(){await tick()}};
 }
 
@@ -93,4 +95,15 @@ test('native URL changes update the trusted address except while the user edits 
   h.document.activeElement=h.el('address');h.el('address').value='editing';
   h.nativeEvents.get('lab-browser-url')({payload:'http://127.0.0.1:1/form'});
   assert.equal(h.el('address').value,'editing');
+});
+
+test('waits for the native guest before the first address lookup',async()=>{
+  const h=harness({guestUnavailable:1});await h.frame();
+  assert.equal(h.el('status').textContent,'Preparing browser');
+  assert.equal(h.calls.filter(c=>c.name==='browser_url').length,0);
+  assert.equal(h.reports.some(r=>r.stage==='native_layout_error'),false);
+  await h.timer();await h.frame();
+  assert.equal(h.el('status').textContent,'Browser visible');
+  assert.equal(h.el('address').value,'http://127.0.0.1:1/form');
+  assert.equal(h.calls.filter(c=>c.name==='browser_url').length,1);
 });

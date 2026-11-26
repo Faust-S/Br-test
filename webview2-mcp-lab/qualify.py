@@ -17,6 +17,7 @@ import time
 import urllib.request
 from snapshot_refs import uid
 from stdio_transport import StdioMcpTransport
+from public_sites import SITES, validate_public_page, validate_public_snapshot
 from advanced_fixture import DOWNLOAD_BYTES, UPLOAD_BYTES, handle_get, handle_post
 
 ROOT = Path(__file__).resolve().parent
@@ -148,7 +149,7 @@ class Mcp:
     def call(self, name, **args):
         start = time.monotonic()
         result = self.request("tools/call", {"name": name, "arguments": args})
-        REPORT.setdefault("calls", []).append({"name": name, "elapsed_ms": round((time.monotonic()-start)*1000), "text_bytes": len(self.text(result).encode("utf-8")), "is_error": bool(result.get("isError")), "uid": args.get("uid")})
+        REPORT.setdefault("calls", []).append({"name": name, "elapsed_ms": round((time.monotonic()-start)*1000), "text_bytes": len(self.text(result).encode("utf-8")), "wire_result_bytes":len(json.dumps(result,ensure_ascii=False,separators=(",",":")).encode("utf-8")), "is_error": bool(result.get("isError")), "uid": args.get("uid")})
         if result.get("isError"):
             raise RuntimeError(f"{name}: {self.text(result)[:1500]}")
         return result
@@ -215,7 +216,7 @@ def shot(client, page, name):
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
     (OUT / (name + ".png")).write_bytes(data)
 
-def run(advanced=False):
+def run(advanced=False, public_sites=False):
     if sys.platform != "win32": raise RuntimeError("actual Windows GUI required")
     user = ctypes.windll.user32
     try: user.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -247,7 +248,7 @@ def run(advanced=False):
     hosts = []
     def start_host(name):
         log = (OUT/(name+".log")).open("wb")
-        env = dict(os.environ, IWXA_LAB_PROFILE=str(profile), IWXA_LAB_URL=url, IWXA_LAB_SHELL_URL=shell_url, WEBVIEW2_USER_DATA_FOLDER=str(profile/"shell"))
+        env = dict(os.environ, IWXA_LAB_PROFILE=str(profile), IWXA_LAB_URL=url, IWXA_LAB_SHELL_URL=shell_url, WEBVIEW2_USER_DATA_FOLDER=str(profile/"shell"), IWXA_LAB_PUBLIC_SITES="1" if public_sites else "0")
         # No global remote-debugging flag; do not inherit an externally configured one.
         env.pop("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", None)
         proc = subprocess.Popen([str(binary)],env=env,stdout=log,stderr=subprocess.STDOUT)
@@ -476,6 +477,56 @@ def run(advanced=False):
             await_snapshot(client3,page3,"Session: test operator","23-cookie-restart")
             check("http_only_cookie_persists_after_cold_restart")
             REPORT["g2_status"]="PASS"
+        if public_sites:
+            if not advanced:raise RuntimeError("public smoke requires the completed local browser route")
+            from PIL import Image,ImageChops,ImageStat
+            user.SetWindowPos(hwnd3,0,12,12,min(sw-36,1040),min(sh-80,680),0x0040)
+            # The last fixture page is still visible before leaving the local website.
+            layout_pixels(hwnd3,True,"24-public-start")
+            REPORT["public_sites_status"]="PARTIAL"
+            REPORT["public_sites"]=[]
+            for name,address,allowed_hosts,markers in SITES:
+                entry={"name":name,"requested_url":address,"status":"NOT_CONFIRMED"}
+                REPORT["public_sites"].append(entry)
+                start=time.monotonic()
+                try:
+                    # Only navigation and observation of public sites; no forms, account or mutation.
+                    client3.call("navigate_page",pageId=page3,type="url",url=address,timeout=30000)
+                    actual=validate_public_page(client3.call("list_pages"),page3,allowed_hosts)
+                    entry["actual_url"]=actual["url"];entry["title"]=actual["title"]
+                    def public_content():
+                        value=snapshot(client3,page3,"public-"+name+"-ax")
+                        try:count=validate_public_snapshot(value,markers)
+                        except RuntimeError:return None
+                        return value,count
+                    observed,nodes=wait_for("actual public AX "+name,public_content,timeout=20)
+                    entry["ax_nodes"]=nodes;entry["ax_text_bytes"]=len(observed.encode("utf-8"))
+                    shot(client3,page3,"public-"+name+"-mcp")
+                    desktop=gui.screenshot().convert("RGB")
+                    desktop.save(OUT/("public-"+name+"-native.png"))
+                    x,y,w,h,d=geom(hwnd3)
+                    bx,by,bw,bh=wait_for("native public slot",lambda:pane_bounds(hwnd3))
+                    if not(0<=x+bx<x+bx+bw<=desktop.width and 0<=y+by<y+by+bh<=desktop.height):
+                        raise RuntimeError("public_native_slot_outside_desktop")
+                    native=desktop.crop((x+bx,y+by,x+bx+bw,y+by+bh))
+                    native.save(OUT/("public-"+name+"-crop.png"))
+                    with Image.open(OUT/("public-"+name+"-mcp.png")) as image:
+                        actual_image=image.convert("RGB")
+                    entry["mcp_pixels"]=list(actual_image.size);entry["native_pixels"]=list(native.size)
+                    # Same actual viewport, not an image used as the UI.
+                    entry["pixel_mean_difference"]=round(sum(ImageStat.Stat(ImageChops.difference(
+                        native.resize((64,64)),actual_image.resize((64,64)))).mean)/3,3)
+                    if actual_image.size!=native.size or entry["pixel_mean_difference"]>16:
+                        raise RuntimeError("public_native_viewport_not_confirmed")
+                    entry["status"]="PASS"
+                    check("public_visible_page_"+name,entry.copy())
+                except (RuntimeError,AssertionError,OSError,ValueError) as exc:
+                    entry["error"]=str(exc)[:1000]
+                    print("PUBLIC_NOT_CONFIRMED",name,entry["error"],flush=True)
+                finally:entry["elapsed_ms"]=round((time.monotonic()-start)*1000)
+            if not all(e["status"]=="PASS" for e in REPORT["public_sites"]):
+                raise RuntimeError("one or more public sites not confirmed; local G1/G2 results preserved")
+            REPORT["public_sites_status"]="PASS"
         REPORT["status"]="PASS"
     except BaseException:
         try:gui.screenshot().save(OUT/"failure-native-before-cleanup.png")
@@ -501,7 +552,7 @@ def run(advanced=False):
             REPORT["shell_events"]=SHELL_EVENTS[-100:]
 
 if __name__ == "__main__":
-    try: run(advanced="--advanced" in sys.argv)
+    try: run(advanced="--advanced" in sys.argv,public_sites="--public-sites" in sys.argv)
     except BaseException as exc:
         REPORT["error"]=repr(exc)
         try:

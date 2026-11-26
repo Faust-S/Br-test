@@ -6,7 +6,18 @@ use std::path::PathBuf;
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, WebviewWindowBuilder};
 use tauri::{ipc::CapabilityBuilder, webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}};
 
-struct PaneState { fixture_origin:String, shell_url:Option<tauri::Url> }
+struct PaneState { fixture_origin:String, shell_url:Option<tauri::Url>, public_sites:bool }
+
+// The public smoke test uses a fresh lab profile and only these public origins.
+// Production browser navigation is not constrained to this qualification list.
+const PUBLIC_HOSTS:&[&str]=&["github.com","iwxa.ru","www.iwxa.ru","learn.iwxa.ru","artbazi.ru","www.artbazi.ru"];
+
+fn browsing_destination_allowed(fixture_origin:&str,public_sites:bool,url:&tauri::Url)->bool {
+    if !url.username().is_empty() || url.password().is_some() { return false; }
+    if url.origin().ascii_serialization()==fixture_origin { return true; }
+    public_sites && url.scheme()=="https" && url.port().is_none() &&
+        url.host_str().is_some_and(|host|PUBLIC_HOSTS.contains(&host))
+}
 
 // HTTP IPC carries an Origin header without the document path.
 fn shell_location_allowed(expected:Option<&tauri::Url>, actual:&tauri::Url)->bool {
@@ -32,6 +43,18 @@ mod shell_tests {
             "http://127.0.0.1:12345/",
             "http://tauri.localhost/"] {
             assert!(!shell_location_allowed(Some(&expected),&url.parse().unwrap()),"{url}");
+        }
+    }
+    #[test]
+    fn public_smoke_destinations_are_explicit_and_not_shell() {
+        let fixture="http://127.0.0.1:12345";
+        let public:tauri::Url="https://github.com/ChromeDevTools/chrome-devtools-mcp".parse().unwrap();
+        assert!(!browsing_destination_allowed(fixture,false,&public));
+        assert!(browsing_destination_allowed(fixture,true,&public));
+        assert!(browsing_destination_allowed(fixture,false,&"http://127.0.0.1:12345/form".parse().unwrap()));
+        for url in ["http://github.com/","https://github.com.evil/","https://user@github.com/",
+            "https://github.com:444/","http://127.0.0.1:12346/desktop/index.html","file:///C:/test"] {
+            assert!(!browsing_destination_allowed(fixture,true,&url.parse().unwrap()),"{url}");
         }
     }
     #[test]
@@ -87,8 +110,7 @@ fn browser_command(webview:Webview,state:State<'_,PaneState>,operation:String,ad
     match operation.as_str(){
         "navigate"=>{
             let url:tauri::Url=address.ok_or("address_required")?.parse().map_err(|_|"invalid_address")?;
-            if url.origin().ascii_serialization()!=state.fixture_origin ||
-                !url.username().is_empty() || url.password().is_some(){return Err("outside_lab_origin".into());}
+            if !browsing_destination_allowed(&state.fixture_origin,state.public_sites,&url){return Err("outside_lab_origin".into());}
             guest.navigate(url).map_err(|e|e.to_string())
         },
         "reload"=>guest.reload().map_err(|e|e.to_string()),
@@ -120,6 +142,7 @@ fn main(){
     assert!(entry.scheme()=="http" && entry.host_str()==Some("127.0.0.1") && entry.port().is_some() &&
         entry.username().is_empty() && entry.password().is_none() && entry.path()=="/form","local fixture only");
     let origin=entry.origin();
+    let public_sites=std::env::var("IWXA_LAB_PUBLIC_SITES").ok().as_deref()==Some("1");
     let remote_shell:Option<tauri::Url>=std::env::var("IWXA_LAB_SHELL_URL").ok().map(|s|s.parse().expect("shell URL"));
     if let Some(url)=&remote_shell{
         assert!(url.scheme()=="http" && url.host_str()==Some("127.0.0.1") && url.port().is_some() &&
@@ -145,7 +168,7 @@ fn main(){
     std::fs::create_dir_all(&downloads).expect("lab download directory");
 
     tauri::Builder::default()
-        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone()})
+        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone(),public_sites})
         .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command])
         .setup(move|app|{
             let shell_url=if let Some(url)=&remote_shell{
@@ -167,7 +190,7 @@ fn main(){
                 })
                 .on_new_window(|_,_|NewWindowResponse::Deny).build()?;
             let window=shell.as_ref().window();
-            let fixture_origin=origin.clone();
+            let fixture_origin=origin.ascii_serialization();
             let download_origin=origin.clone();
             let download_path=downloads.join("iwxa-result.txt");
             let guest=window.add_child(
@@ -175,7 +198,7 @@ fn main(){
                     .data_directory(guest_data.clone())
                     .additional_browser_args("--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --no-first-run")
                     .devtools(false)
-                    .on_navigation(move|url|url.origin()==fixture_origin)
+                    .on_navigation(move|url|browsing_destination_allowed(&fixture_origin,public_sites,url))
                     .on_page_load(|view,payload|{
                         let url=payload.url().to_string();
                         let _=view.emit_to("shell","lab-browser-url",url);
