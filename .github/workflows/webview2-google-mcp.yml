@@ -58,9 +58,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node -e "const p=require('./node_modules/chrome-devtools-mcp/package.json'); if(p.version!=='1.14.0')process.exit(1); console.log(p.name,p.version,p.license);"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m py_compile qualify.py snapshot_refs.py test_snapshot_refs.py
+          python -m py_compile qualify.py snapshot_refs.py test_snapshot_refs.py advanced_fixture.py test_advanced_fixture.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m unittest -v test_snapshot_refs
+          python -m unittest -v test_snapshot_refs test_advanced_fixture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build actual native Tauri two-WebView host
         working-directory: webview2-mcp-lab/src-tauri
@@ -70,10 +70,10 @@ jobs:
           cargo build --locked --features custom-protocol
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install existing public GUI qualification tools
-        run: python -m pip install Pillow==11.3.0 pyautogui==0.9.54
+        run: python -m pip install Pillow==11.3.0 pyautogui==0.9.54 psutil==7.0.0
       - name: Actual Windows GUI and original MCP roundtrip
         working-directory: webview2-mcp-lab
-        run: python qualify.py
+        run: python qualify.py --advanced
       - name: Preserve public qualification evidence
         if: always()
         uses: actions/upload-artifact@v4

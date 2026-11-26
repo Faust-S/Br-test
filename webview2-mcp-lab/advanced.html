@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>IWXA browser operations</title>
+<style>
+*{box-sizing:border-box}body{font:15px system-ui;background:#e5f4ec;color:#20382b;margin:0;padding:24px}
+h1{font-size:21px;margin:0 0 12px}#session{margin:0 0 10px}button,input,select{font:15px system-ui}
+#signin{position:absolute;left:24px;top:80px;width:235px;height:34px}
+#order{margin-top:61px;display:grid;gap:7px;max-width:320px}
+#order input:not([type=checkbox]),select{width:100%;height:30px}
+#submit-order,#upload-button{height:34px}#file-area{margin-top:14px;max-width:340px}
+#document{display:block;width:100%;margin:7px 0}#result{min-height:21px;overflow-wrap:anywhere}
+button{cursor:pointer}a{display:inline-block;margin-top:5px}
+</style></head>
+<body>
+<h1>IWXA shared browser operations</h1><p id="session">{{SESSION_STATUS}}</p>
+<form method="post" action="/signin"><button id="signin" type="submit">Sign in as test operator</button></form>
+<form id="order">
+<label for="company">Company</label><input id="company" name="company">
+<label for="delivery">Delivery method</label><select name="delivery" id="delivery"><option value="Standard">Standard</option><option value="Express">Express</option></select>
+<label><input type="checkbox" name="receipt" value="yes" id="receipt"> Include receipt</label>
+<button id="submit-order" type="submit">Submit order</button>
+</form>
+<section id="file-area"><label for="document">Supporting file</label>
+<input type="file" id="document" aria-label="Supporting file"><button id="upload-button" type="button">Upload evidence</button></section>
+<p id="result" role="status">Waiting for operation</p>
+<a href="/download" download="iwxa-result.txt">Download result</a>
+<script>
+const order=document.getElementById('order'), result=document.getElementById('result');
+order.addEventListener('submit',async event=>{
+ event.preventDefault();
+ try{
+  const response=await fetch('/advanced-order',{method:'POST',body:new URLSearchParams(new FormData(order))});
+  result.textContent=await response.text();
+ }catch(error){result.textContent='Order failed'}
+});
+document.getElementById('upload-button').addEventListener('click',async()=>{
+ const file=document.getElementById('document').files[0];
+ if(!file){result.textContent='No selected file';return}
+ try{
+  const response=await fetch('/upload',{method:'POST',headers:{'Content-Type':'application/octet-stream'},body:file});
+  if(!response.ok){result.textContent='Upload failed';return}
+  const data=await response.json();
+  result.textContent='Uploaded '+data.size+' bytes';
+ }catch(error){result.textContent='Upload failed'}
+});
+</script></body></html>

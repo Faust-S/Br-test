@@ -3,7 +3,7 @@
 
 use std::{path::PathBuf, sync::atomic::{AtomicBool, Ordering}};
 use tauri::{Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, Window, WindowEvent};
-use tauri::{webview::{NewWindowResponse, WebviewBuilder}, window::WindowBuilder};
+use tauri::{webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}, window::WindowBuilder};
 
 struct PaneState(AtomicBool);
 
@@ -53,6 +53,8 @@ fn main() {
     let guest_data = profile.join("guest");
     std::fs::create_dir_all(&shell_data).expect("shell profile");
     std::fs::create_dir_all(&guest_data).expect("guest profile");
+    let downloads = profile.join("downloads");
+    std::fs::create_dir_all(&downloads).expect("lab download directory");
 
     tauri::Builder::default()
         .manage(PaneState(AtomicBool::new(true)))
@@ -77,12 +79,30 @@ fn main() {
                 PhysicalSize::new(split.max(1), size.height.max(1)),
             )?;
             let fixture_origin = origin.clone();
+            let download_origin = origin.clone();
+            let download_path = downloads.join("iwxa-result.txt");
             window.add_child(
                 WebviewBuilder::new("guest", WebviewUrl::External(entry.clone()))
                     .data_directory(guest_data.clone())
                     .additional_browser_args("--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --no-first-run")
                     .devtools(false)
                     .on_navigation(move |url| url.origin() == fixture_origin)
+                    .on_download(move |_, event| {
+                        match event {
+                            DownloadEvent::Requested { url, destination } => {
+                                if url.origin() != download_origin || url.path() != "/download" ||
+                                    download_path.exists() { return false; }
+                                *destination = download_path.clone();
+                                println!("LAB_DOWNLOAD_REQUESTED");
+                                true
+                            }
+                            DownloadEvent::Finished { success, .. } => {
+                                println!("LAB_DOWNLOAD_FINISHED success={success}");
+                                true
+                            }
+                            _ => false,
+                        }
+                    })
                     .on_new_window(|_, _| NewWindowResponse::Deny),
                 PhysicalPosition::new(split as i32, 0),
                 PhysicalSize::new((size.width-split).max(1), size.height.max(1)),
