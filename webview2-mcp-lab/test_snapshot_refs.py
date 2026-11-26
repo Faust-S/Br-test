@@ -35,6 +35,12 @@ class SnapshotRefsTest(unittest.TestCase):
     def test_wrong_role_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError,"found 0"):
             uid(CAPTURE,"button","Agent entry")
+    def test_actual_whitespace_in_accessible_name(self):
+        # W067.3 recorded the leading space; exact names must not silently conflate nodes.
+        actual='uid=5_10 checkbox " Include receipt"'
+        self.assertEqual(uid(actual,"checkbox"," Include receipt"),"5_10")
+        with self.assertRaisesRegex(RuntimeError,"found 0"):
+            uid(actual,"checkbox","Include receipt")
     def test_invalid_role(self):
         with self.assertRaises(ValueError):
             uid(CAPTURE,"textbox .*","Agent entry")
