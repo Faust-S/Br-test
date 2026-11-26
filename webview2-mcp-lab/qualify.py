@@ -7,7 +7,6 @@ import http.server
 import json
 import os
 from pathlib import Path
-import queue
 import re
 import shutil
 import subprocess
@@ -17,6 +16,7 @@ import threading
 import time
 import urllib.request
 from snapshot_refs import uid
+from stdio_transport import StdioMcpTransport
 from advanced_fixture import DOWNLOAD_BYTES, UPLOAD_BYTES, handle_get, handle_post
 
 ROOT = Path(__file__).resolve().parent
@@ -114,7 +114,7 @@ def events(kind, **expected):
         return next((e for e in reversed(EVENTS) if e.get("kind") == kind and all(e.get(k) == v for k, v in expected.items())), None)
 
 class Mcp:
-    """Qualification-only JSON-RPC stdio driver. The browser tools are Google's, unchanged."""
+    """Browser qualification using the reusable, transport-only MCP client."""
     def __init__(self, profile, log_name):
         package = ROOT / "node_modules/chrome-devtools-mcp"
         manifest = json.loads((package / "package.json").read_text(encoding="utf-8"))
@@ -122,54 +122,29 @@ class Mcp:
             raise RuntimeError("unexpected original MCP version")
         entry = (package / manifest["bin"]["chrome-devtools-mcp"]).resolve()
         self.log = (OUT / log_name).open("wb")
-        self.proc = subprocess.Popen(
-            ["node", str(entry), "--autoConnect", "--user-data-dir=" + str(profile),
-             "--no-usage-statistics", "--no-performance-crux", "--no-javascript-evaluation", "--no-file-navigations"],
-            cwd=ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=self.log,
-            encoding="utf-8", text=True, bufsize=1, creationflags=subprocess.CREATE_NO_WINDOW)
-        self.messages = queue.Queue()
-        self.sequence = 0
-        self.reader = threading.Thread(target=self._read, daemon=True)
-        self.reader.start()
-    def _read(self):
         try:
-            for line in self.proc.stdout:
-                try: self.messages.put(json.loads(line))
-                except ValueError: self.messages.put({"_invalid_stdout": line[:300]})
-        finally:
-            self.messages.put({"_eof": True})
-    def send(self, message):
-        self.proc.stdin.write(json.dumps(message, ensure_ascii=True) + "\n")
-        self.proc.stdin.flush()
+            self.transport = StdioMcpTransport(
+                ["node", str(entry), "--autoConnect", "--user-data-dir=" + str(profile),
+                 "--no-usage-statistics", "--no-performance-crux", "--no-javascript-evaluation", "--no-file-navigations"],
+                cwd=ROOT, stderr=self.log)
+        except BaseException:
+            self.log.close()
+            raise
+        self.proc = self.transport.process
+
     def request(self, method, params, timeout=70):
-        self.sequence += 1
-        request_id = self.sequence
-        self.send({"jsonrpc": "2.0", "id": request_id, "method": method, "params": params})
-        until = time.monotonic() + timeout
-        while True:
-            remaining = until - time.monotonic()
-            if remaining <= 0:
-                raise RuntimeError("MCP timeout: " + method)
-            try: response = self.messages.get(timeout=remaining)
-            except queue.Empty: raise RuntimeError("MCP timeout: " + method)
-            if "_invalid_stdout" in response or "_eof" in response:
-                raise RuntimeError("MCP stdio failure: " + str(response))
-            if response.get("id") != request_id:
-                # No sampling/elicitation is needed for these deterministic tools.
-                if "id" in response and "method" in response:
-                    self.send({"jsonrpc":"2.0","id":response["id"],"error":{"code":-32601,"message":"Qualification client does not implement this method"}})
-                continue
-            if "error" in response:
-                raise RuntimeError(f"MCP {method}: {response['error']}")
-            return response["result"]
+        # Fixture calls are conservatively treated as possibly consequential.
+        # Production classification stays in the existing common ToolProvider.
+        return self.transport.request(method, params, timeout=timeout, write=method=="tools/call")
+
     def initialize(self):
-        response = self.request("initialize", {"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"iwxa-webview2-lab","version":"0.6.7"}})
-        self.send({"jsonrpc":"2.0","method":"notifications/initialized"})
+        response = self.transport.initialize(client_name="iwxa-webview2-lab", client_version="0.6.7")
         REPORT.setdefault("mcp_negotiations",[]).append({
             "protocolVersion":response.get("protocolVersion"),
             "serverInfo":response.get("serverInfo"),
             "capabilities":response.get("capabilities")})
         return response["serverInfo"]
+
     def call(self, name, **args):
         start = time.monotonic()
         result = self.request("tools/call", {"name": name, "arguments": args})
@@ -181,13 +156,9 @@ class Mcp:
     def text(result):
         return "\n".join(part["text"] for part in result.get("content", []) if part.get("type") == "text")
     def close(self):
-        if self.proc.stdin and not self.proc.stdin.closed: self.proc.stdin.close()
-        try: self.proc.wait(timeout=15)
-        except subprocess.TimeoutExpired:
-            self.proc.terminate()
-            self.proc.wait(timeout=10)
-        finally:
-            self.log.close()
+        try:self.transport.close()
+        finally:self.log.close()
+
 
 def read_json(url):
     with urllib.request.urlopen(url, timeout=3) as response:
