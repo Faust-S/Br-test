@@ -58,9 +58,9 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node -e "const p=require('./node_modules/chrome-devtools-mcp/package.json'); if(p.version!=='1.14.0')process.exit(1); console.log(p.name,p.version,p.license);"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m py_compile qualify.py snapshot_refs.py test_snapshot_refs.py advanced_fixture.py test_advanced_fixture.py stdio_transport.py test_stdio_transport.py public_sites.py test_public_sites.py tab_identity.py test_tab_identity.py
+          python -m py_compile qualify.py snapshot_refs.py test_snapshot_refs.py advanced_fixture.py test_advanced_fixture.py stdio_transport.py test_stdio_transport.py public_sites.py test_public_sites.py tab_identity.py test_tab_identity.py test_dynamic_identity.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -m unittest -v test_snapshot_refs test_advanced_fixture test_stdio_transport test_public_sites test_tab_identity
+          python -m unittest -v test_snapshot_refs test_advanced_fixture test_stdio_transport test_public_sites test_tab_identity test_dynamic_identity
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node --test test_shell.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

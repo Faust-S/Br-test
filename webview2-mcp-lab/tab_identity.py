@@ -37,3 +37,31 @@ def rebind_pages(binding, pages, ids):
         raise RuntimeError("native_tab_generation_changed")
     lookup={v:k for k,v in ids.items()}
     return {label:lookup[identity] for label,identity in binding.items()}
+
+def attach_tab(binding, label, bootstrap_url, pages, ids):
+    """Commit one native creation only after the original catalog proves it.
+
+    Existing pages may have changed URL or MCP pageId. Their original stable
+    identities must still be present; exactly one new identity is allowed.
+    The supplied bootstrap belongs to the trusted native host, not the model.
+    """
+    _catalog_ids(pages, ids)
+    old = set(binding.values())
+    if label in binding or len(old) != len(binding):
+        raise RuntimeError("native_tab_label_already_bound")
+    new = set(ids.values()) - old
+    if not old.issubset(ids.values()) or len(new) != 1:
+        raise RuntimeError("native_tab_generation_changed")
+    identity = next(iter(new))
+    page = next(p for p in pages if ids[p["id"]] == identity)
+    if page["url"] != bootstrap_url or sum(p["url"] == bootstrap_url for p in pages) != 1:
+        raise RuntimeError("native_tab_bootstrap_not_found")
+    return {**binding, label: identity}
+
+def detach_tab(binding, label, pages, ids):
+    """Commit removal only when exactly the specified stable identity is gone."""
+    if label not in binding or len(binding) <= 1:
+        raise RuntimeError("native_tab_close_invalid")
+    remaining = {key: value for key, value in binding.items() if key != label}
+    rebind_pages(remaining, pages, ids)
+    return remaining
