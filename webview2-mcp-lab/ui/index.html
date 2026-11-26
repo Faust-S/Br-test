@@ -1,3 +1,10 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>IWXA trusted shell</title><link rel="stylesheet" href="shell.css"></head>
-<body><button id="toggle" type="button">Hide browser pane</button><h1>IWXA</h1><p>Trusted local shell.</p><p id="status" role="status">Browser visible</p><script src="shell.js"></script></body></html>
+<body data-open="true">
+<main id="workspace"><button id="toggle" type="button">Hide browser pane</button><h1>IWXA</h1><p>Trusted local shell.</p><p id="status" role="status">Browser visible</p>
+<label for="width">Browser width</label><input id="width" type="range" min="40" max="72" value="62"></main>
+<aside id="pane" aria-label="Browser">
+<form id="toolbar"><button type="button" id="back" title="Back">←</button><button type="button" id="forward" title="Forward">→</button><button type="button" id="reload" title="Reload">↻</button>
+<input id="address" type="text" aria-label="Address" autocomplete="off" spellcheck="false"><button type="submit">Go</button></form>
+<div id="guest-slot" aria-label="Native browser surface"></div>
+</aside><script src="shell.js"></script></body></html>

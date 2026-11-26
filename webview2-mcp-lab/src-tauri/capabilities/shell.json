@@ -1,10 +1,13 @@
 {
   "identifier": "lab-shell-only",
-  "description": "Only trusted local lab shell, never the browsing guest.",
+  "description": "Trusted local shell only.",
   "webviews": [
     "shell"
   ],
   "permissions": [
-    "core:default"
+    "core:default",
+    "allow-sync-pane",
+    "allow-browser-url",
+    "allow-browser-command"
   ]
 }

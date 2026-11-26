@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -71,6 +72,22 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         event = json.loads(self.rfile.read(size))
         record_fixture(event)
         self.send_response(204); self.end_headers()
+
+class TrustedShell(http.server.BaseHTTPRequestHandler):
+    def log_message(self,*args): pass
+    def do_GET(self):
+        allowed={"/desktop/index.html":("index.html","text/html; charset=utf-8"),
+                 "/desktop/shell.css":("shell.css","text/css; charset=utf-8"),
+                 "/desktop/shell.js":("shell.js","text/javascript; charset=utf-8")}
+        item=allowed.get(self.path)
+        if not item: self.send_error(404);return
+        name,mime=item
+        data=(ROOT/"ui"/name).read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type",mime)
+        self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'")
+        self.send_header("Cache-Control","no-store")
+        self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
 
 def events(kind, **expected):
     with LOCK:
@@ -224,16 +241,20 @@ def run(advanced=False):
     server = http.server.ThreadingHTTPServer(("127.0.0.1",0),Fixture)
     threading.Thread(target=server.serve_forever,daemon=True).start()
     url = f"http://127.0.0.1:{server.server_port}/form"
-    binary = ROOT / "src-tauri/target/debug/iwxa-webview2-mcp-lab.exe"
-    profile = Path(tempfile.mkdtemp(prefix="iwxa-wv2-")).resolve()
+    shell_server=http.server.ThreadingHTTPServer(("127.0.0.1",0),TrustedShell)
+    threading.Thread(target=shell_server.serve_forever,daemon=True).start()
+    shell_url=f"http://127.0.0.1:{shell_server.server_port}/desktop/index.html"
+    profile=Path(tempfile.mkdtemp(prefix="iwxa-wv2-data-")).resolve()
+    install=Path(tempfile.mkdtemp(prefix="iwxa-wv2-install-")).resolve()
+    binary=install/"iwxa-webview2-mcp-lab.exe"
+    shutil.copy2(ROOT/"src-tauri/target/debug/iwxa-webview2-mcp-lab.exe",binary)
     clients = []
     hosts = []
     def start_host(name):
         log = (OUT/(name+".log")).open("wb")
-        env = dict(os.environ, IWXA_LAB_PROFILE=str(profile), IWXA_LAB_URL=url)
+        env = dict(os.environ, IWXA_LAB_PROFILE=str(profile), IWXA_LAB_URL=url, IWXA_LAB_SHELL_URL=shell_url, WEBVIEW2_USER_DATA_FOLDER=str(profile/"shell"))
         # No global remote-debugging flag; do not inherit an externally configured one.
         env.pop("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", None)
-        env.pop("WEBVIEW2_USER_DATA_FOLDER", None)
         proc = subprocess.Popen([str(binary)],env=env,stdout=log,stderr=subprocess.STDOUT)
         hosts.append((proc,log))
         def find():
@@ -261,6 +282,12 @@ def run(advanced=False):
     def layout_pixels(hwnd, visible, name):
         def probe():
             x,y,w,h,_=geom(hwnd)
+            current=pane_bounds(hwnd)
+            if visible:
+                if not current:return False
+                bx,by,bw,bh=current
+                if not (0<bx<w and 0<by<h and bx+bw==w and by+bh==h):return False
+            elif current is not None:return False
             im=gui.screenshot().convert("RGB")
             if x<0 or y<0 or x+w>=im.width or y+h>=im.height: return False
             left=im.getpixel((x+min(8,w//4),y+h-18))
@@ -274,9 +301,23 @@ def run(advanced=False):
     def click_shell(hwnd):
         x,y,w,h,d=geom(hwnd)
         gui.click(round(x+100*d),round(y+47*d))
+    def pane_bounds(hwnd):
+        pid=W.DWORD();user.GetWindowThreadProcessId(hwnd,ctypes.byref(pid))
+        logs=[Path(log.name) for process,log in hosts if process.pid==pid.value]
+        assert len(logs)==1
+        entries=re.findall(r"(?m)^LAB_PANE_(?:BOUNDS (\d+) (\d+) (\d+) (\d+)|HIDDEN)\s*$",logs[0].read_text(encoding="utf-8",errors="replace"))
+        if not entries or not entries[-1][0]: return None
+        return tuple(map(int,entries[-1]))
     def click_guest(hwnd,x_css,y_css):
         x,y,w,h,d=geom(hwnd)
-        gui.click(round(x+(w*38//100)+x_css*d),round(y+y_css*d))
+        bx,by,bw,bh=wait_for("native slot bounds",lambda:pane_bounds(hwnd))
+        gui.click(round(x+bx+x_css*d),round(y+by+y_css*d))
+    def check_profile_layout():
+        assert (profile/"shell"/"EBWebView").is_dir()
+        assert (profile/"guest"/"EBWebView").is_dir()
+        assert not list(install.glob("*.WebView2"))
+        assert not list((profile/"shell").rglob("DevToolsActivePort"))
+        check("installed_like_separate_profiles_without_adjacent_cache")
     def start_client(folder,name):
         client=Mcp(folder,name+".log"); clients.append(client)
         info=client.initialize()
@@ -290,6 +331,8 @@ def run(advanced=False):
         user.SetWindowPos(hwnd,0,12,12,min(sw-36,1040),min(sh-80,680),0x0040)
         layout_pixels(hwnd,True,"01-native-split")
         check("one_window_two_visible_native_surfaces",list(geom(hwnd)))
+        check_profile_layout()
+        check("remote_shell_native_dock_rect",list(wait_for("slot bounds",lambda:pane_bounds(hwnd))))
         client=start_client(folder,"first")
         tools=client.request("tools/list",{})["tools"]
         required={"list_pages","take_snapshot","fill","click","take_screenshot","navigate_page"}
@@ -326,6 +369,12 @@ def run(advanced=False):
         layout_pixels(hwnd,True,"11-resized")
         assert geom(hwnd)[2:4] != before[2:4]
         check("native_resize_preserves_two_surfaces",list(geom(hwnd)))
+        initial_bounds=pane_bounds(hwnd)
+        x,y,w,h,d=geom(hwnd)
+        gui.click(round(x+48*d),round(y+203*d))
+        wait_for("user adjusted browser pane width",lambda:pane_bounds(hwnd) and pane_bounds(hwnd)[0]>initial_bounds[0])
+        layout_pixels(hwnd,True,"11b-adjusted-width")
+        check("native_dock_width_tracks_trusted_dom",list(pane_bounds(hwnd)))
         client.close();clients.remove(client)
         click_guest(hwnd,95,282)
         wait_for("physical finish after MCP disconnect",lambda:events("Finished",human="Human-167",agent="Agent-167",trusted=True))
@@ -348,6 +397,16 @@ def run(advanced=False):
         assert page_id(client2,url)==page2
         assert "Finished Human-167 Agent-167" in snapshot(client2,page2,"14-history-back")
         check("original_mcp_navigation_and_back_in_same_native_guest")
+        # The native toolbar navigates the same page seen by the MCP, not a second tab.
+        user.SetWindowPos(hwnd2,0,12,12,min(sw-36,1040),min(sh-80,680),0x0040)
+        layout_pixels(hwnd2,True,"14b-toolbar-ready")
+        x,y,w,h,d=geom(hwnd2); bx,by,bw,bh=wait_for("toolbar slot",lambda:pane_bounds(hwnd2))
+        gui.click(round(x+bx+200*d),round(y+25*d));gui.hotkey("ctrl","a");gui.write(second_url,interval=.02);gui.press("enter")
+        wait_for("manual toolbar navigation",lambda:page_id(client2,second_url)==page2)
+        gui.click(round(x+bx+22*d),round(y+25*d))
+        wait_for("native toolbar back",lambda:page_id(client2,url)==page2)
+        await_snapshot(client2,page2,"Finished Human-167 Agent-167","14c-toolbar-back")
+        check("native_toolbar_address_and_history_share_mcp_target")
         REPORT["g1_status"]="PASS"
         if advanced:
             REPORT["g2_status"]="FAIL"
@@ -425,6 +484,7 @@ def run(advanced=False):
                 except subprocess.TimeoutExpired: proc.kill()
             log.close()
         server.shutdown(); server.server_close()
+        shell_server.shutdown(); shell_server.server_close()
         with LOCK: REPORT["last_fixture_events"]=EVENTS[-30:]
 
 if __name__ == "__main__":

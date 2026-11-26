@@ -1,126 +1,152 @@
-// Public compatibility lab. No browser engine, no Agent runtime, no Cherry source.
+// Public product-host parity lab. Native pane attaches to an existing Tauri WebviewWindow.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::{path::PathBuf, sync::atomic::{AtomicBool, Ordering}};
-use tauri::{Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, Window, WindowEvent};
-use tauri::{webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}, window::WindowBuilder};
+mod pane_geometry;
+use std::path::PathBuf;
+use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, WebviewWindowBuilder};
+use tauri::{ipc::CapabilityBuilder, webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}};
 
-struct PaneState(AtomicBool);
+struct PaneState { fixture_origin:String }
 
-fn bounds(x: u32, width: u32, height: u32) -> Rect {
-    Rect {
-        position: PhysicalPosition::new(x as i32, 0).into(),
-        size: PhysicalSize::new(width.max(1), height.max(1)).into(),
-    }
+fn trusted_guest(webview:&Webview) -> Result<Webview,String> {
+    if webview.label()!="shell" { return Err("trusted_shell_required".into()); }
+    webview.window().get_webview("guest").ok_or_else(||"browser_guest_unavailable".into())
 }
 
-fn layout(window: &Window, visible: bool) -> tauri::Result<()> {
-    let size = window.inner_size()?;
-    if size.width < 2 || size.height == 0 { return Ok(()); }
-    let shell = window.get_webview("shell").ok_or_else(|| tauri::Error::WebviewNotFound)?;
-    let guest = window.get_webview("guest").ok_or_else(|| tauri::Error::WebviewNotFound)?;
-    let split = (size.width as u64 * 38 / 100) as u32;
-    if visible {
-        shell.set_bounds(bounds(0, split, size.height))?;
-        guest.set_bounds(bounds(split, size.width - split, size.height))?;
-        guest.show()?;
-    } else {
-        guest.hide()?;
-        shell.set_bounds(bounds(0, size.width, size.height))?;
-        shell.set_focus()?;
+#[tauri::command]
+fn sync_pane(webview: Webview, visible:bool, left:f64, top:f64, right:f64, bottom:f64,
+    viewport_width:f64, viewport_height:f64) -> Result<(),String> {
+    let guest=trusted_guest(&webview)?;
+    if !visible {
+        guest.hide().map_err(|e|e.to_string())?;
+        println!("LAB_PANE_HIDDEN");
+        return Ok(());
     }
+    let size=webview.window().inner_size().map_err(|e|e.to_string())?;
+    let bounds=match pane_geometry::fit(size.width,size.height,viewport_width,viewport_height,left,top,right,bottom) {
+        Some(value)=>value,
+        None=>{ guest.hide().map_err(|e|e.to_string())?;return Err("invalid_pane_geometry".into()); }
+    };
+    guest.set_bounds(Rect{
+        position:PhysicalPosition::new(bounds.x as i32,bounds.y as i32).into(),
+        size:PhysicalSize::new(bounds.width,bounds.height).into()
+    }).map_err(|e|e.to_string())?;
+    guest.show().map_err(|e|e.to_string())?;
+    println!("LAB_PANE_BOUNDS {} {} {} {}",bounds.x,bounds.y,bounds.width,bounds.height);
     Ok(())
 }
 
 #[tauri::command]
-fn set_pane(webview: Webview, state: State<'_, PaneState>, visible: bool) -> Result<(), String> {
-    if webview.label() != "shell" { return Err("trusted_shell_required".into()); }
-    layout(&webview.window(), visible).map_err(|e| e.to_string())?;
-    state.inner().0.store(visible, Ordering::SeqCst);
-    Ok(())
+fn browser_url(webview:Webview)->Result<String,String>{
+    trusted_guest(&webview)?.url().map(|u|u.to_string()).map_err(|e|e.to_string())
 }
 
-fn main() {
-    // The standalone experiment deliberately accepts only a local fixture, not personal profiles.
-    let profile = PathBuf::from(std::env::var_os("IWXA_LAB_PROFILE").expect("IWXA_LAB_PROFILE"));
-    assert!(profile.is_absolute(), "absolute lab profile required");
-    let entry: tauri::Url = std::env::var("IWXA_LAB_URL").expect("IWXA_LAB_URL").parse().expect("fixture URL");
-    assert!(entry.scheme() == "http" && entry.host_str() == Some("127.0.0.1") &&
-        entry.port().is_some() && entry.username().is_empty() && entry.password().is_none() &&
-        entry.path() == "/form", "local fixture only");
-    let origin = entry.origin();
-    let shell_data = profile.join("shell");
-    let guest_data = profile.join("guest");
+#[tauri::command]
+fn browser_command(webview:Webview,state:State<'_,PaneState>,operation:String,address:Option<String>)->Result<(),String>{
+    let guest=trusted_guest(&webview)?;
+    match operation.as_str(){
+        "navigate"=>{
+            let url:tauri::Url=address.ok_or("address_required")?.parse().map_err(|_|"invalid_address")?;
+            if url.origin().ascii_serialization()!=state.fixture_origin ||
+                !url.username().is_empty() || url.password().is_some(){return Err("outside_lab_origin".into());}
+            guest.navigate(url).map_err(|e|e.to_string())
+        },
+        "reload"=>guest.reload().map_err(|e|e.to_string()),
+        "back"|"forward"=>{
+            let backward=operation=="back";
+            #[cfg(windows)]
+            {
+                let shell=webview.clone();
+                guest.with_webview(move|platform|{
+                    let result=unsafe{platform.controller().CoreWebView2().and_then(|core|{
+                        if backward {core.GoBack()} else {core.GoForward()}
+                    })};
+                    if let Err(error)=result {
+                        let _=shell.emit("lab-browser-error",error.to_string());
+                    }
+                }).map_err(|e|e.to_string())
+            }
+            #[cfg(not(windows))]
+            {let _=backward;Err("windows_native_history_required".into())}
+        },
+        _=>Err("unknown_browser_operation".into())
+    }
+}
+
+fn main(){
+    let profile=PathBuf::from(std::env::var_os("IWXA_LAB_PROFILE").expect("IWXA_LAB_PROFILE"));
+    assert!(profile.is_absolute(),"absolute lab profile required");
+    let entry:tauri::Url=std::env::var("IWXA_LAB_URL").expect("IWXA_LAB_URL").parse().expect("fixture URL");
+    assert!(entry.scheme()=="http" && entry.host_str()==Some("127.0.0.1") && entry.port().is_some() &&
+        entry.username().is_empty() && entry.password().is_none() && entry.path()=="/form","local fixture only");
+    let origin=entry.origin();
+    let remote_shell:Option<tauri::Url>=std::env::var("IWXA_LAB_SHELL_URL").ok().map(|s|s.parse().expect("shell URL"));
+    if let Some(url)=&remote_shell{
+        assert!(url.scheme()=="http" && url.host_str()==Some("127.0.0.1") && url.port().is_some() &&
+            url.username().is_empty() && url.password().is_none() && url.path()=="/desktop/index.html" &&
+            url.origin()!=origin,"trusted shell must have its own loopback origin");
+    }
+    // Consume the explicit shell profile setting before creating any WebView2.
+    // A global WebView2 override would otherwise affect the guest as well.
+    let shell_data=std::env::var_os("WEBVIEW2_USER_DATA_FOLDER").filter(|s|!s.is_empty())
+        .map(PathBuf::from).unwrap_or_else(||profile.join("shell"));
+    std::env::remove_var("WEBVIEW2_USER_DATA_FOLDER");
+    assert!(std::env::var_os("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_none(),"global browser arguments are not permitted in the lab");
+    let guest_data=profile.join("guest");
+    assert!(shell_data.is_absolute(),"absolute shell profile required");
     std::fs::create_dir_all(&shell_data).expect("shell profile");
     std::fs::create_dir_all(&guest_data).expect("guest profile");
-    let downloads = profile.join("downloads");
+    let shell_real=shell_data.canonicalize().expect("canonical shell profile");
+    let guest_real=guest_data.canonicalize().expect("canonical guest profile");
+    let install=std::env::current_exe().expect("exe").parent().expect("exe parent").canonicalize().expect("install path");
+    assert!(!shell_real.starts_with(&guest_real) && !guest_real.starts_with(&shell_real) &&
+        !shell_real.starts_with(&install) && !guest_real.starts_with(&install),"distinct profiles outside install directory required");
+    let downloads=profile.join("downloads");
     std::fs::create_dir_all(&downloads).expect("lab download directory");
 
     tauri::Builder::default()
-        .manage(PaneState(AtomicBool::new(true)))
-        .invoke_handler(tauri::generate_handler![set_pane])
-        .setup(move |app| {
-            let window = WindowBuilder::new(app, "lab")
-                .title("IWXA WebView2 MCP Lab")
-                .inner_size(1040.0, 680.0)
-                .min_inner_size(640.0, 420.0)
-                .visible(false)
-                .center()
-                .build()?;
-            let size = window.inner_size()?;
-            let split = (size.width as u64 * 38 / 100) as u32;
-            // Create both native children in setup on the UI thread.
-            window.add_child(
-                WebviewBuilder::new("shell", WebviewUrl::App("index.html".into()))
-                    .data_directory(shell_data.clone())
-                    .devtools(false)
-                    .on_new_window(|_, _| NewWindowResponse::Deny),
-                PhysicalPosition::new(0, 0),
-                PhysicalSize::new(split.max(1), size.height.max(1)),
-            )?;
-            let fixture_origin = origin.clone();
-            let download_origin = origin.clone();
-            let download_path = downloads.join("iwxa-result.txt");
-            window.add_child(
-                WebviewBuilder::new("guest", WebviewUrl::External(entry.clone()))
+        .manage(PaneState{fixture_origin:origin.ascii_serialization()})
+        .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command])
+        .setup(move|app|{
+            let shell_url=if let Some(url)=&remote_shell{
+                app.add_capability(CapabilityBuilder::new("lab-trusted-remote-shell")
+                    .local(false).webview("shell").remote(format!("{}/desktop/*",url.origin().ascii_serialization()))
+                    .permission("core:default").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command"))?;
+                WebviewUrl::External(url.clone())
+            }else{WebviewUrl::App("index.html".into())};
+            let shell=WebviewWindowBuilder::new(app,"shell",shell_url)
+                .title("IWXA WebView2 MCP Lab").inner_size(1040.0,680.0).min_inner_size(640.0,420.0)
+                .data_directory(shell_data.clone()).devtools(false).visible(false).center()
+                .on_new_window(|_,_|NewWindowResponse::Deny).build()?;
+            let window=shell.as_ref().window();
+            let fixture_origin=origin.clone();
+            let download_origin=origin.clone();
+            let download_path=downloads.join("iwxa-result.txt");
+            let guest=window.add_child(
+                WebviewBuilder::new("guest",WebviewUrl::External(entry.clone()))
                     .data_directory(guest_data.clone())
                     .additional_browser_args("--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --no-first-run")
                     .devtools(false)
-                    .on_navigation(move |url| url.origin() == fixture_origin)
-                    .on_download(move |_, event| {
-                        match event {
-                            DownloadEvent::Requested { url, destination } => {
-                                if url.origin() != download_origin || url.path() != "/download" ||
-                                    download_path.exists() { return false; }
-                                *destination = download_path.clone();
-                                println!("LAB_DOWNLOAD_REQUESTED");
-                                true
-                            }
-                            DownloadEvent::Finished { success, .. } => {
-                                println!("LAB_DOWNLOAD_FINISHED success={success}");
-                                true
-                            }
-                            _ => false,
-                        }
+                    .on_navigation(move|url|url.origin()==fixture_origin)
+                    .on_page_load(|view,payload|{
+                        let url=payload.url().to_string();
+                        let _=view.emit_to("shell","lab-browser-url",url);
                     })
-                    .on_new_window(|_, _| NewWindowResponse::Deny),
-                PhysicalPosition::new(split as i32, 0),
-                PhysicalSize::new((size.width-split).max(1), size.height.max(1)),
+                    .on_download(move|_,event|match event{
+                        DownloadEvent::Requested{url,destination}=>{
+                            if url.origin()!=download_origin || url.path()!="/download" || download_path.exists(){return false;}
+                            *destination=download_path.clone();println!("LAB_DOWNLOAD_REQUESTED");true
+                        },
+                        DownloadEvent::Finished{success,..}=>{println!("LAB_DOWNLOAD_FINISHED success={success}");true},
+                        _=>false,
+                    })
+                    .on_new_window(|_,_|NewWindowResponse::Deny),
+                PhysicalPosition::new(0,0),PhysicalSize::new(1,1)
             )?;
-            let owner = window.clone();
-            window.on_window_event(move |event| {
-                if matches!(event, WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. }) {
-                    let visible = owner.state::<PaneState>().inner().0.load(Ordering::SeqCst);
-                    if let Err(error) = layout(&owner, visible) {
-                        eprintln!("LAB_LAYOUT_ERROR {error}");
-                    }
-                }
-            });
-            window.show()?;
-            layout(&window, true)?;
-            println!("LAB_READY shell=local guest=external separate_profiles=true");
+            guest.hide()?;
+            shell.show()?;
+            println!("LAB_READY shell=WebviewWindow guest=child separate_profiles=true");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("native WebView2 lab failed");
+        .run(tauri::generate_context!()).expect("native WebView2 dock failed");
 }

@@ -69,6 +69,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           cargo build --locked --features custom-protocol
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo test --locked --features custom-protocol -- --nocapture
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Install existing public GUI qualification tools
         run: python -m pip install Pillow==11.3.0 pyautogui==0.9.54 psutil==7.0.0
       - name: Actual Windows GUI and original MCP roundtrip
