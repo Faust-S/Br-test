@@ -73,21 +73,41 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         record_fixture(event)
         self.send_response(204); self.end_headers()
 
+SHELL_EVENTS=[]
+
 class TrustedShell(http.server.BaseHTTPRequestHandler):
     def log_message(self,*args): pass
     def do_GET(self):
         allowed={"/desktop/index.html":("index.html","text/html; charset=utf-8"),
                  "/desktop/shell.css":("shell.css","text/css; charset=utf-8"),
-                 "/desktop/shell.js":("shell.js","text/javascript; charset=utf-8")}
+                 "/desktop/shell.js":("shell.js","text/javascript; charset=utf-8"),
+                 "/desktop/probe.js":("probe.js","text/javascript; charset=utf-8")}
         item=allowed.get(self.path)
         if not item: self.send_error(404);return
         name,mime=item
+        with LOCK:SHELL_EVENTS.append({"stage":"http_get","message":self.path})
         data=(ROOT/"ui"/name).read_bytes()
         self.send_response(200)
         self.send_header("Content-Type",mime)
-        self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'")
+        self.send_header("Content-Security-Policy","default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost; object-src 'none'; frame-src 'none'; base-uri 'none'")
         self.send_header("Cache-Control","no-store")
         self.send_header("Content-Length",str(len(data)));self.end_headers();self.wfile.write(data)
+    def do_POST(self):
+        if self.path!="/desktop/probe":self.send_error(404);return
+        try:
+            length=int(self.headers.get("Content-Length","0"))
+            if not 1<=length<=8192:raise ValueError("size")
+            event=json.loads(self.rfile.read(length))
+            if not isinstance(event,dict) or set(event)!={"stage","message"} or not all(isinstance(v,str) for v in event.values()):
+                raise ValueError("probe shape")
+            event={"stage":event["stage"][:100],"message":event["message"][:2000]}
+        except (ValueError,TypeError,KeyError):
+            self.send_error(400);return
+        with LOCK:SHELL_EVENTS.append(event)
+        self.send_response(204);self.end_headers()
+        if event["stage"] in ("bridge_missing","script_error","native_layout_error","csp_violation","browser_url_error"):
+            print("SHELL_PROBE",json.dumps(event),flush=True)
+
 
 def events(kind, **expected):
     with LOCK:
@@ -337,6 +357,10 @@ def run(advanced=False):
         check("one_window_two_visible_native_surfaces",list(geom(hwnd)))
         check_profile_layout()
         check("remote_shell_native_dock_rect",list(wait_for("slot bounds",lambda:pane_bounds(hwnd))))
+        def layout_ack():
+            with LOCK:return any(event["stage"]=="native_layout_ack" and event["message"]=="true" for event in SHELL_EVENTS)
+        wait_for("trusted shell received native IPC acknowledgement",layout_ack,timeout=10)
+        check("remote_shell_native_ipc_ack")
         client=start_client(folder,"first")
         catalog=client.request("tools/list",{})
         tools=catalog["tools"]
@@ -482,6 +506,13 @@ def run(advanced=False):
             check("http_only_cookie_persists_after_cold_restart")
             REPORT["g2_status"]="PASS"
         REPORT["status"]="PASS"
+    except BaseException:
+        try:gui.screenshot().save(OUT/"failure-native-before-cleanup.png")
+        except Exception:pass
+        for process,log in hosts:
+            try:print("NATIVE_HOST_LOG",Path(log.name).read_text(encoding="utf-8",errors="replace")[-6000:],flush=True)
+            except OSError:pass
+        raise
     finally:
         for client in clients:
             try: client.close()
@@ -494,7 +525,9 @@ def run(advanced=False):
             log.close()
         server.shutdown(); server.server_close()
         shell_server.shutdown(); shell_server.server_close()
-        with LOCK: REPORT["last_fixture_events"]=EVENTS[-30:]
+        with LOCK:
+            REPORT["last_fixture_events"]=EVENTS[-30:]
+            REPORT["shell_events"]=SHELL_EVENTS[-100:]
 
 if __name__ == "__main__":
     try: run(advanced="--advanced" in sys.argv)

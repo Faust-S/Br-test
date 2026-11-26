@@ -1,5 +1,11 @@
 'use strict';
-const api=window.__TAURI__, invoke=api.core.invoke;
+const report=(stage,message='')=>window.__IWXA_LAB_REPORT?.(stage,message);
+const api=window.__TAURI__;
+if(typeof api?.core?.invoke!=='function'){
+  report('bridge_missing',typeof api);
+  throw new Error('Tauri native bridge unavailable in trusted shell');
+}
+const invoke=api.core.invoke;
 const toggle=document.getElementById('toggle'), slot=document.getElementById('guest-slot');
 const status=document.getElementById('status'), address=document.getElementById('address'), width=document.getElementById('width');
 let visible=true, running=false, dirty=false, frame=0, retries=0;
@@ -19,8 +25,10 @@ async function flush(){
           viewportWidth:window.innerWidth,viewportHeight:window.innerHeight});
         retries=0;
         status.textContent=visible?'Browser visible':'Browser hidden';
+        report('native_layout_ack',String(visible));
       }catch(error){
         status.textContent='ERROR: '+String(error);
+        report('native_layout_error',String(error));
         if(retries++<10)setTimeout(schedule,100);
       }
     }
@@ -40,8 +48,11 @@ async function browser(operation,url){
 for(const op of ['back','forward','reload'])document.getElementById(op).addEventListener('click',()=>void browser(op));
 document.getElementById('toolbar').addEventListener('submit',event=>{event.preventDefault();void browser('navigate',address.value.trim())});
 function updateUrl(url){if(document.activeElement!==address)address.value=url}
-void api.event.listen('lab-browser-url',event=>updateUrl(event.payload));
-void api.event.listen('lab-browser-error',event=>{status.textContent='ERROR: '+String(event.payload)});
-void invoke('browser_url').then(updateUrl).catch(()=>{});
 new ResizeObserver(schedule).observe(slot);
 window.addEventListener('resize',schedule);window.addEventListener('load',schedule);schedule();
+if(api.event?.listen){
+  void api.event.listen('lab-browser-url',event=>updateUrl(event.payload)).catch(error=>report('event_listen_error',String(error)));
+  void api.event.listen('lab-browser-error',event=>{status.textContent='ERROR: '+String(event.payload)}).catch(error=>report('event_listen_error',String(error)));
+}
+void invoke('browser_url').then(updateUrl).catch(error=>report('browser_url_error',String(error)));
+report('shell_controller_ready');

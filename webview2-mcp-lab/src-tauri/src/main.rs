@@ -6,10 +6,50 @@ use std::path::PathBuf;
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, WebviewWindowBuilder};
 use tauri::{ipc::CapabilityBuilder, webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}};
 
-struct PaneState { fixture_origin:String }
+struct PaneState { fixture_origin:String, shell_url:Option<tauri::Url> }
+
+// HTTP IPC carries an Origin header without the document path.
+fn shell_location_allowed(expected:Option<&tauri::Url>, actual:&tauri::Url)->bool {
+    if let Some(expected)=expected { return actual==expected; }
+    ((matches!(actual.scheme(),"http"|"https") && actual.host_str()==Some("tauri.localhost")) ||
+        (actual.scheme()=="tauri" && actual.host_str()==Some("localhost"))) &&
+        matches!(actual.path(),"/"|"/index.html") &&
+        actual.port().is_none() && actual.username().is_empty() && actual.password().is_none() &&
+        actual.query().is_none() && actual.fragment().is_none()
+}
+
+#[cfg(test)]
+mod shell_tests {
+    use super::*;
+    #[test]
+    fn exact_remote_shell_document() {
+        let expected:tauri::Url="http://127.0.0.1:12345/desktop/index.html".parse().unwrap();
+        assert!(shell_location_allowed(Some(&expected),&expected));
+        for url in ["http://127.0.0.1:12345/desktop/other.html",
+            "http://127.0.0.1:12345/desktop/index.html?unexpected",
+            "http://127.0.0.1:12346/desktop/index.html",
+            "https://127.0.0.1:12345/desktop/index.html",
+            "http://127.0.0.1:12345/",
+            "http://tauri.localhost/"] {
+            assert!(!shell_location_allowed(Some(&expected),&url.parse().unwrap()),"{url}");
+        }
+    }
+    #[test]
+    fn bundled_shell_document_only() {
+        for url in ["http://tauri.localhost/","https://tauri.localhost/index.html","tauri://localhost/"] {
+            assert!(shell_location_allowed(None,&url.parse().unwrap()),"{url}");
+        }
+        for url in ["http://tauri.localhost.evil/","http://tauri.localhost/other","http://tauri.localhost:1234/","http://127.0.0.1/"] {
+            assert!(!shell_location_allowed(None,&url.parse().unwrap()),"{url}");
+        }
+    }
+}
 
 fn trusted_guest(webview:&Webview) -> Result<Webview,String> {
     if webview.label()!="shell" { return Err("trusted_shell_required".into()); }
+    let actual=webview.url().map_err(|e|e.to_string())?;
+    let state=webview.state::<PaneState>();
+    if !shell_location_allowed(state.shell_url.as_ref(),&actual) { return Err("trusted_shell_document_required".into()); }
     webview.window().get_webview("guest").ok_or_else(||"browser_guest_unavailable".into())
 }
 
@@ -105,18 +145,26 @@ fn main(){
     std::fs::create_dir_all(&downloads).expect("lab download directory");
 
     tauri::Builder::default()
-        .manage(PaneState{fixture_origin:origin.ascii_serialization()})
+        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone()})
         .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command])
         .setup(move|app|{
             let shell_url=if let Some(url)=&remote_shell{
                 app.add_capability(CapabilityBuilder::new("lab-trusted-remote-shell")
-                    .local(false).webview("shell").remote(format!("{}/desktop/*",url.origin().ascii_serialization()))
-                    .permission("core:default").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command"))?;
+                    .local(false).webview("shell").remote(format!("{}/*",url.origin().ascii_serialization()))
+                    .permission("core:event:allow-listen").permission("core:event:allow-unlisten").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command"))?;
                 WebviewUrl::External(url.clone())
             }else{WebviewUrl::App("index.html".into())};
+            let expected_shell=remote_shell.clone();
             let shell=WebviewWindowBuilder::new(app,"shell",shell_url)
                 .title("IWXA WebView2 MCP Lab").inner_size(1040.0,680.0).min_inner_size(640.0,420.0)
                 .data_directory(shell_data.clone()).devtools(false).visible(false).center()
+                .on_navigation(move|url|shell_location_allowed(expected_shell.as_ref(),url))
+                .on_page_load(|view,payload|{
+                    println!("LAB_SHELL_PAGE {:?} {}",payload.event(),payload.url());
+                    let _=view.eval_with_callback(
+                        r#"JSON.stringify({ready:document.readyState,api:typeof window.__TAURI__,title:document.title,status:document.getElementById('status')?.textContent||'',href:location.href})"#,
+                        |result|println!("LAB_SHELL_DOCUMENT {result}"));
+                })
                 .on_new_window(|_,_|NewWindowResponse::Deny).build()?;
             let window=shell.as_ref().window();
             let fixture_origin=origin.clone();
