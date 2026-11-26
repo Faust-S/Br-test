@@ -1,0 +1,511 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/CherryHQ/cherry-studio.git",
+  "tag": "v2.1.7",
+  "commit": "6e08bf9b8aa2acd05a0d40cc5a4560b6153760ba",
+  "license": "AGPL-3.0",
+  "scope": "source intake only; not a standalone build, not a release, not a license exception",
+  "checkout": "upstream/cherry-studio",
+  "files": [
+    {
+      "path": "LICENSE",
+      "blob": "be3f7b28e564e7dd05eaf59d64adba1a4065ac0e",
+      "size": 34523
+    },
+    {
+      "path": "resources/skills/cherry-browser/references/api.md",
+      "blob": "5bcbdd1640a3c7255e4c5d02720af5f60106d40f",
+      "size": 4495
+    },
+    {
+      "path": "resources/skills/cherry-browser/SKILL.md",
+      "blob": "11284261f4446cf2d4c82cf2a0e931a63faf0a85",
+      "size": 5484
+    },
+    {
+      "path": "src/main/features/browser/__tests__/actions.test.ts",
+      "blob": "4d665046030a0d44951bb30e54a3724941106ccf",
+      "size": 13530
+    },
+    {
+      "path": "src/main/features/browser/__tests__/AgentBrowserRegistry.test.ts",
+      "blob": "bfc105dc3c8e7227569ca4b445af29deccb84b09",
+      "size": 15959
+    },
+    {
+      "path": "src/main/features/browser/__tests__/browserCookieKey.test.ts",
+      "blob": "187d553902cedc19a16915fdc4687931da00cae2",
+      "size": 11565
+    },
+    {
+      "path": "src/main/features/browser/__tests__/BrowserCursor.test.ts",
+      "blob": "0f99fb9f9b25bdea2d9948df6e566ca6e3ad048b",
+      "size": 4417
+    },
+    {
+      "path": "src/main/features/browser/__tests__/browserFavicons.test.ts",
+      "blob": "5c64a317e8c0b16f6388f05c701c57617ea71002",
+      "size": 5428
+    },
+    {
+      "path": "src/main/features/browser/__tests__/browserImport.test.ts",
+      "blob": "0419dae6b1fb716fbf601fba616108d306c44077",
+      "size": 22278
+    },
+    {
+      "path": "src/main/features/browser/__tests__/BrowserSessionService.test.ts",
+      "blob": "c06449db1d512e8146bb29ea79729f1a2d402e72",
+      "size": 13846
+    },
+    {
+      "path": "src/main/features/browser/__tests__/ChromiumCookieDecryptor.test.ts",
+      "blob": "9ee7ccf4bc7bc5e1151a8d9559c939af4c270cd8",
+      "size": 7124
+    },
+    {
+      "path": "src/main/features/browser/__tests__/downloads.test.ts",
+      "blob": "5c0864cc72b324c918a480fcb3ec3eaa169c6dd6",
+      "size": 2200
+    },
+    {
+      "path": "src/main/features/browser/__tests__/fixtures/form.json",
+      "blob": "45e672468791520fa863b7fbdc20eccf3bb726ef",
+      "size": 53686
+    },
+    {
+      "path": "src/main/features/browser/__tests__/guestFixture.ts",
+      "blob": "e6d4569044af932d8093e47454261b6f14f135dc",
+      "size": 2102
+    },
+    {
+      "path": "src/main/features/browser/__tests__/GuestSession.test.ts",
+      "blob": "ade9a605697a2fda6c87002f3d247e910173494e",
+      "size": 20091
+    },
+    {
+      "path": "src/main/features/browser/__tests__/inspection.test.ts",
+      "blob": "3cc430188e8d75639509644257a9001df3c010f0",
+      "size": 9979
+    },
+    {
+      "path": "src/main/features/browser/__tests__/mcp/browser.test.ts",
+      "blob": "7e0d91e930c944792db9ad6b25fe85dcbd7296e1",
+      "size": 35389
+    },
+    {
+      "path": "src/main/features/browser/__tests__/refRecovery.test.ts",
+      "blob": "a8b399e0ac8faf4a8822f3c8601c131792604000",
+      "size": 8992
+    },
+    {
+      "path": "src/main/features/browser/__tests__/screenshot.test.ts",
+      "blob": "6686a331c61b07f4561cf697486a6c039dbeccae",
+      "size": 7274
+    },
+    {
+      "path": "src/main/features/browser/__tests__/snapshot.test.ts",
+      "blob": "f7e2ca51d8c6fc47bbc22699eaa5e50122bd2ba5",
+      "size": 14553
+    },
+    {
+      "path": "src/main/features/browser/__tests__/TopicBrowser.test.ts",
+      "blob": "7be2a94baf5fc6c8e589cde6eb11a3c770ebfa43",
+      "size": 18225
+    },
+    {
+      "path": "src/main/features/browser/__tests__/trackBrowserHistory.test.ts",
+      "blob": "20d45643acf7b1aab0fae2a7e015eca35de0c285",
+      "size": 5399
+    },
+    {
+      "path": "src/main/features/browser/__tests__/WebMcpTools.test.ts",
+      "blob": "c002f8603f820551072f9a4e28dfe2f02e0ffd7f",
+      "size": 13036
+    },
+    {
+      "path": "src/main/features/browser/actions/forms.ts",
+      "blob": "5b4b31fda71d31137b5ec2a7cec348ecb25bc009",
+      "size": 1338
+    },
+    {
+      "path": "src/main/features/browser/actions/keyboard.ts",
+      "blob": "04ad3b71b17c62391d6a1d18b18b4d9c7c1ae93e",
+      "size": 4603
+    },
+    {
+      "path": "src/main/features/browser/actions/keyDefinitions.ts",
+      "blob": "bda945b10c62f6ff89c4cf1f35c1d2bae5408e00",
+      "size": 2600
+    },
+    {
+      "path": "src/main/features/browser/actions/mouse.ts",
+      "blob": "67dcaa2e02f897601f45d1d2463dd4fdca175e17",
+      "size": 3381
+    },
+    {
+      "path": "src/main/features/browser/actions/resolveTarget.ts",
+      "blob": "a10fa34e1c04a0aa6b85930696e758251a92f7b9",
+      "size": 5271
+    },
+    {
+      "path": "src/main/features/browser/actions/screenshot.ts",
+      "blob": "ed61eb0b91708d6e63c0044cfb90185e50f01441",
+      "size": 6233
+    },
+    {
+      "path": "src/main/features/browser/actions/settle.ts",
+      "blob": "f8040350816599666b66f01818eca8c1944d9818",
+      "size": 1988
+    },
+    {
+      "path": "src/main/features/browser/AgentBrowserRegistry.ts",
+      "blob": "c8c1b2e079174e9dad1a63c361d810617b1eb5d4",
+      "size": 1010
+    },
+    {
+      "path": "src/main/features/browser/automation.ts",
+      "blob": "1629ad74737bff30932c7212567ffb8e054867a6",
+      "size": 9440
+    },
+    {
+      "path": "src/main/features/browser/BrowserControlSession.ts",
+      "blob": "b07fb54190d05790ee50f4a0de5c570d764f3421",
+      "size": 2127
+    },
+    {
+      "path": "src/main/features/browser/BrowserCursor.ts",
+      "blob": "c52cf4e8bd5b76be35bef392cd9134a74fc23580",
+      "size": 4200
+    },
+    {
+      "path": "src/main/features/browser/browserFavicons.ts",
+      "blob": "ca7c37f0cb4e5a71557011fccafeaf9a84cefdd2",
+      "size": 3921
+    },
+    {
+      "path": "src/main/features/browser/BrowserGuestRegistry.ts",
+      "blob": "bb568acf84c275b4f3e31ee6f94df0d4daf18556",
+      "size": 11560
+    },
+    {
+      "path": "src/main/features/browser/BrowserSessionService.ts",
+      "blob": "514a5f7b523374aa834df3d97bf49c165996c3f0",
+      "size": 18428
+    },
+    {
+      "path": "src/main/features/browser/browserUse.ts",
+      "blob": "628e944d7acda16a34baf2956f50fe01591ddd74",
+      "size": 955
+    },
+    {
+      "path": "src/main/features/browser/import/browserCookieKey.ts",
+      "blob": "c051a9e64c0827543bce92366855047e95dd3dca",
+      "size": 6361
+    },
+    {
+      "path": "src/main/features/browser/import/browserFavicons.ts",
+      "blob": "f4b12e9e87f966f15eeed541839fa9c877b618ff",
+      "size": 1588
+    },
+    {
+      "path": "src/main/features/browser/import/browserProfiles.ts",
+      "blob": "93c9013767c07fddbfa3342e2c503954ef051887",
+      "size": 3606
+    },
+    {
+      "path": "src/main/features/browser/import/ChromiumCookieDecryptor.ts",
+      "blob": "da18b40e2cd6828034c9510c281da7e06cd87eac",
+      "size": 3809
+    },
+    {
+      "path": "src/main/features/browser/import/CookieImportError.ts",
+      "blob": "bec1c5fce0e5f8ea5784d708c4fe07fc5f50ebcf",
+      "size": 239
+    },
+    {
+      "path": "src/main/features/browser/import/importBrowserData.ts",
+      "blob": "998980d620af0855673d92b0b3b95890fb4146f2",
+      "size": 13910
+    },
+    {
+      "path": "src/main/features/browser/import/portableBrowserData.ts",
+      "blob": "db18b462b2ef4ce99e3094d7b8d75bd3d694a387",
+      "size": 2254
+    },
+    {
+      "path": "src/main/features/browser/import/sqliteSnapshot.ts",
+      "blob": "8e91451b4de3d28dd1eb5f0e8843655d774f5525",
+      "size": 1132
+    },
+    {
+      "path": "src/main/features/browser/index.ts",
+      "blob": "d4276d618bb2c0027ab47f0e886d3ffabd9fa899",
+      "size": 682
+    },
+    {
+      "path": "src/main/features/browser/mcp/AgentBrowserController.ts",
+      "blob": "ed704566b0ece57a11b8fc1e2a7683f1ad15e968",
+      "size": 1940
+    },
+    {
+      "path": "src/main/features/browser/mcp/browserController.ts",
+      "blob": "c8d863beb4a291b06dbf91bb156ade2eaeb0401f",
+      "size": 630
+    },
+    {
+      "path": "src/main/features/browser/mcp/BrowserPageController.ts",
+      "blob": "e373b2b67f725eecd7fec304d7e92ea5edc92941",
+      "size": 4099
+    },
+    {
+      "path": "src/main/features/browser/mcp/constants.ts",
+      "blob": "2b10943f8ecf304918e728112a3a028f993c318c",
+      "size": 186
+    },
+    {
+      "path": "src/main/features/browser/mcp/controller.ts",
+      "blob": "9688fafd11f9650680f9fb8eb1b630dcafe52e1c",
+      "size": 31125
+    },
+    {
+      "path": "src/main/features/browser/mcp/README.md",
+      "blob": "415f4902daf0276ad92eae5483ef0392a8e62e8f",
+      "size": 11027
+    },
+    {
+      "path": "src/main/features/browser/mcp/server.ts",
+      "blob": "758c144f17c3de5f2c9e2bf51198023380edcaa2",
+      "size": 3224
+    },
+    {
+      "path": "src/main/features/browser/mcp/SessionBrowserController.ts",
+      "blob": "1c506eace531157f05c9cbfbfd63786086dea1a2",
+      "size": 7397
+    },
+    {
+      "path": "src/main/features/browser/mcp/tabbarHtml.ts",
+      "blob": "88b7dfb6e43dca5beb61821ad1df12e355deadb8",
+      "size": 19445
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/dialog.ts",
+      "blob": "ffa3486d4a1a6a580cd7d52773d1c409fcbf0fbc",
+      "size": 881
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/execute.ts",
+      "blob": "33a889fba7aa2d3d9a4b9f76c459bcca9968963b",
+      "size": 1257
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/inspect.ts",
+      "blob": "c910eb7f9c7914dc098a0a4942babc8a46b1ed41",
+      "size": 1183
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/interact.ts",
+      "blob": "b0d3fa9ed7d027e07e21c518cfc50675db8c0a35",
+      "size": 2101
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/navigate.ts",
+      "blob": "e8b9474f1900d8204a4246719a859a2b48611850",
+      "size": 2141
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/open.ts",
+      "blob": "50c1a0e205fa81befa2a4559e03e310b35d7f404",
+      "size": 1492
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/registry.ts",
+      "blob": "8324eb73cc3019d915b233227134ed189e80b6be",
+      "size": 1796
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/reset.ts",
+      "blob": "326730d004477b061ebd84fc9b18a8c1ea572182",
+      "size": 859
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/result.ts",
+      "blob": "67f77ca6a3543b9252ad0b9eecf26cec4340daef",
+      "size": 2752
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/screenshot.ts",
+      "blob": "03d592a460154cdc03c8f31e73a833411f4c243a",
+      "size": 1211
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/snapshot.ts",
+      "blob": "7bea4f15a32ef82f188bbd8ae79e90a3b09c840b",
+      "size": 529
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/tabs.ts",
+      "blob": "5ab32f30e37fdb13defc2efb98537574ec617042",
+      "size": 1810
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/utils.ts",
+      "blob": "76d4eebba9b03d4492a3d2bc0960ce43e852ed2d",
+      "size": 427
+    },
+    {
+      "path": "src/main/features/browser/mcp/tools/webMcp.ts",
+      "blob": "8718b116c2cb7cc569cacb6fc348ff0db06402e5",
+      "size": 757
+    },
+    {
+      "path": "src/main/features/browser/mcp/types.ts",
+      "blob": "eea3aee307e990ff128b27af42f75e81d0790756",
+      "size": 831
+    },
+    {
+      "path": "src/main/features/browser/README.md",
+      "blob": "6cce2ded5882c3a7c9ace591b0c6a63c9507b5ba",
+      "size": 11309
+    },
+    {
+      "path": "src/main/features/browser/session/BrowserInspection.ts",
+      "blob": "eb62c6a30a869d8ce614a33afa28238e94dd7511",
+      "size": 4531
+    },
+    {
+      "path": "src/main/features/browser/session/BrowserSessionError.ts",
+      "blob": "f044904341581cb98e24baf988f201346efa6e0a",
+      "size": 584
+    },
+    {
+      "path": "src/main/features/browser/session/cdpAllowList.ts",
+      "blob": "c75c4f4765dc37704f6e28f50ac54050772688ae",
+      "size": 2481
+    },
+    {
+      "path": "src/main/features/browser/session/GuestSession.ts",
+      "blob": "59c826ddd016c62a7f7685f088fcff6e923ae81d",
+      "size": 26233
+    },
+    {
+      "path": "src/main/features/browser/session/WebMcpTools.ts",
+      "blob": "e2d2ee54582bd92a61c2780a7f5cb18b0fd435c9",
+      "size": 8368
+    },
+    {
+      "path": "src/main/features/browser/snapshot/accessibilityTypes.ts",
+      "blob": "d51b1e7ebf2f52f55acae616727a367f098bfdc8",
+      "size": 1294
+    },
+    {
+      "path": "src/main/features/browser/snapshot/buildSnapshotTree.ts",
+      "blob": "41fb3ef0d7bceb0975fd444628a90cf8884e37b8",
+      "size": 5778
+    },
+    {
+      "path": "src/main/features/browser/snapshot/captureSnapshot.ts",
+      "blob": "381daca7630257ea85b395c7dc1859a94466df60",
+      "size": 1663
+    },
+    {
+      "path": "src/main/features/browser/snapshot/describeElement.ts",
+      "blob": "340f9d1775762c122d7d2313cd6f0249a509fe06",
+      "size": 8662
+    },
+    {
+      "path": "src/main/features/browser/snapshot/diffSnapshot.ts",
+      "blob": "8383dfa228b2e8ee2648903b72dee73f526fdabc",
+      "size": 1023
+    },
+    {
+      "path": "src/main/features/browser/snapshot/serializeSnapshot.ts",
+      "blob": "48d2c980bdc21da193089f8f46fb294607e22712",
+      "size": 2255
+    },
+    {
+      "path": "src/main/features/browser/trackBrowserHistory.ts",
+      "blob": "53f8a3277084bb71572165404133d8cf7f2a436a",
+      "size": 2543
+    },
+    {
+      "path": "src/renderer/components/AgentBrowserRuntimeHost.tsx",
+      "blob": "fdee3066e32a1fc8480eb8fa7dec350c8ecb872f",
+      "size": 6590
+    },
+    {
+      "path": "src/renderer/components/BrowserChrome.tsx",
+      "blob": "32e2791d4a0576ee957d0fa59b6ae4feeeeba3bc",
+      "size": 534
+    },
+    {
+      "path": "src/renderer/components/BrowserCursorAnimation.ts",
+      "blob": "f3e3888fa0d434bebc9b6e5f775ecdfc990068e6",
+      "size": 8062
+    },
+    {
+      "path": "src/renderer/components/BrowserCursorOverlay.tsx",
+      "blob": "e58acedcdbb79d70ca72f249188600db2db2167b",
+      "size": 4555
+    },
+    {
+      "path": "src/renderer/components/BrowserOverlays.tsx",
+      "blob": "7e8fb01d84cae803b02d86a34b4c36f29e29f291",
+      "size": 1224
+    },
+    {
+      "path": "src/renderer/components/SessionBrowserView.tsx",
+      "blob": "1d65f6c266bbed13997d50cd84d0b8d1b1951ba5",
+      "size": 4141
+    },
+    {
+      "path": "src/renderer/components/WebviewBrowser.tsx",
+      "blob": "997a9f337ec5224591c7f9c74ccc3ddd1b292318",
+      "size": 6722
+    },
+    {
+      "path": "src/renderer/components/WebviewHost.tsx",
+      "blob": "9e34d95aa6a508c65b4173cdb8dcf43eb18eaed0",
+      "size": 9391
+    },
+    {
+      "path": "src/renderer/components/WebviewNavigation.tsx",
+      "blob": "8dbfc65b4df29f2b74de2d837506f219344d1dcd",
+      "size": 15224
+    },
+    {
+      "path": "src/renderer/components/WebviewSurface.tsx",
+      "blob": "71579e1ee7ce4d5dbc4b4780f24de546c48b4c24",
+      "size": 4365
+    },
+    {
+      "path": "src/renderer/hooks/agent/useAgentBrowserGuest.ts",
+      "blob": "fa7f29713b51f396fd55f9f0245b0fea11f63431",
+      "size": 3332
+    },
+    {
+      "path": "src/renderer/services/AgentBrowserRuntimeService.ts",
+      "blob": "7bae7210c84e4e47af1b3b1a9f4f5935c5531c70",
+      "size": 5235
+    },
+    {
+      "path": "src/renderer/services/WebviewRuntimeService.ts",
+      "blob": "5ab8138f962db28a43eaec3a7e62a8578c0622a2",
+      "size": 3964
+    },
+    {
+      "path": "src/shared/ipc/schemas/browser.ts",
+      "blob": "2b4ed698ae928915f3c2dd1db6368f3c4daf8f42",
+      "size": 2338
+    },
+    {
+      "path": "src/shared/types/browserCursor.ts",
+      "blob": "f6079aa3c99d5bade5ccf66c370682b2b9fa9d77",
+      "size": 493
+    },
+    {
+      "path": "src/shared/utils/browserUrl.ts",
+      "blob": "244a09b93fc810371174554afd67d7e630f6c3c4",
+      "size": 813
+    }
+  ]
+}
