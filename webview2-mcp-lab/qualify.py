@@ -14,6 +14,7 @@ import tempfile
 import threading
 import time
 import urllib.request
+from snapshot_refs import uid
 
 ROOT = Path(__file__).resolve().parent
 OUT = ROOT / "artifacts"
@@ -124,9 +125,9 @@ class Mcp:
     def call(self, name, **args):
         start = time.monotonic()
         result = self.request("tools/call", {"name": name, "arguments": args})
+        REPORT.setdefault("calls", []).append({"name": name, "elapsed_ms": round((time.monotonic()-start)*1000), "text_bytes": len(self.text(result).encode("utf-8")), "is_error": bool(result.get("isError")), "uid": args.get("uid")})
         if result.get("isError"):
             raise RuntimeError(f"{name}: {self.text(result)[:1500]}")
-        REPORT.setdefault("calls", []).append({"name": name, "elapsed_ms": round((time.monotonic()-start)*1000), "text_bytes": len(self.text(result).encode("utf-8"))})
         return result
     @staticmethod
     def text(result):
@@ -175,13 +176,6 @@ def page_id(client, url):
     if len(found) != 1 or len(rows) != 1:
         raise RuntimeError("expected exactly one visible guest: " + text[:1500])
     return found[0]
-
-def uid(snapshot, label):
-    for line in snapshot.splitlines():
-        if ('"' + label + '"') in line:
-            match = re.search(r"\buid=([A-Za-z0-9_-]+)", line)
-            if match: return match.group(1)
-    raise RuntimeError("missing accessible element: " + label + " in " + snapshot[:1600])
 
 def snapshot(client, page, name):
     text = client.text(client.call("take_snapshot", pageId=page))
@@ -298,10 +292,11 @@ def run():
         text=snapshot(client,page,"03-human-input")
         assert "Human-167" in text
         check("human_input_visible_to_original_mcp")
-        client.call("fill",pageId=page,uid=uid(text,"Agent entry"),value="Agent-167")
+        client.call("fill",pageId=page,uid=uid(text,"textbox","Agent entry"),value="Agent-167")
+        wait_for("actual fixture input event from original MCP",lambda:events("agent",human="Human-167",agent="Agent-167"))
         text=snapshot(client,page,"04-agent-input")
         assert "Agent-167" in text and "Human-167" in text
-        client.call("click",pageId=page,uid=uid(text,"Save by agent"))
+        client.call("click",pageId=page,uid=uid(text,"button","Save by agent"))
         wait_for("actual site saved by MCP",lambda:events("Saved",human="Human-167",agent="Agent-167"))
         text=snapshot(client,page,"05-saved")
         assert "Saved Human-167 Agent-167" in text
@@ -332,6 +327,14 @@ def run():
         page2=page_id(client2,url)
         assert "Finished Human-167 Agent-167" in snapshot(client2,page2,"12-cold-restart")
         check("cold_restart_same_profile_and_original_mcp")
+        second_url=url.rsplit("/",1)[0]+"/second"
+        client2.call("navigate_page",pageId=page2,type="url",url=second_url)
+        assert page_id(client2,second_url)==page2
+        assert "Second fixture page" in snapshot(client2,page2,"13-second-page")
+        client2.call("navigate_page",pageId=page2,type="back")
+        assert page_id(client2,url)==page2
+        assert "Finished Human-167 Agent-167" in snapshot(client2,page2,"14-history-back")
+        check("original_mcp_navigation_and_back_in_same_native_guest")
         REPORT["status"]="PASS"
     finally:
         for client in clients:
