@@ -8,6 +8,7 @@ if(typeof api?.core?.invoke!=='function'){
 const invoke=api.core.invoke;
 const toggle=document.getElementById('toggle'), slot=document.getElementById('guest-slot');
 const status=document.getElementById('status'), address=document.getElementById('address'), width=document.getElementById('width');
+const tabs=document.getElementById('browser-tabs'), tabButtons=[document.getElementById('tab-a'),document.getElementById('tab-b')];
 let visible=true, running=false, dirty=false, frame=0, retries=0, addressReady=false;
 function schedule(){
   dirty=true;
@@ -27,7 +28,7 @@ async function flush(){
         status.textContent=visible?'Browser visible':'Browser hidden';
         report('native_layout_ack',String(visible));
         if(!addressReady){
-          try{updateUrl(await invoke('browser_url'));addressReady=true}
+          try{updateUrl(await invoke('browser_url'));addressReady=true;await refreshTabs()}
           catch(error){report('browser_url_error',String(error))}
         }
       }catch(error){
@@ -59,9 +60,26 @@ async function browser(operation,url){
 for(const op of ['back','forward','reload'])document.getElementById(op).addEventListener('click',()=>void browser(op));
 document.getElementById('toolbar').addEventListener('submit',event=>{event.preventDefault();void browser('navigate',address.value.trim())});
 function updateUrl(url){if(document.activeElement!==address)address.value=url}
+async function refreshTabs(){
+  try{
+    const [count,index]=await invoke('browser_tabs');
+    tabs.hidden=count<2;
+    tabButtons.forEach((button,i)=>button.setAttribute('aria-pressed',String(i===index)));
+    schedule();
+  }catch(error){report('browser_tabs_error',String(error))}
+}
+let selecting=false;
+tabButtons.forEach((button,index)=>button.addEventListener('click',async()=>{
+  if(selecting)return;
+  selecting=true;
+  try{updateUrl(await invoke('browser_select_tab',{index}));await refreshTabs();schedule()}
+  catch(error){status.textContent='ERROR: '+String(error)}
+  finally{selecting=false}
+}));
 new ResizeObserver(schedule).observe(slot);
 window.addEventListener('resize',schedule);window.addEventListener('load',schedule);schedule();
 if(api.event?.listen){
+  void api.event.listen('lab-browser-tabs-ready',()=>void refreshTabs()).catch(error=>report('event_listen_error',String(error)));
   void api.event.listen('lab-browser-url',event=>updateUrl(event.payload)).catch(error=>report('event_listen_error',String(error)));
   void api.event.listen('lab-browser-error',event=>{status.textContent='ERROR: '+String(event.payload)}).catch(error=>report('event_listen_error',String(error)));
 }

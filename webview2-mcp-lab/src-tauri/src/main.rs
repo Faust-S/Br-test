@@ -2,11 +2,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod pane_geometry;
-use std::path::PathBuf;
+use std::{path::PathBuf,sync::atomic::{AtomicUsize,Ordering}};
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, WebviewWindowBuilder};
 use tauri::{ipc::CapabilityBuilder, webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}};
 
-struct PaneState { fixture_origin:String, shell_url:Option<tauri::Url>, public_sites:bool }
+struct PaneState {
+    fixture_origin:String, shell_url:Option<tauri::Url>, public_sites:bool,
+    two_tabs:bool, active_tab:AtomicUsize,
+}
+fn tab_label(index:usize)->Option<&'static str>{
+    match index{0=>Some("guest"),1=>Some("guest-2"),_=>None}
+}
+impl PaneState{
+    fn active_label(&self)->&'static str{
+        tab_label(self.active_tab.load(Ordering::SeqCst)).expect("valid active tab")
+    }
+}
 
 // The public smoke test uses a fresh lab profile and only these public origins.
 // Production browser navigation is not constrained to this qualification list.
@@ -68,18 +79,53 @@ mod shell_tests {
     }
 }
 
-fn trusted_guest(webview:&Webview) -> Result<Webview,String> {
+fn trusted_shell(webview:&Webview)->Result<(),String>{
     if webview.label()!="shell" { return Err("trusted_shell_required".into()); }
     let actual=webview.url().map_err(|e|e.to_string())?;
     let state=webview.state::<PaneState>();
     if !shell_location_allowed(state.shell_url.as_ref(),&actual) { return Err("trusted_shell_document_required".into()); }
-    webview.window().get_webview("guest").ok_or_else(||"browser_guest_unavailable".into())
+    Ok(())
+}
+fn trusted_guest(webview:&Webview) -> Result<Webview,String> {
+    trusted_shell(webview)?;
+    let state=webview.state::<PaneState>();
+    webview.window().get_webview(state.active_label()).ok_or_else(||"browser_guest_unavailable".into())
+}
+
+#[tauri::command]
+fn browser_tabs(webview:Webview)->Result<(usize,usize),String>{
+    trusted_shell(&webview)?;
+    let state=webview.state::<PaneState>();
+    let count=if state.two_tabs && webview.window().get_webview("guest-2").is_some(){2}else{1};
+    Ok((count,state.active_tab.load(Ordering::SeqCst)))
+}
+
+#[tauri::command]
+fn browser_select_tab(webview:Webview,index:usize)->Result<String,String>{
+    trusted_shell(&webview)?;
+    let state=webview.state::<PaneState>();
+    if index>0&&!state.two_tabs{return Err("browser_tab_not_enabled".into());}
+    let label=tab_label(index).ok_or("invalid_browser_tab")?;
+    let next=webview.window().get_webview(label).ok_or("browser_guest_unavailable")?;
+    if state.active_tab.load(Ordering::SeqCst)!=index{
+        if let Some(previous)=webview.window().get_webview(state.active_label()){
+            previous.hide().map_err(|e|e.to_string())?;
+        }
+        state.active_tab.store(index,Ordering::SeqCst);
+        println!("LAB_ACTIVE_TAB {index}");
+    }
+    next.url().map(|u|u.to_string()).map_err(|e|e.to_string())
 }
 
 #[tauri::command]
 fn sync_pane(webview: Webview, visible:bool, left:f64, top:f64, right:f64, bottom:f64,
     viewport_width:f64, viewport_height:f64) -> Result<(),String> {
     let guest=trusted_guest(&webview)?;
+    for label in ["guest","guest-2"]{
+        if label!=guest.label(){
+            if let Some(other)=webview.window().get_webview(label){other.hide().map_err(|e|e.to_string())?;}
+        }
+    }
     if !visible {
         guest.hide().map_err(|e|e.to_string())?;
         println!("LAB_PANE_HIDDEN");
@@ -135,6 +181,29 @@ fn browser_command(webview:Webview,state:State<'_,PaneState>,operation:String,ad
     }
 }
 
+fn guest_builder(label:&str,entry:tauri::Url,data:PathBuf,fixture_origin:String,
+    public_sites:bool,download_origin:tauri::Url,download_path:PathBuf)->WebviewBuilder<tauri::Wry>{
+    WebviewBuilder::new(label,WebviewUrl::External(entry))
+        .data_directory(data)
+        .additional_browser_args("--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --no-first-run")
+        .devtools(false)
+        .on_navigation(move|url|browsing_destination_allowed(&fixture_origin,public_sites,url))
+        .on_page_load(|view,payload|{
+            if view.label()==view.state::<PaneState>().active_label(){
+                let _=view.emit_to("shell","lab-browser-url",payload.url().to_string());
+            }
+        })
+        .on_download(move|_,event|match event{
+            DownloadEvent::Requested{url,destination}=>{
+                if url.origin()!=download_origin.origin() || url.path()!="/download" || download_path.exists(){return false;}
+                *destination=download_path.clone();println!("LAB_DOWNLOAD_REQUESTED");true
+            },
+            DownloadEvent::Finished{success,..}=>{println!("LAB_DOWNLOAD_FINISHED success={success}");true},
+            _=>false,
+        })
+        .on_new_window(|_,_|NewWindowResponse::Deny)
+}
+
 fn main(){
     let profile=PathBuf::from(std::env::var_os("IWXA_LAB_PROFILE").expect("IWXA_LAB_PROFILE"));
     assert!(profile.is_absolute(),"absolute lab profile required");
@@ -143,6 +212,7 @@ fn main(){
         entry.username().is_empty() && entry.password().is_none() && entry.path()=="/form","local fixture only");
     let origin=entry.origin();
     let public_sites=std::env::var("IWXA_LAB_PUBLIC_SITES").ok().as_deref()==Some("1");
+    let two_tabs=std::env::var("IWXA_LAB_TWO_TABS").ok().as_deref()==Some("1");
     let remote_shell:Option<tauri::Url>=std::env::var("IWXA_LAB_SHELL_URL").ok().map(|s|s.parse().expect("shell URL"));
     if let Some(url)=&remote_shell{
         assert!(url.scheme()=="http" && url.host_str()==Some("127.0.0.1") && url.port().is_some() &&
@@ -168,13 +238,13 @@ fn main(){
     std::fs::create_dir_all(&downloads).expect("lab download directory");
 
     tauri::Builder::default()
-        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone(),public_sites})
-        .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command])
+        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone(),public_sites,two_tabs,active_tab:AtomicUsize::new(0)})
+        .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command,browser_tabs,browser_select_tab])
         .setup(move|app|{
             let shell_url=if let Some(url)=&remote_shell{
                 app.add_capability(CapabilityBuilder::new("lab-trusted-remote-shell")
                     .local(false).webview("shell").remote(format!("{}/*",url.origin().ascii_serialization()))
-                    .permission("core:event:allow-listen").permission("core:event:allow-unlisten").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command"))?;
+                    .permission("core:event:allow-listen").permission("core:event:allow-unlisten").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command").permission("allow-browser-tabs").permission("allow-browser-select-tab"))?;
                 WebviewUrl::External(url.clone())
             }else{WebviewUrl::App("index.html".into())};
             let expected_shell=remote_shell.clone();
@@ -191,30 +261,33 @@ fn main(){
                 .on_new_window(|_,_|NewWindowResponse::Deny).build()?;
             let window=shell.as_ref().window();
             let fixture_origin=origin.ascii_serialization();
-            let download_origin=origin.clone();
             let download_path=downloads.join("iwxa-result.txt");
+            let first_url=if two_tabs{entry.join("/tab-a").expect("tab A URL")}else{entry.clone()};
             let guest=window.add_child(
-                WebviewBuilder::new("guest",WebviewUrl::External(entry.clone()))
-                    .data_directory(guest_data.clone())
-                    .additional_browser_args("--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --no-first-run")
-                    .devtools(false)
-                    .on_navigation(move|url|browsing_destination_allowed(&fixture_origin,public_sites,url))
-                    .on_page_load(|view,payload|{
-                        let url=payload.url().to_string();
-                        let _=view.emit_to("shell","lab-browser-url",url);
-                    })
-                    .on_download(move|_,event|match event{
-                        DownloadEvent::Requested{url,destination}=>{
-                            if url.origin()!=download_origin || url.path()!="/download" || download_path.exists(){return false;}
-                            *destination=download_path.clone();println!("LAB_DOWNLOAD_REQUESTED");true
-                        },
-                        DownloadEvent::Finished{success,..}=>{println!("LAB_DOWNLOAD_FINISHED success={success}");true},
-                        _=>false,
-                    })
-                    .on_new_window(|_,_|NewWindowResponse::Deny),
+                guest_builder("guest",first_url,guest_data.clone(),fixture_origin.clone(),public_sites,entry.clone(),download_path.clone()),
                 PhysicalPosition::new(0,0),PhysicalSize::new(1,1)
             )?;
             guest.hide()?;
+            #[cfg(windows)]
+            if two_tabs{
+                // Reuse the actual existing environment, not a second browser profile.
+                let owner=window.clone();
+                let second_url=entry.join("/tab-b").expect("tab B URL");
+                let second_data=guest_data.clone();
+                let download_origin=entry.clone();
+                guest.with_webview(move|platform|{
+                    let builder=guest_builder("guest-2",second_url,second_data,fixture_origin,public_sites,download_origin,download_path)
+                        .with_environment(platform.environment());
+                    match owner.add_child(builder,PhysicalPosition::new(0,0),PhysicalSize::new(1,1)){
+                        Ok(second)=>{
+                            if let Err(error)=second.hide(){eprintln!("LAB_SECOND_GUEST_HIDE_FAILED {error}");}
+                            println!("LAB_SECOND_GUEST_READY");
+                            if let Some(shell)=owner.get_webview("shell"){let _=shell.emit("lab-browser-tabs-ready",());}
+                        },
+                        Err(error)=>eprintln!("LAB_SECOND_GUEST_FAILED {error}"),
+                    }
+                })?;
+            }
             shell.show()?;
             println!("LAB_READY shell=WebviewWindow guest=child separate_profiles=true");
             Ok(())

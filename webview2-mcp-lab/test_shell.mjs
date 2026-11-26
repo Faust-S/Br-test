@@ -6,15 +6,16 @@ import {readFileSync} from 'node:fs';
 
 const source=readFileSync(new URL('./ui/shell.js',import.meta.url),'utf8');
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
-function harness({deferSync=false,guestUnavailable=0}={}){
+function harness({deferSync=false,guestUnavailable=0,tabCount=1}={}){
   const calls=[], frames=[], nativeEvents=new Map(), resizeObservers=[], timers=[], elements=new Map(), reports=[];
   let rect={left:380,top:54,right:1000,bottom:700,width:620,height:646};
-  let active=0,maxActive=0;
+  let active=0,maxActive=0,activeTab=0;
   const pending=[];
   const el=id=>{
     if(!elements.has(id)){
       const handlers=new Map();
       elements.set(id,{value:id==='width'?'62':'',textContent:'',
+        hidden:true,attributes:{},setAttribute(k,v){this.attributes[k]=v},
         addEventListener(name,cb){handlers.set(name,cb)},
         fire(name,event={preventDefault(){}}){handlers.get(name)?.(event)},
         getBoundingClientRect(){return {...rect}}});
@@ -26,6 +27,8 @@ function harness({deferSync=false,guestUnavailable=0}={}){
   const api={core:{invoke(name,args){
     calls.push({name,args:args===undefined?null:JSON.parse(JSON.stringify(args))});
     if(name==='browser_url')return Promise.resolve('http://127.0.0.1:1/form');
+    if(name==='browser_tabs')return Promise.resolve([tabCount,activeTab]);
+    if(name==='browser_select_tab'){activeTab=args.index;return Promise.resolve('http://127.0.0.1:1/tab-b')}
     if(name==='sync_pane'&&guestUnavailable>0){guestUnavailable--;return Promise.reject('browser_guest_unavailable')}
     if(name==='sync_pane'&&deferSync){
       active++;maxActive=Math.max(maxActive,active);
@@ -106,4 +109,14 @@ test('waits for the native guest before the first address lookup',async()=>{
   assert.equal(h.el('status').textContent,'Browser visible');
   assert.equal(h.el('address').value,'http://127.0.0.1:1/form');
   assert.equal(h.calls.filter(c=>c.name==='browser_url').length,1);
+});
+
+test('native tab selection updates the same address and marks the active tab',async()=>{
+  const h=harness({tabCount:2});await h.frame();
+  assert.equal(h.el('browser-tabs').hidden,false);
+  h.el('tab-b').fire('click');await h.settle();
+  assert.equal(h.el('address').value,'http://127.0.0.1:1/tab-b');
+  assert.equal(h.el('tab-a').attributes['aria-pressed'],'false');
+  assert.equal(h.el('tab-b').attributes['aria-pressed'],'true');
+  assert.deepEqual(h.calls.filter(c=>c.name==='browser_select_tab').map(c=>c.args),[{index:1}]);
 });

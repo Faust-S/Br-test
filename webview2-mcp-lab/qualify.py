@@ -17,7 +17,8 @@ import time
 import urllib.request
 from snapshot_refs import uid
 from stdio_transport import StdioMcpTransport
-from public_sites import SITES, validate_public_page, validate_public_snapshot
+from public_sites import SITES, page_catalog, validate_public_page, validate_public_snapshot
+from tab_identity import stable_tab_id, bind_bootstrap, rebind_pages
 from advanced_fixture import DOWNLOAD_BYTES, UPLOAD_BYTES, handle_get, handle_post
 
 ROOT = Path(__file__).resolve().parent
@@ -53,7 +54,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
         if handle_get(self, record_fixture): return
-        if self.path == "/form":
+        if self.path in {"/form","/tab-a","/tab-b"}:
             data = (ROOT / "fixture.html").read_bytes()
         elif self.path == "/second":
             data = b"<!doctype html><title>Second fixture</title><h1>Second fixture page</h1>"
@@ -126,7 +127,8 @@ class Mcp:
         try:
             self.transport = StdioMcpTransport(
                 ["node", str(entry), "--autoConnect", "--user-data-dir=" + str(profile),
-                 "--no-usage-statistics", "--no-performance-crux", "--no-javascript-evaluation", "--no-file-navigations"],
+                 "--no-usage-statistics", "--no-performance-crux", "--no-javascript-evaluation", "--no-file-navigations",
+                 "--experimental-structured-content", "--experimentalInteropTools"],
                 cwd=ROOT, stderr=self.log)
         except BaseException:
             self.log.close()
@@ -165,7 +167,8 @@ def read_json(url):
     with urllib.request.urlopen(url, timeout=3) as response:
         return json.load(response)
 
-def endpoint(profile, form_url):
+def endpoint(profile, form_url, other_urls=()):
+    expected_urls={form_url,*other_urls}
     # Microsoft's documented path is the automatically appended EBWebView directory.
     path = profile / "guest" / "EBWebView"
     port_file = path / "DevToolsActivePort"
@@ -177,13 +180,13 @@ def endpoint(profile, form_url):
             raise RuntimeError("invalid DevToolsActivePort")
         base = "http://127.0.0.1:" + str(port)
         targets = read_json(base + "/json/list")
-        if not any(t.get("url") == form_url for t in targets): return None
+        if not expected_urls <= {t.get("url") for t in targets}: return None
         return path, base, targets
     result = wait_for("guest DevToolsActivePort and live fixture target", ready, timeout=60)
     _, base, targets = result
     shell_files = list((profile / "shell").rglob("DevToolsActivePort"))
     assert not shell_files, "trusted shell unexpectedly exposes CDP"
-    assert all(t.get("url") == form_url or t.get("url", "").startswith("about:blank") for t in targets), "unexpected target in guest endpoint"
+    assert all(t.get("url") in expected_urls or t.get("url", "").startswith("about:blank") for t in targets), "unexpected target in guest endpoint"
     check("guest_endpoint_without_shell", {"target_types":[t.get("type") for t in targets], "browser":read_json(base+"/json/version").get("Browser")})
     return result[0]
 
@@ -216,7 +219,7 @@ def shot(client, page, name):
     assert data.startswith(b"\x89PNG\r\n\x1a\n")
     (OUT / (name + ".png")).write_bytes(data)
 
-def run(advanced=False, public_sites=False):
+def run(advanced=False, public_sites=False, tab_probe=False):
     if sys.platform != "win32": raise RuntimeError("actual Windows GUI required")
     user = ctypes.windll.user32
     try: user.SetProcessDpiAwarenessContext(ctypes.c_void_p(-4))
@@ -246,9 +249,9 @@ def run(advanced=False, public_sites=False):
     shutil.copy2(ROOT/"src-tauri/target/debug/iwxa-webview2-mcp-lab.exe",binary)
     clients = []
     hosts = []
-    def start_host(name):
+    def start_host(name,two_tabs=False):
         log = (OUT/(name+".log")).open("wb")
-        env = dict(os.environ, IWXA_LAB_PROFILE=str(profile), IWXA_LAB_URL=url, IWXA_LAB_SHELL_URL=shell_url, WEBVIEW2_USER_DATA_FOLDER=str(profile/"shell"), IWXA_LAB_PUBLIC_SITES="1" if public_sites else "0")
+        env = dict(os.environ, IWXA_LAB_PROFILE=str(profile), IWXA_LAB_URL=url, IWXA_LAB_SHELL_URL=shell_url, WEBVIEW2_USER_DATA_FOLDER=str(profile/"shell"), IWXA_LAB_PUBLIC_SITES="1" if public_sites else "0", IWXA_LAB_TWO_TABS="1" if two_tabs else "0")
         # No global remote-debugging flag; do not inherit an externally configured one.
         env.pop("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", None)
         proc = subprocess.Popen([str(binary)],env=env,stdout=log,stderr=subprocess.STDOUT)
@@ -524,9 +527,70 @@ def run(advanced=False, public_sites=False):
                     entry["error"]=str(exc)[:1000]
                     print("PUBLIC_NOT_CONFIRMED",name,entry["error"],flush=True)
                 finally:entry["elapsed_ms"]=round((time.monotonic()-start)*1000)
-            if not all(e["status"]=="PASS" for e in REPORT["public_sites"]):
-                raise RuntimeError("one or more public sites not confirmed; local G1/G2 results preserved")
-            REPORT["public_sites_status"]="PASS"
+            if all(e["status"]=="PASS" for e in REPORT["public_sites"]):
+                REPORT["public_sites_status"]="PASS"
+        if tab_probe:
+            if not advanced:raise RuntimeError("tab probe requires completed local route")
+            REPORT["tabs_status"]="FAIL"
+            client3.close();clients.remove(client3)
+            user.PostMessageW(hwnd3,0x0010,0,0);proc3.wait(timeout=25)
+            profile=Path(tempfile.mkdtemp(prefix="iwxa-wv2-tabs-")).resolve()
+            origin=url.rsplit("/",1)[0]
+            bootstrap={"guest":origin+"/tab-a","guest-2":origin+"/tab-b"}
+            proc4,hwnd4=start_host("host-tabs",two_tabs=True)
+            folder4=endpoint(profile,bootstrap["guest"],[bootstrap["guest-2"]])
+            user.SetWindowPos(hwnd4,0,12,12,min(sw-36,1040),min(sh-80,680),0x0040)
+            layout_pixels(hwnd4,True,"25-two-native-tabs")
+            client4=start_client(folder4,"tabs")
+            def tab_catalog(client):
+                pages=page_catalog(client.call("list_pages"))
+                ids={p["id"]:stable_tab_id(client.call("get_tab_id",pageId=p["id"])) for p in pages}
+                return pages,ids
+            pages,ids=tab_catalog(client4)
+            binding=bind_bootstrap(bootstrap,pages,ids)
+            by_label=rebind_pages(binding,pages,ids)
+            check("two_native_guests_same_profile_original_tab_identity",{"binding":binding})
+            for page in by_label.values():
+                client4.call("navigate_page",pageId=page,type="url",url=url)
+            pages,ids=tab_catalog(client4)
+            assert len(pages)==2 and all(p["url"]==url for p in pages)
+            assert rebind_pages(binding,pages,ids)==by_label
+            check("same_url_tabs_have_distinct_original_identity")
+            page_a,page_b=by_label["guest"],by_label["guest-2"]
+            click_guest(hwnd4,95,118);gui.hotkey("ctrl","a");gui.write("Tab-A-Human",interval=.04)
+            wait_for("physical input in native tab A",lambda:events("human",human="Tab-A-Human",trusted=True))
+            assert "Tab-A-Human" in snapshot(client4,page_a,"26-tab-a")
+            assert "Tab-A-Human" not in snapshot(client4,page_b,"27-tab-b-before")
+            check("human_input_does_not_cross_same_url_tabs")
+            x,y,w,h,d=geom(hwnd4);bx,by,bw,bh=wait_for("tab strip native slot",lambda:pane_bounds(hwnd4))
+            # Toolbar is 54 CSS px; tab strip occupies the next 36.
+            gui.click(round(x+bx+135*d),round(y+72*d))
+            wait_for("native host selected B",lambda:"LAB_ACTIVE_TAB 1" in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
+            layout_pixels(hwnd4,True,"28-visible-tab-b")
+            text=snapshot(client4,page_b,"29-tab-b")
+            client4.call("fill",pageId=page_b,uid=uid(text,"textbox","Agent entry"),value="Tab-B-Agent")
+            assert "Tab-B-Agent" in snapshot(client4,page_b,"30-tab-b-agent")
+            assert "Tab-B-Agent" not in snapshot(client4,page_a,"31-tab-a-unchanged")
+            shot(client4,page_b,"32-tab-b-mcp")
+            from PIL import Image,ImageChops,ImageStat
+            desktop=gui.screenshot().convert("RGB");desktop.save(OUT/"32-tab-b-native.png")
+            x,y,w,h,d=geom(hwnd4);bx,by,bw,bh=wait_for("visible tab B bounds",lambda:pane_bounds(hwnd4))
+            native=desktop.crop((x+bx,y+by,x+bx+bw,y+by+bh))
+            with Image.open(OUT/"32-tab-b-mcp.png") as image:original=image.convert("RGB")
+            diff=sum(ImageStat.Stat(ImageChops.difference(native.resize((64,64)),original.resize((64,64)))).mean)/3
+            assert native.size==original.size and diff<=12
+            check("original_mcp_acts_on_selected_native_tab",{"pixel_mean_difference":round(diff,3)})
+            client4.close();clients.remove(client4)
+            client5=start_client(folder4,"tabs-reconnect")
+            pages,ids=tab_catalog(client5)
+            rebound=rebind_pages(binding,pages,ids)
+            assert len(pages)==2 and all(p["url"]==url for p in pages)
+            assert "Tab-A-Human" in snapshot(client5,rebound["guest"],"33-tab-a-reconnected")
+            assert "Tab-B-Agent" in snapshot(client5,rebound["guest-2"],"34-tab-b-reconnected")
+            check("same_url_native_tabs_rebound_after_mcp_disconnect")
+            REPORT["tabs_status"]="PASS"
+        if public_sites and REPORT["public_sites_status"]!="PASS":
+            raise RuntimeError("one or more public sites not confirmed; local and tab results preserved")
         REPORT["status"]="PASS"
     except BaseException:
         try:gui.screenshot().save(OUT/"failure-native-before-cleanup.png")
@@ -552,7 +616,7 @@ def run(advanced=False, public_sites=False):
             REPORT["shell_events"]=SHELL_EVENTS[-100:]
 
 if __name__ == "__main__":
-    try: run(advanced="--advanced" in sys.argv,public_sites="--public-sites" in sys.argv)
+    try: run(advanced="--advanced" in sys.argv,public_sites="--public-sites" in sys.argv,tab_probe="--two-tabs" in sys.argv)
     except BaseException as exc:
         REPORT["error"]=repr(exc)
         try:

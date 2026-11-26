@@ -8,6 +8,8 @@
     "core:default",
     "allow-sync-pane",
     "allow-browser-url",
-    "allow-browser-command"
+    "allow-browser-command",
+    "allow-browser-tabs",
+    "allow-browser-select-tab"
   ]
 }
