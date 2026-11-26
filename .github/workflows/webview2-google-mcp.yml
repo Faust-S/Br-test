@@ -1,0 +1,86 @@
+name: IWXA WebView2 plus original Google MCP
+on:
+  push:
+    branches: ["ci/once/webview2-google-mcp/**"]
+    paths: [".github/ci-requests/webview2-google-mcp.json"]
+permissions:
+  contents: read
+concurrency:
+  group: iwxa-webview2-google-mcp
+  cancel-in-progress: false
+jobs:
+  windows:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ci/once/webview2-google-mcp/')
+    runs-on: windows-2022
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify one explicit request and exact public candidate
+        run: |
+          @'
+          import json,os,re,subprocess
+          from pathlib import Path
+          def git(*args): return subprocess.check_output(["git",*args],text=True).strip()
+          path=".github/ci-requests/webview2-google-mcp.json"
+          request=json.loads(Path(path).read_text(encoding="utf-8"))
+          assert set(request)=={"workflow","prepared_sha"}
+          assert request["workflow"]=="webview2-google-mcp"
+          sha=request["prepared_sha"]
+          assert re.fullmatch("[0-9a-f]{40}",sha)
+          assert os.environ["GITHUB_REF"]=="refs/heads/ci/once/webview2-google-mcp/"+sha
+          assert git("rev-list","--parents","-n","1","HEAD").split()==[os.environ["GITHUB_SHA"],sha]
+          assert git("diff","--name-status",sha,"HEAD")=="A\t"+path
+          subprocess.check_call(["git","checkout","--detach",sha])
+          assert not Path("cherry-browser").exists(), "AGPL prototype must not enter the candidate"
+          print("EXACT_PUBLIC_CANDIDATE",sha)
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Resolve and install original Google MCP without browser downloads
+        working-directory: webview2-mcp-lab
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "true"
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci --ignore-scripts --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node -e "const p=require('./node_modules/chrome-devtools-mcp/package.json'); if(p.version!=='1.14.0')process.exit(1); console.log(p.name,p.version,p.license);"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -m py_compile qualify.py
+      - name: Build actual native Tauri two-WebView host
+        working-directory: webview2-mcp-lab/src-tauri
+        run: |
+          cargo generate-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          cargo build --locked --features custom-protocol
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Install existing public GUI qualification tools
+        run: python -m pip install Pillow==11.3.0 pyautogui==0.9.54
+      - name: Actual Windows GUI and original MCP roundtrip
+        working-directory: webview2-mcp-lab
+        run: python qualify.py
+      - name: Preserve public qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webview2-google-mcp-windows
+          path: |
+            webview2-mcp-lab/artifacts/
+            webview2-mcp-lab/package-lock.json
+            webview2-mcp-lab/src-tauri/Cargo.lock
+          if-no-files-found: warn
+          retention-days: 7

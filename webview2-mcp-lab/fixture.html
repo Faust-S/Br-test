@@ -1,0 +1,21 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>IWXA browser fixture</title>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{font:16px system-ui;background:#e5f4ec;color:#20382b;padding:24px}h1{font-size:22px;margin:0}label,input,button,#result{position:absolute;left:24px}input,button{height:36px;width:235px;font:16px system-ui}label[for=human]{top:76px}#human{top:100px}label[for=agent]{top:147px}#agent{top:171px}#save{top:220px;background:#17694c;color:white;border:0}#finish{top:266px;background:#fff;border:1px solid #17694c}#result{top:322px}a{position:absolute;top:380px;left:24px}
+</style></head><body>
+<h1>IWXA shared browser fixture</h1>
+<label for="human">Human entry</label><input id="human">
+<label for="agent">Agent entry</label><input id="agent">
+<button id="save">Save by agent</button><button id="finish">Finish by human</button>
+<p id="result" role="status">Not saved</p><a href="/second">Second page</a>
+<script>
+const human=document.getElementById('human'), agent=document.getElementById('agent'), result=document.getElementById('result');
+const key='iwxa-native-lab-result';
+const previous=localStorage.getItem(key);
+if(previous){const saved=JSON.parse(previous);human.value=saved.human;agent.value=saved.agent;result.textContent=saved.result}
+function report(kind, event){fetch('/event',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind,human:human.value,agent:agent.value,result:result.textContent,trusted:event?.isTrusted??null})}).catch(()=>{})}
+for(const element of [human,agent]) element.addEventListener('input', event=>report(element.id,event));
+function persist(kind,event){result.textContent=kind+' '+human.value+' '+agent.value;localStorage.setItem(key,JSON.stringify({human:human.value,agent:agent.value,result:result.textContent}));report(kind,event)}
+document.getElementById('save').addEventListener('click',event=>persist('Saved',event));
+document.getElementById('finish').addEventListener('click',event=>persist('Finished',event));
+report('load');
+</script></body></html>

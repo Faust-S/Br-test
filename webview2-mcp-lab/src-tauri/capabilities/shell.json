@@ -1,0 +1,10 @@
+{
+  "identifier": "lab-shell-only",
+  "description": "Only trusted local lab shell, never the browsing guest.",
+  "webviews": [
+    "shell"
+  ],
+  "permissions": [
+    "core:default"
+  ]
+}

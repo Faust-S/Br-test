@@ -1,0 +1,9 @@
+{
+  "name": "iwxa-webview2-mcp-qualification",
+  "version": "0.6.7",
+  "private": true,
+  "description": "Original Google Chrome DevTools MCP only",
+  "dependencies": {
+    "chrome-devtools-mcp": "1.14.0"
+  }
+}

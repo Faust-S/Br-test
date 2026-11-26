@@ -1,0 +1,15 @@
+[package]
+name = "iwxa-webview2-mcp-lab"
+version = "0.6.7"
+edition = "2021"
+description = "Public native two-WebView2 compatibility qualification"
+license = "MIT OR Apache-2.0"
+
+[build-dependencies]
+tauri-build = { version = "=2.7.6", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.7", features = ["unstable"] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
