@@ -62,6 +62,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -m unittest -v test_snapshot_refs test_advanced_fixture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          node --test test_shell.mjs
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build actual native Tauri two-WebView host
         working-directory: webview2-mcp-lab/src-tauri
         run: |
