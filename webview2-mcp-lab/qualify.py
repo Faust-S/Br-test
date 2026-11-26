@@ -145,6 +145,10 @@ class Mcp:
     def initialize(self):
         response = self.request("initialize", {"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"iwxa-webview2-lab","version":"0.6.7"}})
         self.send({"jsonrpc":"2.0","method":"notifications/initialized"})
+        REPORT.setdefault("mcp_negotiations",[]).append({
+            "protocolVersion":response.get("protocolVersion"),
+            "serverInfo":response.get("serverInfo"),
+            "capabilities":response.get("capabilities")})
         return response["serverInfo"]
     def call(self, name, **args):
         start = time.monotonic()
@@ -334,9 +338,14 @@ def run(advanced=False):
         check_profile_layout()
         check("remote_shell_native_dock_rect",list(wait_for("slot bounds",lambda:pane_bounds(hwnd))))
         client=start_client(folder,"first")
-        tools=client.request("tools/list",{})["tools"]
+        catalog=client.request("tools/list",{})
+        tools=catalog["tools"]
+        (OUT/"original-mcp-catalog.json").write_text(json.dumps(catalog,indent=2,ensure_ascii=False),encoding="utf-8")
+        names=[t["name"] for t in tools]
         required={"list_pages","take_snapshot","fill","click","take_screenshot","navigate_page"}
-        assert required <= {t["name"] for t in tools}
+        if advanced:required|={"fill_form","upload_file"}
+        assert len(names)==len(set(names)) and required<=set(names)
+        assert all(isinstance(t.get("inputSchema"),dict) for t in tools)
         check("original_tool_catalog",len(tools))
         page=page_id(client,url)
         text=snapshot(client,page,"02-initial-ax")
