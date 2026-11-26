@@ -1,0 +1,80 @@
+name: IWXA Cherry browser qualification
+on:
+  push:
+    branches: ["ci/once/cherry-browser-qualification/**"]
+    paths: [".github/ci-requests/cherry-browser-qualification.json"]
+permissions:
+  contents: read
+concurrency:
+  group: cherry-browser-qualification
+  cancel-in-progress: false
+jobs:
+  qualify:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/ci/once/cherry-browser-qualification/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify single explicit qualification request and exact candidate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re, subprocess
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(["git",*args], text=True).strip()
+          req = ".github/ci-requests/cherry-browser-qualification.json"
+          candidate = json.loads(Path(req).read_text(encoding="utf-8"))
+          assert set(candidate) == {"workflow", "prepared_sha"}
+          assert candidate["workflow"] == "cherry-browser-qualification"
+          sha = candidate["prepared_sha"]
+          assert re.fullmatch("[0-9a-f]{40}", sha)
+          assert os.environ["GITHUB_REF"] == "refs/heads/ci/once/cherry-browser-qualification/" + sha
+          assert git("rev-list", "--parents", "-n", "1", "HEAD").split()[1:] == [sha]
+          assert git("diff", "--name-status", sha, "HEAD") == "A\t" + req
+          assert git("rev-parse", "HEAD^{commit}") == os.environ["GITHUB_SHA"]
+          subprocess.check_call(["git", "checkout", "--detach", sha])
+          print("EXACT_PUBLIC_CANDIDATE", sha)
+          PY
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify original source
+        working-directory: cherry-browser
+        run: python verify_vendor.py
+      - name: Resolve and install exact public dependencies
+        working-directory: cherry-browser
+        run: |
+          npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+          npm ci --no-audit --no-fund
+      - name: Run adapter and selected original tests
+        working-directory: cherry-browser
+        run: npm run test:all
+      - name: Build independent browser module and public fixtures
+        working-directory: cherry-browser
+        run: npm run build
+      - name: Native Chromium prerequisites
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y xvfb openbox libgtk-3-0t64 libnss3 libasound2t64
+      - name: Native visible browser and MCP roundtrip
+        working-directory: cherry-browser
+        run: |
+          set -o pipefail
+          xvfb-run -a -s "-screen 0 1280x900x24" bash -c 'openbox >/tmp/iwxa-openbox.log 2>&1 & npm run test:native' | tee native-qualification.log
+      - name: Publish public dependency and test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cherry-browser-qualification
+          path: |
+            cherry-browser/package-lock.json
+            cherry-browser/native-qualification.log
+          if-no-files-found: warn
+          retention-days: 7
