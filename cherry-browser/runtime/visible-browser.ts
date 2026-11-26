@@ -4,6 +4,9 @@ import { randomUUID } from 'node:crypto'
 import type { WebContents } from 'electron'
 import { BrowserCursor } from '@main/features/browser/BrowserCursor'
 import { BrowserControlSession } from '@main/features/browser/BrowserControlSession'
+import { executeBrowserOperation, type BrowserAutomationResult } from '@main/features/browser/automation'
+import type { BrowserController } from '@main/features/browser/mcp/browserController'
+import { automationToolName } from './automation-names.mjs'
 import { SessionBrowserController } from '@main/features/browser/mcp/SessionBrowserController'
 import { BrowserSessionError } from '@main/features/browser/session/BrowserSessionError'
 import { sessionToolDefinitions } from '@main/ai/mcp/browserToolDefinitions'
@@ -127,10 +130,26 @@ export class VisibleBrowserAdapter {
   hideCursor(): void { this.cursor.hide() }
   notePopupBlocked(): void { this.target.popupBlocked = true }
 
-  async callTool(name: string, args: unknown, signal: AbortSignal): Promise<CallToolResult> {
+  private async runControl<T>(name: string, args: unknown, signal: AbortSignal,
+    operation: (controller: BrowserController, signal: AbortSignal) => Promise<T>): Promise<T> {
     this.assertAvailable()
     signal.throwIfAborted()
     const ticket = this.lifetime.capture()
+    const result = await ticket.control.run((controller, callSignal) => {
+      // Both original MCP and automation APIs share this same serialized controller.
+      this.assertAvailable()
+      callSignal.throwIfAborted()
+      if (!this.lifetime.isCurrent(ticket) || !this.host.authorize(name, args))
+        throw new BrowserSessionError('not_allowed')
+      return operation(controller, callSignal)
+    }, signal)
+    if (!this.lifetime.isCurrent(ticket))
+      throw new Error('browser_control_interrupted: inspect the visible page before any retry')
+    return result
+  }
+
+  async callTool(name: string, args: unknown, signal: AbortSignal): Promise<CallToolResult> {
+    this.assertAvailable()
     const definition = sessionToolDefinitions.find(tool => tool.name === name)
     if (!definition || !Object.hasOwn(toolHandlers, name)) throw new BrowserSessionError('not_allowed')
     const parsed = definition.inputSchema.parse(args)
@@ -138,17 +157,18 @@ export class VisibleBrowserAdapter {
       throw new BrowserSessionError('not_found')
     if ('privateMode' in parsed && parsed.privateMode === true ||
         'newTab' in parsed && parsed.newTab === true) throw new BrowserSessionError('not_allowed')
-    const result = await ticket.control.run((controller, callSignal) => {
-      // Original BrowserControlSession serializes the live-pane operations. Check current host
-      // permission again when the operation leaves that queue.
-      this.assertAvailable()
-      callSignal.throwIfAborted()
-      if (!this.lifetime.isCurrent(ticket) || !this.host.authorize(name, parsed))
-        throw new BrowserSessionError('not_allowed')
-      return toolHandlers[name](controller, parsed, callSignal)
-    }, signal)
-    if (epoch !== this.epoch) throw new Error('browser_control_interrupted: inspect the visible page before any retry')
-    return result
+    return this.runControl(name, parsed, signal, (controller, callSignal) =>
+      toolHandlers[name](controller, parsed, callSignal))
+  }
+
+  async execute(name: string, args: Record<string, unknown>, tabId: string | undefined,
+    signal: AbortSignal): Promise<BrowserAutomationResult> {
+    this.assertAvailable()
+    const tool = automationToolName(name)
+    if (!tool) throw new BrowserSessionError('not_allowed')
+    if (tabId !== undefined && tabId !== this.tabId) throw new BrowserSessionError('not_found')
+    return this.runControl(tool, args, signal, (controller, callSignal) =>
+      executeBrowserOperation(controller, name, args, this.tabId, callSignal))
   }
 
   private disposal?: Promise<void>

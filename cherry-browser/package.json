@@ -11,7 +11,8 @@
     "start:mcp": "electron . --mcp",
     "test": "node --test tests/*.test.mjs",
     "test:upstream": "vitest run --config vitest.config.mts",
-    "test:all": "npm run test && npm run test:upstream"
+    "test:all": "npm run test && npm run test:upstream",
+    "test:native": "node qualification/native-mcp.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/client": "2.3.0",
@@ -28,5 +29,8 @@
     "jsdom": "26.1.0",
     "typescript": "5.9.3",
     "vitest": "5.0.1"
+  },
+  "exports": {
+    ".": "./dist/browser-module.mjs"
   }
 }
