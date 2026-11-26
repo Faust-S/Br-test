@@ -1,11 +1,12 @@
 {
-  "schema": 1,
+  "schema": 2,
   "repository": "https://github.com/CherryHQ/cherry-studio.git",
   "tag": "v2.1.7",
   "commit": "6e08bf9b8aa2acd05a0d40cc5a4560b6153760ba",
   "license": "AGPL-3.0",
-  "scope": "source intake only; not a standalone build, not a release, not a license exception",
+  "scope": "browser-only source intake; not a full dependency closure or a release",
   "checkout": "upstream/cherry-studio",
+  "vendor": "vendor/cherry-studio",
   "files": [
     {
       "path": "LICENSE",
@@ -21,6 +22,36 @@
       "path": "resources/skills/cherry-browser/SKILL.md",
       "blob": "11284261f4446cf2d4c82cf2a0e931a63faf0a85",
       "size": 5484
+    },
+    {
+      "path": "src/main/ai/mcp/__tests__/browserToolDefinitions.test.ts",
+      "blob": "7a12eb67073d4389c0bcc2ce6b0fcc989cafe498",
+      "size": 1997
+    },
+    {
+      "path": "src/main/ai/mcp/browserToolDefinitions.ts",
+      "blob": "eb173c4a59e9ff85add8027767b88571e96cb4a1",
+      "size": 13324
+    },
+    {
+      "path": "src/main/ai/mcp/browserTools.ts",
+      "blob": "b25904008bd4bf7b3bfb33ee5747a9bdc92bd101",
+      "size": 582
+    },
+    {
+      "path": "src/main/ai/tools/adapters/aiSdk/builtin/BrowserTools.ts",
+      "blob": "badf80e0079dc4f0a208378871b3c56c501e6805",
+      "size": 1764
+    },
+    {
+      "path": "src/main/core/lifecycle/event.ts",
+      "blob": "70038609898a6d98ffd1698218e970b1a81362fa",
+      "size": 3304
+    },
+    {
+      "path": "src/main/core/platform.ts",
+      "blob": "392451724aea3312ee4a02c827c4a015f67aaf49",
+      "size": 816
     },
     {
       "path": "src/main/features/browser/__tests__/actions.test.ts",
@@ -428,6 +459,26 @@
       "size": 2543
     },
     {
+      "path": "src/main/utils/htmlToMarkdown.ts",
+      "blob": "3696b96246097afee38d593b3865691000305c3c",
+      "size": 9385
+    },
+    {
+      "path": "src/main/utils/remoteUrlSafety.ts",
+      "blob": "e560fd233b5d1deab7b05f6b182e0d3f0af4037a",
+      "size": 10269
+    },
+    {
+      "path": "src/renderer/assets/images/browser-cursor.svg",
+      "blob": "c753c8176c13cb4c45186b08666b30b9c58cfff0",
+      "size": 350
+    },
+    {
+      "path": "src/renderer/components/__tests__/BrowserCursorAnimation.test.ts",
+      "blob": "56cf79b7128ef1f9151d107518b3379d4ecc63ac",
+      "size": 5488
+    },
+    {
       "path": "src/renderer/components/AgentBrowserRuntimeHost.tsx",
       "blob": "fdee3066e32a1fc8480eb8fa7dec350c8ecb872f",
       "size": 6590
@@ -468,9 +519,19 @@
       "size": 9391
     },
     {
+      "path": "src/renderer/components/WebviewImportBanner.tsx",
+      "blob": "ddc8888178a2fe5ff2ceb123a5b15249165a03c9",
+      "size": 1776
+    },
+    {
       "path": "src/renderer/components/WebviewNavigation.tsx",
       "blob": "8dbfc65b4df29f2b74de2d837506f219344d1dcd",
       "size": 15224
+    },
+    {
+      "path": "src/renderer/components/WebviewSearch.tsx",
+      "blob": "9999c69abf86b48e75ccc195a2463d1bef244735",
+      "size": 10872
     },
     {
       "path": "src/renderer/components/WebviewSurface.tsx",
@@ -503,9 +564,24 @@
       "size": 493
     },
     {
+      "path": "src/shared/types/webviewAnnotation.ts",
+      "blob": "93e5cdb7fd8f4ce6be9541c61aa0842a6a8c6d03",
+      "size": 7061
+    },
+    {
       "path": "src/shared/utils/browserUrl.ts",
       "blob": "244a09b93fc810371174554afd67d7e630f6c3c4",
       "size": 813
+    },
+    {
+      "path": "src/shared/utils/redaction.ts",
+      "blob": "171c7e527873373f786383b203785b6acea24acf",
+      "size": 8082
+    },
+    {
+      "path": "src/shared/utils/webviewSecurity.ts",
+      "blob": "6e5bc4380027fbcdbd133624ae9b123518c6c62d",
+      "size": 1305
     }
   ]
 }
