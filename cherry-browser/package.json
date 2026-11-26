@@ -1,0 +1,32 @@
+{
+  "name": "iwxa-cherry-browser-module",
+  "version": "0.6.7-pre.1",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "main": "dist/main.mjs",
+  "scripts": {
+    "verify:source": "python verify_vendor.py",
+    "build": "node build.mjs",
+    "start": "electron .",
+    "start:mcp": "electron . --mcp",
+    "test": "node --test tests/*.test.mjs",
+    "test:upstream": "vitest run --config vitest.config.mts",
+    "test:all": "npm run test && npm run test:upstream"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/client": "2.3.0",
+    "@modelcontextprotocol/server": "2.3.0",
+    "async-mutex": "0.5.0",
+    "turndown": "7.2.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.4",
+    "devtools-protocol": "0.0.1692173",
+    "electron": "44.4.4",
+    "esbuild": "0.25.12",
+    "jsdom": "26.1.0",
+    "typescript": "5.9.3",
+    "vitest": "5.0.1"
+  }
+}

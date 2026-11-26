@@ -49,6 +49,11 @@
       "size": 3304
     },
     {
+      "path": "src/main/core/lifecycle/signal.ts",
+      "blob": "cded9415557319861c3ce37eb170e8a01ff7f6e8",
+      "size": 3096
+    },
+    {
       "path": "src/main/core/platform.ts",
       "blob": "392451724aea3312ee4a02c827c4a015f67aaf49",
       "size": 816
