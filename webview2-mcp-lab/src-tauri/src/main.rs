@@ -44,6 +44,11 @@ impl PaneState{
 // Production browser navigation is not constrained to this qualification list.
 const PUBLIC_HOSTS:&[&str]=&["github.com","iwxa.ru","www.iwxa.ru","learn.iwxa.ru","artbazi.ru","www.artbazi.ru"];
 
+// Exercise the same blank-document URL family as an ordinary native browser.
+fn blank_bootstrap(index:usize)->tauri::Url {
+    format!("about:blank#lab-native-tab-{index}").parse().expect("blank tab URL")
+}
+
 fn browsing_destination_allowed(fixture_origin:&str,public_sites:bool,url:&tauri::Url)->bool {
     if !url.username().is_empty() || url.password().is_some() { return false; }
     if url.origin().ascii_serialization()==fixture_origin { return true; }
@@ -64,6 +69,14 @@ fn shell_location_allowed(expected:Option<&tauri::Url>, actual:&tauri::Url)->boo
 #[cfg(test)]
 mod shell_tests {
     use super::*;
+    #[test]
+    fn unique_blank_bootstrap_urls() {
+        let urls:Vec<_>=(0..12).map(blank_bootstrap).collect();
+        for (index,url) in urls.iter().enumerate(){
+            assert_eq!(url.as_str(),format!("about:blank#lab-native-tab-{index}"));
+            assert!(!browsing_destination_allowed("http://127.0.0.1:9000",false,url));
+        }
+    }
     #[test]
     fn exact_remote_shell_document() {
         let expected:tauri::Url="http://127.0.0.1:12345/desktop/index.html".parse().unwrap();
@@ -169,7 +182,7 @@ async fn browser_create_tab(webview:Webview)->Result<(usize,String),String>{
         let index=state.next_tab.fetch_update(Ordering::SeqCst,Ordering::SeqCst,
             |value|value.checked_add(1).filter(|next|*next<usize::MAX)).map_err(|_|"browser_tab_id_exhausted")?;
         let label=tab_label(index);
-        let bootstrap=state.entry.join(&format!("/tab-new/{index}")).map_err(|e|e.to_string())?;
+        let bootstrap=blank_bootstrap(index);
         let data=state.guest_data.clone();
         let fixture=state.fixture_origin.clone();
         let public_sites=state.public_sites;
@@ -290,11 +303,12 @@ fn browser_command(webview:Webview,state:State<'_,PaneState>,index:usize,operati
 
 fn guest_builder(label:&str,entry:tauri::Url,data:PathBuf,fixture_origin:String,
     public_sites:bool,download_origin:tauri::Url,download_path:PathBuf)->WebviewBuilder<tauri::Wry>{
+    let initial=entry.clone();
     WebviewBuilder::new(label,WebviewUrl::External(entry))
         .data_directory(data)
         .additional_browser_args("--remote-debugging-port=0 --remote-debugging-address=127.0.0.1 --no-first-run")
         .devtools(false)
-        .on_navigation(move|url|browsing_destination_allowed(&fixture_origin,public_sites,url))
+        .on_navigation(move|url|*url==initial||browsing_destination_allowed(&fixture_origin,public_sites,url))
         .on_page_load(|view,payload|{
             if let Some(index)=tab_index(view.label()){
                 if view.state::<PaneState>().active_tab.load(Ordering::SeqCst)==index{
@@ -374,7 +388,7 @@ fn main(){
             let window=shell.as_ref().window();
             let fixture_origin=origin.ascii_serialization();
             let download_path=downloads.join("iwxa-result.txt");
-            let first_url=if two_tabs{entry.join("/tab-a").expect("tab A URL")}else{entry.clone()};
+            let first_url=if two_tabs{blank_bootstrap(0)}else{entry.clone()};
             let guest=window.add_child(
                 guest_builder("guest",first_url,guest_data.clone(),fixture_origin.clone(),public_sites,entry.clone(),download_path.clone()),
                 PhysicalPosition::new(0,0),PhysicalSize::new(1,1)
@@ -384,7 +398,7 @@ fn main(){
             if two_tabs{
                 // Reuse the actual existing environment, not a second browser profile.
                 let owner=window.clone();
-                let second_url=entry.join("/tab-b").expect("tab B URL");
+                let second_url=blank_bootstrap(1);
                 let second_data=guest_data.clone();
                 let download_origin=entry.clone();
                 guest.with_webview(move|platform|{

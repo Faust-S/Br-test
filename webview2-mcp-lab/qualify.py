@@ -535,8 +535,9 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             client3.close();clients.remove(client3)
             user.PostMessageW(hwnd3,0x0010,0,0);proc3.wait(timeout=25)
             profile=Path(tempfile.mkdtemp(prefix="iwxa-wv2-tabs-")).resolve()
-            origin=url.rsplit("/",1)[0]
-            bootstrap={"guest":origin+"/tab-a","guest-2":origin+"/tab-b"}
+            def blank_bootstrap(index):
+                return f"about:blank#lab-native-tab-{index}"
+            bootstrap={"guest":blank_bootstrap(0),"guest-2":blank_bootstrap(1)}
             proc4,hwnd4=start_host("host-tabs",two_tabs=True)
             folder4=endpoint(profile,bootstrap["guest"],[bootstrap["guest-2"]])
             user.SetWindowPos(hwnd4,0,12,12,min(sw-36,1040),min(sh-80,680),0x0040)
@@ -550,6 +551,7 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             binding=bind_bootstrap(bootstrap,pages,ids)
             by_label=rebind_pages(binding,pages,ids)
             check("two_native_guests_same_profile_original_tab_identity",{"binding":binding})
+            check("blank_fragment_bootstrap_visible_to_original_mcp",{"indices":[0,1]})
             for page in by_label.values():
                 client4.call("navigate_page",pageId=page,type="url",url=url)
             pages,ids=tab_catalog(client4)
@@ -605,7 +607,7 @@ def run(advanced=False, public_sites=False, tab_probe=False):
                 return wait_for("closed original tab "+label,probe,timeout=35)
             click_tab_action(True)
             wait_for("native create C",lambda:"LAB_TAB_CREATED 2 " in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
-            binding=added(binding,"guest-3",origin+"/tab-new/2")
+            binding=added(binding,"guest-3",blank_bootstrap(2))
             layout_pixels(hwnd4,True,"35-created-tab-c")
             pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
             page_c=by_label["guest-3"]
@@ -626,13 +628,14 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             check("native_dynamic_close_preserves_surviving_tab_identity")
             click_tab_action(True)
             wait_for("native create D",lambda:"LAB_TAB_CREATED 3 " in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
-            binding=added(binding,"guest-4",origin+"/tab-new/3")
+            binding=added(binding,"guest-4",blank_bootstrap(3))
             assert binding["guest-4"]!=closed_id
             pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
             assert "Tab-C-Agent" not in snapshot(client5,by_label["guest-4"],"42-d-new")
             layout_pixels(hwnd4,True,"43-new-tab-d")
             check("native_dynamic_reopen_never_reuses_closed_identity")
             REPORT["dynamic_tabs_status"]="PASS"
+            check("blank_fragment_dynamic_tab_identity",{"indices":[2,3]})
         if public_sites and REPORT["public_sites_status"]!="PASS":
             raise RuntimeError("one or more public sites not confirmed; local and tab results preserved")
         REPORT["status"]="PASS"

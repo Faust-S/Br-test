@@ -77,7 +77,7 @@ jobs:
         run: python -m pip install Pillow==11.3.0 pyautogui==0.9.54 psutil==7.0.0
       - name: Actual Windows GUI and original MCP roundtrip
         working-directory: webview2-mcp-lab
-        run: python qualify.py --advanced --public-sites --two-tabs
+        run: python qualify.py --advanced --two-tabs
       - name: Preserve public qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
