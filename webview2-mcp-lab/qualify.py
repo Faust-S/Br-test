@@ -541,7 +541,8 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             proc4,hwnd4=start_host("host-tabs",two_tabs=True)
             folder4=endpoint(profile,bootstrap["guest"],[bootstrap["guest-2"]])
             user.SetWindowPos(hwnd4,0,12,12,min(sw-36,1040),min(sh-80,680),0x0040)
-            layout_pixels(hwnd4,True,"25-two-native-tabs")
+            # The blank page has no green fixture background. First observe
+            # its identity through the original MCP without navigating it.
             client4=start_client(folder4,"tabs")
             def tab_catalog(client):
                 pages=page_catalog(client.call("list_pages"))
@@ -558,6 +559,9 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             assert len(pages)==2 and all(p["url"]==url for p in pages)
             assert rebind_pages(binding,pages,ids)==by_label
             check("same_url_tabs_have_distinct_original_identity")
+            # The existing color/geometry witness applies to the loaded
+            # fixture, not to a genuinely empty WebView2 document.
+            layout_pixels(hwnd4,True,"25-two-native-tabs")
             page_a,page_b=by_label["guest"],by_label["guest-2"]
             click_guest(hwnd4,95,118);gui.hotkey("ctrl","a");gui.write("Tab-A-Human",interval=.04)
             wait_for("physical input in native tab A",lambda:events("human",human="Tab-A-Human",trusted=True))
@@ -608,10 +612,10 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             click_tab_action(True)
             wait_for("native create C",lambda:"LAB_TAB_CREATED 2 " in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
             binding=added(binding,"guest-3",blank_bootstrap(2))
-            layout_pixels(hwnd4,True,"35-created-tab-c")
             pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
             page_c=by_label["guest-3"]
             client5.call("navigate_page",pageId=page_c,type="url",url=url)
+            layout_pixels(hwnd4,True,"35-created-tab-c")
             text=snapshot(client5,page_c,"36-c-before")
             client5.call("fill",pageId=page_c,uid=uid(text,"textbox","Agent entry"),value="Tab-C-Agent")
             assert "Tab-C-Agent" in snapshot(client5,page_c,"37-c-after")
@@ -631,7 +635,13 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             binding=added(binding,"guest-4",blank_bootstrap(3))
             assert binding["guest-4"]!=closed_id
             pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
-            assert "Tab-C-Agent" not in snapshot(client5,by_label["guest-4"],"42-d-new")
+            page_d=by_label["guest-4"]
+            assert "Tab-C-Agent" not in snapshot(client5,page_d,"42-d-new")
+            client5.call("navigate_page",pageId=page_d,type="url",url=url)
+            pages,ids=tab_catalog(client5)
+            assert rebind_pages(binding,pages,ids)["guest-4"]==page_d
+            assert all(p["url"]==url for p in pages)
+            assert "Tab-C-Agent" not in snapshot(client5,page_d,"42b-d-fixture")
             layout_pixels(hwnd4,True,"43-new-tab-d")
             check("native_dynamic_reopen_never_reuses_closed_identity")
             REPORT["dynamic_tabs_status"]="PASS"
