@@ -2,20 +2,41 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod pane_geometry;
-use std::{path::PathBuf,sync::atomic::{AtomicUsize,Ordering}};
+use std::{path::PathBuf,sync::{Arc,atomic::{AtomicBool,AtomicUsize,Ordering}}};
 use tauri::{Emitter, Manager, PhysicalPosition, PhysicalSize, Rect, State, Webview, WebviewUrl, WebviewWindowBuilder};
 use tauri::{ipc::CapabilityBuilder, webview::{DownloadEvent, NewWindowResponse, WebviewBuilder}};
 
 struct PaneState {
     fixture_origin:String, shell_url:Option<tauri::Url>, public_sites:bool,
-    two_tabs:bool, active_tab:AtomicUsize,
+    active_tab:AtomicUsize, next_tab:AtomicUsize, creating:Arc<AtomicBool>,
+    entry:tauri::Url, guest_data:PathBuf, download_path:PathBuf,
 }
-fn tab_label(index:usize)->Option<&'static str>{
-    match index{0=>Some("guest"),1=>Some("guest-2"),_=>None}
+const MAX_OPEN_TABS:usize=12;
+fn tab_label(index:usize)->String{
+    if index==0 {"guest".into()}else{format!("guest-{}",index+1)}
+}
+fn tab_index(label:&str)->Option<usize>{
+    if label=="guest"{return Some(0);}
+    let number=label.strip_prefix("guest-")?.parse::<usize>().ok()?;
+    if number<2 || tab_label(number-1)!=label{return None;}
+    Some(number-1)
+}
+fn live_tabs(window:&tauri::Window)->Vec<usize>{
+    let mut ids:Vec<_>=window.webviews().iter().filter_map(|view|tab_index(view.label())).collect();
+    ids.sort_unstable();ids
+}
+fn replacement_tab(ids:&[usize], closing:usize)->Option<usize>{
+    let position=ids.iter().position(|id|*id==closing)?;
+    if position>0{Some(ids[position-1])}else{ids.get(1).copied()}
+}
+struct CreationGuard(Arc<AtomicBool>);
+impl Drop for CreationGuard{
+    fn drop(&mut self){self.0.store(false,Ordering::SeqCst);}
 }
 impl PaneState{
-    fn active_label(&self)->&'static str{
-        tab_label(self.active_tab.load(Ordering::SeqCst)).expect("valid active tab")
+    fn active_label(&self)->String{tab_label(self.active_tab.load(Ordering::SeqCst))}
+    fn idle(&self)->Result<(),String>{
+        if self.creating.load(Ordering::SeqCst){Err("browser_tab_busy".into())}else{Ok(())}
     }
 }
 
@@ -69,6 +90,16 @@ mod shell_tests {
         }
     }
     #[test]
+    fn stable_native_labels_and_close_neighbour(){
+        for id in [0,1,2,9,123] {assert_eq!(tab_index(&tab_label(id)),Some(id));}
+        for label in ["shell","guest-1","guest-02","guest-0","guest--2","guest-other"] {assert_eq!(tab_index(label),None);}
+        assert_eq!(replacement_tab(&[0,2,5],2),Some(0));
+        assert_eq!(replacement_tab(&[0,2,5],0),Some(2));
+        assert_eq!(replacement_tab(&[0,2,5],5),Some(2));
+        assert_eq!(replacement_tab(&[2],2),None);
+        assert_eq!(replacement_tab(&[0,2],1),None);
+    }
+    #[test]
     fn bundled_shell_document_only() {
         for url in ["http://tauri.localhost/","https://tauri.localhost/index.html","tauri://localhost/"] {
             assert!(shell_location_allowed(None,&url.parse().unwrap()),"{url}");
@@ -89,41 +120,112 @@ fn trusted_shell(webview:&Webview)->Result<(),String>{
 fn trusted_guest(webview:&Webview) -> Result<Webview,String> {
     trusted_shell(webview)?;
     let state=webview.state::<PaneState>();
-    webview.window().get_webview(state.active_label()).ok_or_else(||"browser_guest_unavailable".into())
+    webview.window().get_webview(&state.active_label()).ok_or_else(||"browser_guest_unavailable".into())
 }
 
 #[tauri::command]
-fn browser_tabs(webview:Webview)->Result<(usize,usize),String>{
+fn browser_tabs(webview:Webview)->Result<(Vec<usize>,usize),String>{
     trusted_shell(&webview)?;
     let state=webview.state::<PaneState>();
-    let count=if state.two_tabs && webview.window().get_webview("guest-2").is_some(){2}else{1};
-    Ok((count,state.active_tab.load(Ordering::SeqCst)))
+    let ids=live_tabs(&webview.window());
+    let active=state.active_tab.load(Ordering::SeqCst);
+    if !ids.contains(&active){return Err("browser_guest_unavailable".into());}
+    Ok((ids,active))
 }
 
 #[tauri::command]
 fn browser_select_tab(webview:Webview,index:usize)->Result<String,String>{
     trusted_shell(&webview)?;
     let state=webview.state::<PaneState>();
-    if index>0&&!state.two_tabs{return Err("browser_tab_not_enabled".into());}
-    let label=tab_label(index).ok_or("invalid_browser_tab")?;
-    let next=webview.window().get_webview(label).ok_or("browser_guest_unavailable")?;
+    state.idle()?;
+    if !live_tabs(&webview.window()).contains(&index){return Err("browser_guest_unavailable".into());}
+    let next=webview.window().get_webview(&tab_label(index)).ok_or("browser_guest_unavailable")?;
+    let url=next.url().map_err(|e|e.to_string())?.to_string();
     if state.active_tab.load(Ordering::SeqCst)!=index{
-        if let Some(previous)=webview.window().get_webview(state.active_label()){
+        if let Some(previous)=webview.window().get_webview(&state.active_label()){
             previous.hide().map_err(|e|e.to_string())?;
         }
         state.active_tab.store(index,Ordering::SeqCst);
         println!("LAB_ACTIVE_TAB {index}");
     }
-    next.url().map(|u|u.to_string()).map_err(|e|e.to_string())
+    Ok(url)
+}
+
+#[tauri::command]
+async fn browser_create_tab(webview:Webview)->Result<(usize,String),String>{
+    #[cfg(not(windows))]
+    {let _=webview;Err("windows_native_tabs_required".into())}
+    #[cfg(windows)]
+    {
+        trusted_shell(&webview)?;
+        let state=webview.state::<PaneState>();
+        state.creating.compare_exchange(false,true,Ordering::SeqCst,Ordering::SeqCst)
+            .map_err(|_|"browser_tab_busy")?;
+        let guard=CreationGuard(state.creating.clone());
+        let owner=webview.window();
+        if live_tabs(&owner).len()>=MAX_OPEN_TABS{return Err("browser_tab_limit".into());}
+        let anchor=trusted_guest(&webview)?;
+        // A failed or closed tab never reuses its native identity.
+        let index=state.next_tab.fetch_update(Ordering::SeqCst,Ordering::SeqCst,
+            |value|value.checked_add(1).filter(|next|*next<usize::MAX)).map_err(|_|"browser_tab_id_exhausted")?;
+        let label=tab_label(index);
+        let bootstrap=state.entry.join(&format!("/tab-new/{index}")).map_err(|e|e.to_string())?;
+        let data=state.guest_data.clone();
+        let fixture=state.fixture_origin.clone();
+        let public_sites=state.public_sites;
+        let download_origin=state.entry.clone();
+        let download_path=state.download_path.clone();
+        let (tx,mut rx)=tauri::async_runtime::channel(1);
+        let previous=anchor.clone();
+        anchor.with_webview(move|platform|{
+            let result=(||->Result<(usize,String),String>{
+                let builder=guest_builder(&label,bootstrap.clone(),data,fixture,public_sites,download_origin,download_path)
+                    .with_environment(platform.environment());
+                let view=owner.add_child(builder,PhysicalPosition::new(0,0),PhysicalSize::new(1,1))
+                    .map_err(|e|e.to_string())?;
+                if let Err(error)=view.hide().and_then(|_|previous.hide()){
+                    if let Err(close_error)=view.close(){eprintln!("LAB_TAB_CREATE_ROLLBACK_FAILED {close_error}");}
+                    return Err(error.to_string());
+                }
+                owner.state::<PaneState>().active_tab.store(index,Ordering::SeqCst);
+                println!("LAB_TAB_CREATED {index} {}",bootstrap.as_str());
+                println!("LAB_ACTIVE_TAB {index}");
+                Ok((index,bootstrap.to_string()))
+            })();
+            drop(guard);
+            let _=tx.try_send(result);
+        }).map_err(|e|e.to_string())?;
+        rx.recv().await.ok_or_else(||"browser_tab_creation_lost_ack".to_string())?
+    }
+}
+
+#[tauri::command]
+fn browser_close_tab(webview:Webview,index:usize)->Result<(usize,String),String>{
+    trusted_shell(&webview)?;
+    let state=webview.state::<PaneState>();
+    state.idle()?;
+    let owner=webview.window();
+    let ids=live_tabs(&owner);
+    let neighbour=replacement_tab(&ids,index).ok_or("browser_tab_close_invalid")?;
+    let target=owner.get_webview(&tab_label(index)).ok_or("browser_guest_unavailable")?;
+    let active=state.active_tab.load(Ordering::SeqCst);
+    let next=if active==index{neighbour}else{active};
+    let url=owner.get_webview(&tab_label(next)).ok_or("browser_guest_unavailable")?
+        .url().map_err(|e|e.to_string())?.to_string();
+    target.close().map_err(|e|e.to_string())?;
+    state.active_tab.store(next,Ordering::SeqCst);
+    println!("LAB_TAB_CLOSED {index}");
+    println!("LAB_ACTIVE_TAB {next}");
+    Ok((next,url))
 }
 
 #[tauri::command]
 fn sync_pane(webview: Webview, visible:bool, left:f64, top:f64, right:f64, bottom:f64,
     viewport_width:f64, viewport_height:f64) -> Result<(),String> {
     let guest=trusted_guest(&webview)?;
-    for label in ["guest","guest-2"]{
-        if label!=guest.label(){
-            if let Some(other)=webview.window().get_webview(label){other.hide().map_err(|e|e.to_string())?;}
+    for other in webview.window().webviews(){
+        if tab_index(other.label()).is_some() && other.label()!=guest.label(){
+            other.hide().map_err(|e|e.to_string())?;
         }
     }
     if !visible {
@@ -151,8 +253,10 @@ fn browser_url(webview:Webview)->Result<String,String>{
 }
 
 #[tauri::command]
-fn browser_command(webview:Webview,state:State<'_,PaneState>,operation:String,address:Option<String>)->Result<(),String>{
+fn browser_command(webview:Webview,state:State<'_,PaneState>,index:usize,operation:String,address:Option<String>)->Result<(),String>{
     let guest=trusted_guest(&webview)?;
+    state.idle()?;
+    if state.active_tab.load(Ordering::SeqCst)!=index{return Err("browser_tab_selection_changed".into());}
     match operation.as_str(){
         "navigate"=>{
             let url:tauri::Url=address.ok_or("address_required")?.parse().map_err(|_|"invalid_address")?;
@@ -189,8 +293,10 @@ fn guest_builder(label:&str,entry:tauri::Url,data:PathBuf,fixture_origin:String,
         .devtools(false)
         .on_navigation(move|url|browsing_destination_allowed(&fixture_origin,public_sites,url))
         .on_page_load(|view,payload|{
-            if view.label()==view.state::<PaneState>().active_label(){
-                let _=view.emit_to("shell","lab-browser-url",payload.url().to_string());
+            if let Some(index)=tab_index(view.label()){
+                if view.state::<PaneState>().active_tab.load(Ordering::SeqCst)==index{
+                    let _=view.emit_to("shell","lab-browser-url",(index,payload.url().to_string()));
+                }
             }
         })
         .on_download(move|_,event|match event{
@@ -238,13 +344,16 @@ fn main(){
     std::fs::create_dir_all(&downloads).expect("lab download directory");
 
     tauri::Builder::default()
-        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone(),public_sites,two_tabs,active_tab:AtomicUsize::new(0)})
-        .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command,browser_tabs,browser_select_tab])
+        .manage(PaneState{fixture_origin:origin.ascii_serialization(),shell_url:remote_shell.clone(),public_sites,
+            active_tab:AtomicUsize::new(0),next_tab:AtomicUsize::new(if two_tabs{2}else{1}),
+            creating:Arc::new(AtomicBool::new(false)),entry:entry.clone(),guest_data:guest_data.clone(),
+            download_path:downloads.join("iwxa-result.txt")})
+        .invoke_handler(tauri::generate_handler![sync_pane,browser_url,browser_command,browser_tabs,browser_select_tab,browser_create_tab,browser_close_tab])
         .setup(move|app|{
             let shell_url=if let Some(url)=&remote_shell{
                 app.add_capability(CapabilityBuilder::new("lab-trusted-remote-shell")
                     .local(false).webview("shell").remote(format!("{}/*",url.origin().ascii_serialization()))
-                    .permission("core:event:allow-listen").permission("core:event:allow-unlisten").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command").permission("allow-browser-tabs").permission("allow-browser-select-tab"))?;
+                    .permission("core:event:allow-listen").permission("core:event:allow-unlisten").permission("allow-sync-pane").permission("allow-browser-url").permission("allow-browser-command").permission("allow-browser-tabs").permission("allow-browser-select-tab").permission("allow-browser-create-tab").permission("allow-browser-close-tab"))?;
                 WebviewUrl::External(url.clone())
             }else{WebviewUrl::App("index.html".into())};
             let expected_shell=remote_shell.clone();
