@@ -179,6 +179,9 @@ async fn browser_create_tab(webview:Webview)->Result<(usize,String),String>{
         let previous=anchor.clone();
         anchor.with_webview(move|platform|{
             let result=(||->Result<(usize,String),String>{
+                if owner.state::<PaneState>().active_label()!=previous.label() || live_tabs(&owner).len()>=MAX_OPEN_TABS {
+                    return Err("browser_tab_selection_changed".into());
+                }
                 let builder=guest_builder(&label,bootstrap.clone(),data,fixture,public_sites,download_origin,download_path)
                     .with_environment(platform.environment());
                 let view=owner.add_child(builder,PhysicalPosition::new(0,0),PhysicalSize::new(1,1))

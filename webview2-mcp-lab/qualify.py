@@ -18,7 +18,7 @@ import urllib.request
 from snapshot_refs import uid
 from stdio_transport import StdioMcpTransport
 from public_sites import SITES, page_catalog, validate_public_page, validate_public_snapshot
-from tab_identity import stable_tab_id, bind_bootstrap, rebind_pages
+from tab_identity import stable_tab_id, bind_bootstrap, rebind_pages, attach_tab, detach_tab
 from advanced_fixture import DOWNLOAD_BYTES, UPLOAD_BYTES, handle_get, handle_post
 
 ROOT = Path(__file__).resolve().parent
@@ -54,7 +54,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
         if handle_get(self, record_fixture): return
-        if self.path in {"/form","/tab-a","/tab-b"}:
+        if self.path in {"/form","/tab-a","/tab-b"} or re.fullmatch(r"/tab-new/[0-9]+", self.path):
             data = (ROOT / "fixture.html").read_bytes()
         elif self.path == "/second":
             data = b"<!doctype html><title>Second fixture</title><h1>Second fixture page</h1>"
@@ -589,6 +589,50 @@ def run(advanced=False, public_sites=False, tab_probe=False):
             assert "Tab-B-Agent" in snapshot(client5,rebound["guest-2"],"34-tab-b-reconnected")
             check("same_url_native_tabs_rebound_after_mcp_disconnect")
             REPORT["tabs_status"]="PASS"
+            REPORT["dynamic_tabs_status"]="FAIL"
+            def click_tab_action(new):
+                x,y,w,h,d=geom(hwnd4)
+                gui.click(round(x+w-(59 if new else 21)*d),round(y+72*d))
+            def added(old,label,bootstrap_url):
+                def probe():
+                    pages,ids=tab_catalog(client5)
+                    return attach_tab(old,label,bootstrap_url,pages,ids)
+                return wait_for("new original tab "+label,probe,timeout=35)
+            def removed(old,label):
+                def probe():
+                    pages,ids=tab_catalog(client5)
+                    return detach_tab(old,label,pages,ids)
+                return wait_for("closed original tab "+label,probe,timeout=35)
+            click_tab_action(True)
+            wait_for("native create C",lambda:"LAB_TAB_CREATED 2 " in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
+            binding=added(binding,"guest-3",origin+"/tab-new/2")
+            layout_pixels(hwnd4,True,"35-created-tab-c")
+            pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
+            page_c=by_label["guest-3"]
+            client5.call("navigate_page",pageId=page_c,type="url",url=url)
+            text=snapshot(client5,page_c,"36-c-before")
+            client5.call("fill",pageId=page_c,uid=uid(text,"textbox","Agent entry"),value="Tab-C-Agent")
+            assert "Tab-C-Agent" in snapshot(client5,page_c,"37-c-after")
+            assert "Tab-C-Agent" not in snapshot(client5,by_label["guest-2"],"38-b-unchanged")
+            check("native_dynamic_create_same_profile_original_identity")
+            closed_id=binding["guest-3"]
+            click_tab_action(False)
+            wait_for("native close C",lambda:"LAB_TAB_CLOSED 2" in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
+            binding=removed(binding,"guest-3")
+            layout_pixels(hwnd4,True,"39-closed-tab-c")
+            pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
+            assert "Tab-B-Agent" in snapshot(client5,by_label["guest-2"],"40-b-after-close")
+            assert "Tab-A-Human" in snapshot(client5,by_label["guest"],"41-a-after-close")
+            check("native_dynamic_close_preserves_surviving_tab_identity")
+            click_tab_action(True)
+            wait_for("native create D",lambda:"LAB_TAB_CREATED 3 " in (OUT/"host-tabs.log").read_text(encoding="utf-8",errors="replace"))
+            binding=added(binding,"guest-4",origin+"/tab-new/3")
+            assert binding["guest-4"]!=closed_id
+            pages,ids=tab_catalog(client5);by_label=rebind_pages(binding,pages,ids)
+            assert "Tab-C-Agent" not in snapshot(client5,by_label["guest-4"],"42-d-new")
+            layout_pixels(hwnd4,True,"43-new-tab-d")
+            check("native_dynamic_reopen_never_reuses_closed_identity")
+            REPORT["dynamic_tabs_status"]="PASS"
         if public_sites and REPORT["public_sites_status"]!="PASS":
             raise RuntimeError("one or more public sites not confirmed; local and tab results preserved")
         REPORT["status"]="PASS"

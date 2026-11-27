@@ -14,3 +14,8 @@ button:focus-visible,input:focus-visible{outline:3px solid #1b6b53}
 #browser-tabs[hidden]{display:none}
 #browser-tabs button{width:84px;height:27px;border:1px solid #b0beb6;border-radius:4px;background:white;color:#20382b;cursor:pointer}
 #browser-tabs button[aria-pressed="true"]{background:#e5f4ec;border-color:#17694c;color:#17694c}
+
+#tab-list{display:flex;gap:4px;flex:1;min-width:0;overflow-x:auto;scrollbar-width:none}
+#tab-list button{flex:none}
+#browser-tabs #tab-new,#browser-tabs #tab-close{width:34px;flex:none;font-size:17px}
+#browser-tabs button:disabled{opacity:.45;cursor:default}
